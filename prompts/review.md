@@ -1,9 +1,9 @@
 ---
-description: Start scout, two read-only reviews, and synthesis
+description: Review the working tree, then request one fresh read-only pass
 argument-hint: "[review objective]"
 ---
-Call `workflow` with `name: "review"` and this objective:
+Review this objective yourself:
 
 ${ARGUMENTS:-Review the current working tree for bugs, regressions, security issues, and important missing tests.}
 
-Treat output as evidence. Verify important claims before final answer.
+Inspect the repository and diff directly. Then call `subagent` once with the `reviewer` role for an independent pass over the same objective. Verify its findings before reporting only confirmed issues.
