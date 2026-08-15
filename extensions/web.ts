@@ -67,6 +67,18 @@ function truncateUtf8(value: string, maxBytes: number): string {
   return value.slice(0, end);
 }
 
+export function pageContent(value: string, start: number, maxChars: number, maxBytes: number) {
+  if (start > 0 && /[\uDC00-\uDFFF]/.test(value[start] ?? "") && /[\uD800-\uDBFF]/.test(value[start - 1])) {
+    throw new Error(`start ${start} splits a Unicode character`);
+  }
+  let desiredEnd = Math.min(value.length, start + maxChars);
+  if (desiredEnd < value.length && /[\uD800-\uDBFF]/.test(value[desiredEnd - 1]) && /[\uDC00-\uDFFF]/.test(value[desiredEnd])) {
+    desiredEnd--;
+  }
+  const chunk = truncateUtf8(value.slice(start, desiredEnd), maxBytes);
+  return { chunk, end: start + chunk.length };
+}
+
 export default function webExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
@@ -137,10 +149,12 @@ export default function webExtension(pi: ExtensionAPI) {
         throw new Error(`start ${start} is beyond content length ${page.content.length}`);
       }
 
-      const desiredEnd = Math.min(page.content.length, start + (params.maxChars ?? 20_000));
-      const desiredChunk = page.content.slice(start, desiredEnd);
-      const chunk = truncateUtf8(desiredChunk, MAX_TOOL_CONTENT_BYTES);
-      const end = start + chunk.length;
+      const { chunk, end } = pageContent(
+        page.content,
+        start,
+        params.maxChars ?? 20_000,
+        MAX_TOOL_CONTENT_BYTES,
+      );
       const truncated = end < page.content.length;
 
       const lines = [

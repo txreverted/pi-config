@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
+import { pageContent } from "../extensions/web.ts";
 import {
   decompressBody,
   htmlToMarkdown,
@@ -23,7 +24,12 @@ test("IP policy blocks local and reserved ranges", () => {
     "198.18.0.1",
     "::",
     "::1",
+    "::127.0.0.1",
+    "::7f00:1",
     "::ffff:127.0.0.1",
+    "::ffff:0:127.0.0.1",
+    "::ffff:0:10.0.0.1",
+    "::ffff:0:169.254.169.254",
     "fc00::1",
     "fe80::1",
     "2001:db8::1",
@@ -33,6 +39,12 @@ test("IP policy blocks local and reserved ranges", () => {
 
   assert.equal(isPublicIp("1.1.1.1"), true);
   assert.equal(isPublicIp("2606:4700:4700::1111"), true);
+});
+
+test("web pagination preserves Unicode code-point boundaries", () => {
+  assert.deepEqual(pageContent("a😀b", 0, 2, 100), { chunk: "a", end: 1 });
+  assert.deepEqual(pageContent("a😀b", 1, 2, 100), { chunk: "😀", end: 3 });
+  assert.throws(() => pageContent("a😀b", 2, 2, 100), /splits a Unicode character/);
 });
 
 test("URL resolution rejects unsafe targets and mixed DNS answers", async () => {

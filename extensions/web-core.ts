@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import type { Readable } from "node:stream";
 import { gunzip, inflate, brotliDecompress } from "node:zlib";
 import { promisify } from "node:util";
@@ -338,81 +338,24 @@ function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 }
 
-function parseIPv6(address: string): number[] | null {
-  let value = address;
-  if (value.includes(".")) {
-    const lastColon = value.lastIndexOf(":");
-    const ipv4 = value.slice(lastColon + 1);
-    if (isIP(ipv4) !== 4) return null;
-    const octets = ipv4.split(".").map(Number);
-    value = `${value.slice(0, lastColon)}:${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
-  }
-
-  const pieces = value.split("::");
-  if (pieces.length > 2) return null;
-  const left = pieces[0] ? pieces[0].split(":") : [];
-  const right = pieces.length === 2 && pieces[1] ? pieces[1].split(":") : [];
-  const missing = 8 - left.length - right.length;
-  if ((pieces.length === 1 && missing !== 0) || (pieces.length === 2 && missing < 1)) return null;
-
-  const groups = [...left, ...Array(missing).fill("0"), ...right].map((part) =>
-    /^[0-9a-f]{1,4}$/i.test(part) ? Number.parseInt(part, 16) : -1,
-  );
-  return groups.length === 8 && groups.every((group) => group >= 0 && group <= 0xffff) ? groups : null;
-}
-
-function isBlockedIPv4(address: string): boolean {
-  const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b, c] = parts;
-  return a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 192 && b === 88 && c === 99) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113) ||
-    a >= 224;
-}
-
-function isBlockedIPv6(address: string): boolean {
-  const groups = parseIPv6(address);
-  if (!groups) return true;
-  if (groups.every((group) => group === 0)) return true;
-  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
-
-  const embeddedIPv4 = groups.slice(0, 6).every((group, index) => group === 0 || (index === 5 && group === 0xffff));
-  if (embeddedIPv4) {
-    const ipv4 = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join(".");
-    return isBlockedIPv4(ipv4);
-  }
-
-  const first = groups[0];
-  if ((first & 0xfe00) === 0xfc00) return true; // Unique-local fc00::/7
-  if ((first & 0xffc0) === 0xfe80) return true; // Link-local fe80::/10
-  if ((first & 0xffc0) === 0xfec0) return true; // Deprecated site-local fec0::/10
-  if ((first & 0xff00) === 0xff00) return true; // Multicast ff00::/8
-  if (first === 0x2002) return true; // 6to4 can embed an IPv4 destination
-  if (groups[0] === 0x0064 && groups[1] === 0xff9b) return true; // NAT64 ranges
-  if (groups[0] === 0x0100 && groups.slice(1, 4).every((group) => group === 0)) return true; // Discard-only 100::/64
-  if (groups[0] === 0x2001 && groups[1] === 0x0db8) return true; // Documentation
-  if (groups[0] === 0x2001 && groups[1] === 0x0002) return true; // Benchmarking
-  if (groups[0] === 0x2001 && ((groups[1] & 0xfff0) === 0x0010 || (groups[1] & 0xfff0) === 0x0020)) return true; // ORCHID
-  return false;
-}
+const blockedAddresses = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
+  ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24],
+  ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
+  ["203.0.113.0", 24], ["224.0.0.0", 3],
+] as const) blockedAddresses.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [
+  ["::", 96], ["::ffff:0:0:0", 96], ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48], ["100::", 64], ["2001:2::", 48], ["2001:10::", 28],
+  ["2001:20::", 28], ["2001:db8::", 32], ["2002::", 16], ["fc00::", 7],
+  ["fe80::", 10], ["fec0::", 10], ["ff00::", 8],
+] as const) blockedAddresses.addSubnet(network, prefix, "ipv6");
 
 export function isPublicIp(address: string): boolean {
   const normalized = normalizeHostname(address);
   const version = isIP(normalized);
-  if (version === 4) return !isBlockedIPv4(normalized);
-  if (version === 6) return !isBlockedIPv6(normalized);
-  return false;
+  return version !== 0 && !blockedAddresses.check(normalized, version === 4 ? "ipv4" : "ipv6");
 }
 
 const defaultDnsLookup: DnsLookup = async (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
@@ -623,7 +566,6 @@ function absoluteLinks(document: Document, baseUrl: URL): void {
 }
 
 const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-turndown.remove(["script", "style", "noscript", "template", "iframe", "object", "embed", "svg", "canvas", "form"]);
 
 export function htmlToMarkdown(html: string, baseUrl: URL): { title: string; markdown: string } {
   const { document } = parseHTML(html);
@@ -743,6 +685,7 @@ export async function fetchWebPage(
     // empty extraction or a failed/unsupported direct fetch.
     if (readerMode === "never" || !shouldUseReaderFallback(directPage)) return directPage;
   } catch (error) {
+    if (signal.aborted) throw abortError(signal);
     if (error instanceof UnsafeUrlError) throw error;
     directError = error;
     if (readerMode === "never") throw error;
@@ -751,6 +694,7 @@ export async function fetchWebPage(
   try {
     return await fetchWithReader(target, signal, lookup);
   } catch (readerError) {
+    if (signal.aborted) throw abortError(signal);
     if (directPage) return directPage;
     const directMessage = directError instanceof Error ? directError.message : "direct fetch failed";
     const readerMessage = readerError instanceof Error ? readerError.message : "reader fetch failed";
