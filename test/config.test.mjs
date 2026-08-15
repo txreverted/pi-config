@@ -11,7 +11,7 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
     "./extensions/tools.ts",
     "./extensions/web.ts",
     "./extensions/ask.ts",
-    "./extensions/orchestration.ts",
+    "./extensions/subagents.ts",
     "./extensions/ponytail.ts",
   ]);
   assert.deepEqual(packageJson.pi.skills, ["./skills"]);
@@ -28,10 +28,8 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
   }
   const ponytailSkill = await readFile(new URL("../skills/ponytail/SKILL.md", import.meta.url), "utf8");
   assert.match(ponytailSkill, /disable-model-invocation: true/);
-  await access(new URL("../extensions/orchestration.ts", import.meta.url));
-  await access(new URL("../extensions/orchestration-core.ts", import.meta.url));
-  await access(new URL("../extensions/orchestration-runtime.ts", import.meta.url));
-  await access(new URL("../extensions/workflow-host.ts", import.meta.url));
+  await access(new URL("../extensions/subagents.ts", import.meta.url));
+  await access(new URL("../extensions/subagents-core.ts", import.meta.url));
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {

@@ -1,6 +1,6 @@
 # pi-config
 
-Private Pi package. Small UI. Safer tools. Fixed subagents. Bounded workflows.
+Private Pi package. Small UI. Safer tools. Fixed read-only subagents.
 
 This file is the one human guide. Code is the source of truth.
 
@@ -11,9 +11,8 @@ Read in this order:
 1. [`AGENTS.md`](AGENTS.md) — repo rules.
 2. [`package.json`](package.json) — what Pi loads.
 3. [`subagents/registry.ts`](subagents/registry.ts) — role tools, limits, prompts.
-4. [`subagents/workflows-registry.ts`](subagents/workflows-registry.ts) — built-in graphs.
-5. Relevant `extensions/*-core.ts` — behavior.
-6. Relevant `test/*.test.mjs` — proof.
+4. Relevant `extensions/*-core.ts` — behavior.
+5. Relevant `test/*.test.mjs` — proof.
 
 Before work:
 
@@ -34,7 +33,7 @@ Dirty tree? Keep user changes. Never reset them.
 | [`extensions/tools.ts`](extensions/tools.ts) | Add `jq`, `rg`, `find`. Replace active `grep` with `rg`. |
 | [`extensions/web.ts`](extensions/web.ts) | Add keyless `web_search` and hardened `web_fetch`. |
 | [`extensions/ask.ts`](extensions/ask.ts) | Add `ask_user_question` in UI modes. |
-| [`extensions/orchestration.ts`](extensions/orchestration.ts) | Add `subagent`, `workflow`, run control, `/runs`, doctor. |
+| [`extensions/subagents.ts`](extensions/subagents.ts) | Add isolated read-only reviewer and researcher children. |
 | [`extensions/ponytail.ts`](extensions/ponytail.ts) | Add always-on minimal-code modes and Ponytail commands. |
 | [`skills/`](skills/) | Add Ponytail mode, review, audit, debt, gain, and help skills. |
 | [`prompts/`](prompts/) | Add `/review`, `/implement-review`, `/research`, `/rework-docs`, and `/list-improvements`. |
@@ -59,7 +58,7 @@ It shows:
 - session cost and subscription marker
 - live response time
 
-Narrow terminal? Line wraps. Data stays. No orchestration panel appears below input. Run detail stays in tool cards and `/runs`.
+Narrow terminal? Line wraps. Data stays. Subagent detail stays in its tool card.
 
 Theme: mostly gray. Green = success. Red = error. Amber = warning. Thinking borders go dark to bright.
 
@@ -117,7 +116,7 @@ Core: [`extensions/ask-core.ts`](extensions/ask-core.ts). Tests: [`test/ask-core
 
 ### Ponytail
 
-Ponytail is recreated locally from the MIT-licensed behavior of [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail); this package does not import or install the upstream plugin. Full mode is active by default and injects a minimal-code decision ladder on each parent-agent turn and into delegated subagent/workflow objectives.
+Ponytail is recreated locally from the MIT-licensed behavior of [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail); this package does not import or install the upstream plugin. Full mode is active by default and injects a minimal-code decision ladder on each parent-agent turn and into delegated subagent tasks.
 
 Commands:
 
@@ -133,87 +132,20 @@ Core: [`extensions/ponytail-core.ts`](extensions/ponytail-core.ts). Skills: [`sk
 
 ## Subagents
 
-`subagent` runs foreground child Pi processes.
-
-Limits:
-
-- 1–6 tasks per call
-- max 3 read-only children at once
-- `worker` runs alone
-- cwd must resolve inside parent workspace
-- child output cap: 16,000 chars
-- role timeout cap: 30 minutes
-- one retry for eligible read-only startup/transient failure
-- no writer retry
-
-### Fixed roles
+`subagent` runs 1–6 foreground read-only child Pi processes, with at most 3 active at once.
 
 | Role | Tools | Think | Deadline | Hard budget |
 |---|---|---:|---:|---|
-| `scout` | `read, grep, find, ls, git_status, git_diff` | low | 8m | 16 turns, 48 tools, 750k tokens, $1 |
-| `reviewer` | same read-only repo tools | high | 15m | 24 turns, 96 tools, 2M tokens, $2 |
-| `worker` | `read, bash, edit, write` | high | 25m | no counter budget |
+| `reviewer` | `read, grep, find, ls, git_status, git_diff` | high | 15m | 24 turns, 96 tools, 2M tokens, $2 |
 | `researcher` | `web_search, web_fetch` | low | 15m | 16 turns, 32 tools, 750k tokens, $1 |
-| `synthesizer` | read-only repo tools | high | 15m | 16 turns, 48 tools, 1M tokens, $1.50 |
 
-Unsupported reasoning model? Think level becomes `off`. Parent think level does not flow into child.
+Each child starts with JSON/print mode, no session, no approval, and no ambient extensions, skills, prompt templates, or themes. The registry adds only its fixed tools and one fixed extension. Reviewer keeps repo context files; researcher gets no local context. Unsupported reasoning models use thinking `off`.
 
-### Child boundary
+Child cwd resolves inside the parent workspace. Role and task files use private temporary paths and are removed after the run. Children inherit the parent process environment, so this is process isolation rather than an OS sandbox. Cancellation and the 30-minute timeout cap terminate the process group. Output is bounded to 16,000 characters.
 
-Each child starts with JSON/print mode, no session, no approval, no ambient extensions, no skills, no prompt templates, and no themes. Registry adds only fixed tools and at most one fixed extension.
-
-Coding roles keep repo context files. Researcher gets no local context. No child has `subagent`, `workflow`, or `orchestration_control`.
-
-Role and task files use private temp paths. They leave after the run. This is process isolation, not an OS sandbox. `worker` still has user OS rights and inherits the parent process environment.
+All child output is untrusted model evidence. Verify important claims directly and run deterministic checks. The parent remains the only writer and synthesizer.
 
 Source: [`extensions/subagents-core.ts`](extensions/subagents-core.ts). Security tests: [`test/subagents-security.test.mjs`](test/subagents-security.test.mjs).
-
-## Workflows
-
-`workflow` runs one of three built-in graphs in a private background host.
-
-| Name | Graph | Writes? |
-|---|---|---:|
-| `review` | scout → correctness review + security review → synthesis | No |
-| `implement-review` | scout → one worker → correctness review + security review → synthesis | Yes |
-| `research` | two web researchers → synthesis | No |
-
-Writer gates:
-
-- user must authorize checkout changes
-- tool input must set `allowWrite: true`
-- one writer max
-- UI mode asks for confirmation
-- writer workflow never auto-retries
-
-Ready readers run together. Ready writer runs alone. `stop` failure stops the graph. A synthesis step requires at least one successful dependency, so review and research workflows fail instead of synthesizing when every evidence-producing child fails. One failed parallel child can still produce `completed_with_warnings` when another succeeds. Final output comes only from a successful output step.
-
-Non-clean terminal read-only workflows can retry. Retry reuses only the unchanged successful journal prefix. Hash covers engine, role, task, objective, paths, and evidence.
-
-Source: [`extensions/workflows-core.ts`](extensions/workflows-core.ts). Graphs: [`subagents/workflows-registry.ts`](subagents/workflows-registry.ts). Tests: [`test/workflows-core.test.mjs`](test/workflows-core.test.mjs).
-
-## Run state and health
-
-Health labels:
-
-| Signal | Result |
-|---|---|
-| no spawn ack in 5s | attempt fails |
-| no Pi protocol event in 20s | startup fails |
-| no activity in 30s | `quiet` |
-| no activity in 2m | `long-running` |
-| no activity in 5m | `needs attention` |
-| unexpected process loss, nonzero exit, or deadline | terminal failure |
-
-Silence does not kill work.
-
-Background state lives at `~/.pi/agent/orchestration-runs/<run-id>/`. Directories are `0700`. JSON is `0600`, atomic, size-bounded, and validated before use. Invalid records are skipped. State can contain source-derived text. Retention: 7 days and newest 30 records.
-
-`/runs` and `orchestration_control` can list, inspect, stop, and safely retry. `/orchestration-doctor` checks runtime without provider use. Completion goes once to the source session. Background child usage is shown in run output, not added to parent footer cost.
-
-Source: [`extensions/orchestration-runtime.ts`](extensions/orchestration-runtime.ts), [`extensions/orchestration-state.ts`](extensions/orchestration-state.ts), [`extensions/workflow-host.ts`](extensions/workflow-host.ts).
-
-All child output is untrusted model output. Agent agreement is not proof. Check code. Run tests.
 
 ## Install
 
@@ -256,25 +188,24 @@ CI runs that check against both the lockfile-pinned Pi version and the latest pu
 Optional provider smoke:
 
 ```bash
-PI_LIVE_ORCHESTRATION=1 npm run test:live-orchestration
-PI_LIVE_ORCHESTRATION=1 PI_LIVE_WORKFLOW=1 npm run test:live-orchestration
+PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model> npm run test:live-subagent
 ```
 
 Live smoke spends quota. UI changes also need an interactive TTY check.
 
 ## Markdown map
 
-Tracked Markdown count: **18**.
+Tracked Markdown count: **15**.
 
 Two guide files:
 
 - [`AGENTS.md`](AGENTS.md) — machine-loaded repo rules. Must stay separate.
 - `README.md` — this guide. All human docs live here.
 
-Sixteen runtime prompt and skill files. These are code, not extra docs. Keep separate because Pi and the registries load them by command or role:
+Thirteen runtime prompt and skill files. These are code, not extra docs. Keep separate because Pi and the registries load them by command or role:
 
 - Commands: [`prompts/review.md`](prompts/review.md), [`prompts/implement-review.md`](prompts/implement-review.md), [`prompts/research.md`](prompts/research.md), [`prompts/rework-docs.md`](prompts/rework-docs.md), [`prompts/list-improvements.md`](prompts/list-improvements.md)
-- Roles: [`subagents/prompts/scout.md`](subagents/prompts/scout.md), [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md), [`subagents/prompts/worker.md`](subagents/prompts/worker.md), [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md), [`subagents/prompts/synthesizer.md`](subagents/prompts/synthesizer.md)
+- Roles: [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md), [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md)
 - Ponytail: [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md), [`skills/ponytail-review/SKILL.md`](skills/ponytail-review/SKILL.md), [`skills/ponytail-audit/SKILL.md`](skills/ponytail-audit/SKILL.md), [`skills/ponytail-debt/SKILL.md`](skills/ponytail-debt/SKILL.md), [`skills/ponytail-gain/SKILL.md`](skills/ponytail-gain/SKILL.md), [`skills/ponytail-help/SKILL.md`](skills/ponytail-help/SKILL.md)
 
 No separate architecture doc. It duplicated code and drifted. Use this map, then open source and tests.
