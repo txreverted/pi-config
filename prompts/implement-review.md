@@ -1,9 +1,9 @@
 ---
-description: Start scout, one writer, two fresh reviews, and synthesis
+description: Implement a change, check it, then request one fresh read-only review
 argument-hint: "<implementation objective>"
 ---
-Call `workflow` with `name: "implement-review"`, `allowWrite: true`, and this authorized objective:
+Implement this authorized change in the current checkout:
 
 $ARGUMENTS
 
-It may change this checkout. Use one writer. Keep unrelated user changes. Run deterministic checks. Report changed files, checks, and confirmed review findings.
+Keep unrelated user changes, run deterministic checks, then call `subagent` once with the `reviewer` role to inspect the resulting working tree. Verify and address confirmed findings yourself. Report changed files and checks.

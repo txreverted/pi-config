@@ -67,6 +67,10 @@ if (mode === "hang" || mode === "startup-hang") {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   writeEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "read", result: {}, isError: false });
   writeEvent(finalEvent());
+} else if (mode === "large") {
+  const event = finalEvent();
+  event.message.content[0].text = "x".repeat(20_000);
+  writeEvent(event);
 } else if (mode === "tool-loop") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({ type: "agent_start" });

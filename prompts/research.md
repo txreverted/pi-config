@@ -1,9 +1,9 @@
 ---
-description: Start two public-web research passes and synthesis
+description: Research with primary sources and an optional independent pass
 argument-hint: "<research question>"
 ---
-Call `workflow` with `name: "research"` and this question as the objective:
+Research this question:
 
 $ARGUMENTS
 
-Keep useful source URLs. Split fact from inference. Resolve conflicts. State what stays unknown.
+Use primary public sources, preserve useful URLs, separate fact from inference, and state uncertainty. Call `subagent` with the `researcher` role only when an independent second pass would materially improve confidence. Verify its evidence before answering.

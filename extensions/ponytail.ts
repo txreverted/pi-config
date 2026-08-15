@@ -141,19 +141,15 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
       return `${value}${suffix}`;
     };
 
-    if (event.toolName === "subagent") {
-      const input = event.input as { tasks?: unknown };
-      if (!Array.isArray(input.tasks)) return;
-      for (const task of input.tasks) {
-        if (!task || typeof task !== "object") continue;
-        const record = task as { task?: unknown };
-        const next = append(record.task);
-        if (next) record.task = next;
-      }
-    } else if (event.toolName === "workflow") {
-      const input = event.input as { objective?: unknown };
-      const next = append(input.objective);
-      if (next) input.objective = next;
+    if (event.toolName !== "subagent") return;
+    const input = event.input as { tasks?: unknown };
+    if (!Array.isArray(input.tasks)) return;
+    for (const task of input.tasks) {
+      if (!task || typeof task !== "object") continue;
+      const record = task as { task?: unknown };
+      if (typeof record.task !== "string" || !record.task.trim()) continue;
+      const next = append(record.task);
+      if (next) record.task = next;
     }
   });
 
