@@ -113,17 +113,19 @@ export default function uiExtension(pi: ExtensionAPI) {
             const model = currentModel?.id ?? "no-model";
 
             const dim = (value: string) => theme.fg("dim", value);
-            const contextColor = contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "dim";
+            const contextColor = usage?.percent == null
+              ? "muted"
+              : contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "success";
             const context = theme.fg(contextColor, `${contextPercent}%/${formatTokens(contextWindow)}`);
             const separator = dim(" > ");
             const logo = theme.bold(theme.fg("accent", "π"));
             const renderCandidate = (segments: readonly string[]) =>
-              `${logo} ${segments.filter(Boolean).join(separator)}`;
+              ` ${logo} ${segments.filter(Boolean).join(separator)}`;
             const version = dim(`v${VERSION}`);
-            const fullModel = dim(`${model} (${currentThinking})`);
-            const place = dim(location);
-            const price = dim(`$${cost.toFixed(3)}${subscription}`);
-            const time = elapsed ? theme.fg("muted", elapsed) : undefined;
+            const place = theme.fg("accent", location);
+            const fullModel = theme.fg("syntaxType", `${model} (${currentThinking})`);
+            const price = theme.fg("syntaxNumber", `$${cost.toFixed(3)}${subscription}`);
+            const time = elapsed ? theme.fg("customMessageLabel", elapsed) : undefined;
             const line = renderCandidate([
               version,
               place,
