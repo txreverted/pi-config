@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createAgentRegistry, createWorkflowRegistry } from "../subagents/registry.ts";
+import { createAgentRegistry } from "../subagents/registry.ts";
+import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
 import { validateWorkflowDefinition } from "../extensions/workflows-core.ts";
 
 const allowedTools = new Set([
   "read", "grep", "find", "ls", "bash", "edit", "write", "web_search", "web_fetch",
+  "git_status", "git_diff",
 ]);
 
 test("agent registry is fixed, minimal, and non-recursive", () => {
@@ -21,11 +23,19 @@ test("agent registry is fixed, minimal, and non-recursive", () => {
   }
 
   const researcher = agents.get("researcher");
-  assert.deepEqual(researcher.tools, ["read", "web_search", "web_fetch"]);
+  assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
   assert.equal(researcher.contextFiles, false);
   assert.equal(researcher.extensions.length, 1);
   assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
   assert.equal(agents.get("worker").extensions, undefined);
+
+  for (const name of ["scout", "reviewer", "synthesizer"]) {
+    const agent = agents.get(name);
+    assert.ok(agent.tools.includes("git_status"), name);
+    assert.ok(agent.tools.includes("git_diff"), name);
+    assert.equal(agent.extensions.length, 1, name);
+    assert.match(agent.extensions[0], /extensions[/\\]subagent-tools\.ts$/, name);
+  }
 });
 
 test("all registered workflows are valid and have at most one static writer", () => {

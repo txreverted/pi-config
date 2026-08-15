@@ -68,7 +68,7 @@ export default function askExtension(pi: ExtensionAPI) {
     }),
     executionMode: "sequential",
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (!ctx.hasUI) throw new Error("ask_user_question requires an interactive TUI or RPC client");
 
       const context = params.context?.trim();
@@ -97,7 +97,7 @@ export default function askExtension(pi: ExtensionAPI) {
         }
 
         const choices = [...question.options.map(optionDisplay), CUSTOM_CHOICE];
-        const selected = await ctx.ui.select(title, choices);
+        const selected = await ctx.ui.select(title, choices, { signal });
         if (selected === undefined) {
           return {
             content: [{ type: "text", text: "User cancelled the clarification questionnaire. Do not infer answers from the cancellation." }],

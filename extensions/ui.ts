@@ -1,5 +1,3 @@
-import { relative, resolve, sep } from "node:path";
-import { homedir } from "node:os";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   VERSION,
@@ -7,27 +5,13 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
-
-function formatCwd(cwd: string): string {
-  const home = resolve(homedir());
-  const absoluteCwd = resolve(cwd);
-  const fromHome = relative(home, absoluteCwd);
-  const insideHome =
-    fromHome === "" ||
-    (fromHome !== ".." && !fromHome.startsWith(`..${sep}`) && !fromHome.startsWith(sep));
-
-  if (!insideHome) return cwd;
-  return fromHome === "" ? "~" : `~${sep}${fromHome}`;
-}
-
-function formatTokens(count: number): string {
-  if (count < 1_000) return `${count}`;
-  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  return `${Math.round(count / 1_000_000)}M`;
-}
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  formatCwd,
+  formatElapsed,
+  formatTokens,
+  pickStatusCandidate,
+} from "./ui-core.ts";
 
 function usageCost(entry: SessionEntry): number {
   let usage: unknown;
@@ -56,7 +40,16 @@ function isSubscription(ctx: ExtensionContext, model: Model<any> | undefined): b
 export default function uiExtension(pi: ExtensionAPI) {
   let currentModel: Model<any> | undefined;
   let currentThinking = "off";
+  let responseStartedAt: number | undefined;
+  let responseTimer: ReturnType<typeof setInterval> | undefined;
   let requestStatusRender: (() => void) | undefined;
+
+  const stopResponseTimer = () => {
+    if (responseTimer) clearInterval(responseTimer);
+    responseTimer = undefined;
+    responseStartedAt = undefined;
+    requestStatusRender?.();
+  };
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -87,25 +80,53 @@ export default function uiExtension(pi: ExtensionAPI) {
         return {
           dispose() {
             unsubscribeBranch();
+            if (responseTimer) clearInterval(responseTimer);
+            responseTimer = undefined;
+            responseStartedAt = undefined;
             requestStatusRender = undefined;
           },
           invalidate() {},
           render(width: number): string[] {
             const branch = getGitBranch();
-            const location = `${formatCwd(ctx.cwd)}${branch ? `(${branch})` : ""}`;
+            const sessionName = ctx.sessionManager.getSessionName();
+            const location = [
+              `${formatCwd(ctx.cwd)}${branch ? `(${branch})` : ""}`,
+              sessionName,
+            ].filter(Boolean).join(" · ");
             const cost = ctx.sessionManager.getEntries().reduce((total, entry) => total + usageCost(entry), 0);
             const usage = ctx.getContextUsage();
             const contextWindow = usage?.contextWindow ?? currentModel?.contextWindow ?? 0;
-            const contextPercent = usage?.percent === null ? "?" : (usage?.percent ?? 0).toFixed(1);
+            const contextPercentValue = usage?.percent ?? 0;
+            const contextPercent = usage?.percent === null ? "?" : contextPercentValue.toFixed(1);
             const subscription = isSubscription(ctx, currentModel) ? " (sub)" : "";
-            const details = [
-              `v${VERSION}`,
-              location,
-              `${currentModel?.id ?? "no-model"} (${currentThinking})`,
-              `${contextPercent}%/${formatTokens(contextWindow)} (auto)`,
-              `$${cost.toFixed(3)}${subscription}`,
-            ].join(" > ");
-            const line = `${theme.bold(theme.fg("accent", "π"))}${theme.fg("dim", ` ${details}`)}`;
+            const elapsed = responseStartedAt === undefined ? undefined : formatElapsed(Date.now() - responseStartedAt);
+            const model = currentModel?.id ?? "no-model";
+
+            const dim = (value: string) => theme.fg("dim", value);
+            const contextColor = contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "dim";
+            const context = theme.fg(contextColor, `${contextPercent}%/${formatTokens(contextWindow)}`);
+            const separator = dim(" > ");
+            const logo = theme.bold(theme.fg("accent", "π"));
+            const renderCandidate = (segments: readonly string[]) =>
+              `${logo} ${segments.filter(Boolean).join(separator)}`;
+            const version = dim(`v${VERSION}`);
+            const fullModel = dim(`${model} (${currentThinking})`);
+            const shortModel = dim(model);
+            const place = dim(location);
+            const price = dim(`$${cost.toFixed(3)}${subscription}`);
+            const time = elapsed ? theme.fg("muted", elapsed) : undefined;
+            const compactTail = [price, time].filter((value): value is string => Boolean(value));
+
+            const candidates = [
+              renderCandidate([version, place, fullModel, context, ...compactTail]),
+              renderCandidate([place, fullModel, context, ...compactTail]),
+              renderCandidate([fullModel, context, ...compactTail]),
+              renderCandidate([shortModel, context, ...compactTail]),
+              renderCandidate([shortModel, ...compactTail]),
+              renderCandidate(compactTail),
+              renderCandidate(time ? [time] : [price]),
+            ];
+            const line = pickStatusCandidate(candidates, width, visibleWidth);
 
             return [truncateToWidth(line, width, "…")];
           },
@@ -113,6 +134,21 @@ export default function uiExtension(pi: ExtensionAPI) {
       },
       { placement: "aboveEditor" },
     );
+  });
+
+  pi.on("agent_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+
+    responseStartedAt = Date.now();
+    if (!responseTimer) {
+      responseTimer = setInterval(() => requestStatusRender?.(), 1_000);
+      responseTimer.unref?.();
+    }
+    requestStatusRender?.();
+  });
+
+  pi.on("agent_settled", () => {
+    stopResponseTimer();
   });
 
   pi.on("model_select", (event) => {
@@ -125,7 +161,14 @@ export default function uiExtension(pi: ExtensionAPI) {
     requestStatusRender?.();
   });
 
+  pi.on("session_info_changed", () => {
+    requestStatusRender?.();
+  });
+
   pi.on("session_shutdown", () => {
+    if (responseTimer) clearInterval(responseTimer);
+    responseTimer = undefined;
+    responseStartedAt = undefined;
     requestStatusRender = undefined;
   });
 }

@@ -8,4 +8,5 @@ Rules:
 - Resolve disagreements explicitly instead of averaging them.
 - Omit duplicate or unsupported claims.
 - Distinguish confirmed findings, suggestions, and unresolved uncertainty.
+- Verify repository claims with read-only inspection and Git diff. State which runtime checks the parent must run; this role cannot execute tests.
 - Prefer deterministic verification over agent consensus.
