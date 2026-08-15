@@ -24,8 +24,6 @@ export const WORKFLOW_ENGINE_VERSION = 2;
 export const MAX_WORKFLOW_STEPS = 8;
 export const MAX_WORKFLOW_EVIDENCE_CHARS = 24_000;
 const MAX_EVIDENCE_PER_STEP_CHARS = 8_000;
-const MAX_DYNAMIC_WORKFLOW_NAME_CHARS = 80;
-const MAX_DYNAMIC_TASK_CHARS = 50_000;
 
 export type BuiltinWorkflowName = "review" | "implement-review" | "research";
 export type WorkflowName = BuiltinWorkflowName | (string & {});
@@ -50,7 +48,6 @@ export interface WorkflowStep {
 
 export interface WorkflowDefinition {
   name: WorkflowName;
-  description: string;
   outputStep?: string;
   steps: readonly WorkflowStep[];
 }
@@ -112,128 +109,6 @@ export interface ExecuteWorkflowOptions {
   resumeOutcomes?: readonly WorkflowStepOutcome[];
   inputHashSalt?: string;
   now?: () => number;
-}
-
-export interface DeclarativeWorkflowStep {
-  id: string;
-  agent: AgentName;
-  phase?: string;
-  task: string;
-  needs?: string[];
-  include?: string[];
-  onFailure?: "stop" | "continue";
-}
-
-export interface DeclarativeWorkflowSpec {
-  version: 1;
-  name: string;
-  description?: string;
-  outputStep: string;
-  steps: DeclarativeWorkflowStep[];
-}
-
-const AGENT_NAMES = new Set<AgentName>(["scout", "reviewer", "worker", "researcher", "synthesizer"]);
-
-function assertPlainObject(value: unknown, label: string): asserts value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new Error(`${label} must be a plain object`);
-  }
-}
-
-function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  const allowedSet = new Set(allowed);
-  const unknown = Object.keys(value).filter((key) => !allowedSet.has(key));
-  if (unknown.length > 0) throw new Error(`${label} contains unsupported field '${unknown[0]}'`);
-}
-
-export function compileDeclarativeWorkflowSpec(
-  value: unknown,
-  isWriter: (agent: AgentName) => boolean,
-): WorkflowDefinition {
-  assertPlainObject(value, "Workflow spec");
-  rejectUnknownKeys(value, ["version", "name", "description", "outputStep", "steps"], "Workflow spec");
-  if (value.version !== 1) throw new Error("Workflow spec version must be 1");
-  if (typeof value.name !== "string" || !value.name.trim() || value.name.length > MAX_DYNAMIC_WORKFLOW_NAME_CHARS || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.name)) {
-    throw new Error("Workflow spec name must be 1-80 letters, digits, dots, underscores, or hyphens");
-  }
-  if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 500)) {
-    throw new Error("Workflow spec description must contain at most 500 characters");
-  }
-  if (typeof value.outputStep !== "string" || !value.outputStep.trim()) {
-    throw new Error("Workflow spec requires an outputStep");
-  }
-  if (!Array.isArray(value.steps) || value.steps.length < 1 || value.steps.length > MAX_WORKFLOW_STEPS) {
-    throw new Error(`Workflow spec requires 1-${MAX_WORKFLOW_STEPS} steps`);
-  }
-
-  const rawSteps = value.steps.map((candidate, index) => {
-    assertPlainObject(candidate, `Workflow spec step ${index + 1}`);
-    rejectUnknownKeys(candidate, ["id", "agent", "phase", "task", "needs", "include", "onFailure"], `Workflow spec step ${index + 1}`);
-    if (typeof candidate.id !== "string" || !candidate.id.trim() || candidate.id.length > 80 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
-      throw new Error(`Workflow spec step ${index + 1} has an invalid id`);
-    }
-    if (typeof candidate.agent !== "string" || !AGENT_NAMES.has(candidate.agent as AgentName)) {
-      throw new Error(`Workflow spec step '${candidate.id}' has an unknown fixed agent role`);
-    }
-    if (typeof candidate.task !== "string" || !candidate.task.trim() || candidate.task.length > MAX_DYNAMIC_TASK_CHARS) {
-      throw new Error(`Workflow spec step '${candidate.id}' task must contain 1-${MAX_DYNAMIC_TASK_CHARS} characters`);
-    }
-    if (candidate.phase !== undefined && (typeof candidate.phase !== "string" || !candidate.phase.trim() || candidate.phase.length > 80)) {
-      throw new Error(`Workflow spec step '${candidate.id}' has an invalid phase`);
-    }
-    for (const field of ["needs", "include"] as const) {
-      const entries = candidate[field];
-      if (entries !== undefined && (!Array.isArray(entries) || entries.length > MAX_WORKFLOW_STEPS || entries.some((entry) => typeof entry !== "string" || !entry.trim()))) {
-        throw new Error(`Workflow spec step '${candidate.id}' has invalid ${field}`);
-      }
-    }
-    if (candidate.onFailure !== undefined && candidate.onFailure !== "stop" && candidate.onFailure !== "continue") {
-      throw new Error(`Workflow spec step '${candidate.id}' has invalid onFailure`);
-    }
-    return {
-      id: candidate.id,
-      agent: candidate.agent as AgentName,
-      ...(typeof candidate.phase === "string" ? { phase: candidate.phase.trim() } : {}),
-      task: candidate.task.trim(),
-      needs: candidate.needs === undefined ? [] : [...candidate.needs as string[]],
-      include: candidate.include === undefined ? [] : [...candidate.include as string[]],
-      onFailure: candidate.onFailure === "continue" ? "continue" as const : "stop" as const,
-    };
-  });
-
-  const ids = new Set(rawSteps.map((step) => step.id));
-  if (!ids.has(value.outputStep)) throw new Error(`Workflow outputStep '${value.outputStep}' does not exist`);
-  for (const step of rawSteps) {
-    for (const included of step.include) {
-      if (!step.needs.includes(included)) {
-        throw new Error(`Workflow step '${step.id}' may include only completed dependencies; add '${included}' to needs`);
-      }
-    }
-  }
-
-  const definition: WorkflowDefinition = {
-    name: value.name,
-    description: typeof value.description === "string" && value.description.trim()
-      ? value.description.trim()
-      : "Bounded declarative workflow",
-    outputStep: value.outputStep,
-    steps: rawSteps.map((step) => ({
-      id: step.id,
-      agent: step.agent,
-      ...(step.phase ? { phase: step.phase } : {}),
-      needs: step.needs,
-      onFailure: step.onFailure,
-      buildTask: (input, results) => {
-        const paths = input.paths.length > 0
-          ? `\nPrioritize these paths:\n${input.paths.map((path) => `- ${path}`).join("\n")}`
-          : "";
-        const evidence = step.include.length > 0 ? `\n\n${formatWorkflowEvidence(results, step.include)}` : "";
-        return `Objective:\n${input.objective.trim()}${paths}\n\nStep task:\n${step.task}${evidence}`;
-      },
-    })),
-  };
-  validateWorkflowDefinition(definition, isWriter);
-  return definition;
 }
 
 export function validateWorkflowDefinition(
@@ -476,6 +351,22 @@ export async function executeWorkflow(options: ExecuteWorkflowOptions): Promise<
       (step) => pending.has(step.id) && (step.needs ?? []).every((dependency) => finished.has(dependency)),
     );
     if (ready.length === 0) throw new Error(`Workflow '${options.definition.name}' could not make progress`);
+
+    const blocked = ready.filter((step) => {
+      const dependencies = step.needs ?? [];
+      return dependencies.length > 0 && dependencies.every((dependency) => outcomes.get(dependency)?.status !== "completed");
+    });
+    if (blocked.length > 0) {
+      for (const step of blocked) {
+        const outcome = failedOutcome(step, `Workflow step '${step.id}' has no successful dependency`, queuedAt, now());
+        pending.delete(step.id);
+        finished.add(step.id);
+        outcomes.set(step.id, outcome);
+        if (step.onFailure === "stop" && !stoppedBy) stoppedBy = outcome;
+      }
+      snapshot();
+      continue;
+    }
 
     const readyWriter = ready.find((step) => options.isWriter(step.agent));
     const batch = readyWriter ? [readyWriter] : ready;

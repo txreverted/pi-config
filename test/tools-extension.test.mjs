@@ -47,6 +47,21 @@ test("search tools override find and replace active grep with rg", async () => {
   assert.equal(pi.active.includes("rg"), true);
 });
 
+test("jq adapter executes shell-free input and enforces exclusive input modes", async () => {
+  const pi = fakePi();
+  await toolsExtension(pi);
+  const jq = pi.tools.get("jq");
+  const result = await jq.execute("jq-test", {
+    filter: ".items | add",
+    input: JSON.stringify({ items: [2, 3] }),
+  }, undefined, undefined, { cwd: process.cwd() });
+  assert.equal(result.content[0].text.trim(), "5");
+  await assert.rejects(
+    () => jq.execute("jq-test", { filter: ".", input: "{}", files: ["package.json"] }, undefined, undefined, { cwd: process.cwd() }),
+    /either input or files/,
+  );
+});
+
 test("find record parsing preserves legal whitespace and escapes embedded newlines", () => {
   const records = parseNulRecords(" trailing.ts \0split\nname.ts\0partial");
   assert.deepEqual(records, [" trailing.ts ", "split\nname.ts"]);

@@ -151,7 +151,7 @@ Limits:
 | Role | Tools | Think | Deadline | Hard budget |
 |---|---|---:|---:|---|
 | `scout` | `read, grep, find, ls, git_status, git_diff` | low | 8m | 16 turns, 48 tools, 750k tokens, $1 |
-| `reviewer` | same read-only repo tools | high | 15m | 24 turns, 72 tools, 1.5M tokens, $1.50 |
+| `reviewer` | same read-only repo tools | high | 15m | 24 turns, 96 tools, 2M tokens, $2 |
 | `worker` | `read, bash, edit, write` | high | 25m | no counter budget |
 | `researcher` | `web_search, web_fetch` | low | 15m | 16 turns, 32 tools, 750k tokens, $1 |
 | `synthesizer` | read-only repo tools | high | 15m | 16 turns, 48 tools, 1M tokens, $1.50 |
@@ -170,7 +170,7 @@ Source: [`extensions/subagents-core.ts`](extensions/subagents-core.ts). Security
 
 ## Workflows
 
-`workflow` runs a built-in graph or a declarative v1 DAG. Background is default.
+`workflow` runs one of three built-in graphs in a private background host.
 
 | Name | Graph | Writes? |
 |---|---|---:|
@@ -184,21 +184,9 @@ Writer gates:
 - tool input must set `allowWrite: true`
 - one writer max
 - UI mode asks for confirmation
-- declarative writer is blocked without UI
 - writer workflow never auto-retries
 
-Declarative v1 rules:
-
-- 1–8 fixed-role steps
-- plain data only
-- known fields only
-- valid IDs, dependencies, output step, acyclic graph
-- `include` can use only a listed dependency
-- one writer max
-- max evidence: 24,000 chars total, 8,000 per source
-- no JS, eval, imports, expressions, nested workflows, or runtime fan-out
-
-Ready readers run together. Ready writer runs alone. `stop` failure stops graph. `continue` failure can end as `completed_with_warnings`. Final output comes only from a successful output step.
+Ready readers run together. Ready writer runs alone. `stop` failure stops the graph. A synthesis step requires at least one successful dependency, so review and research workflows fail instead of synthesizing when every evidence-producing child fails. One failed parallel child can still produce `completed_with_warnings` when another succeeds. Final output comes only from a successful output step.
 
 Non-clean terminal read-only workflows can retry. Retry reuses only the unchanged successful journal prefix. Hash covers engine, role, task, objective, paths, and evidence.
 
@@ -219,7 +207,7 @@ Health labels:
 
 Silence does not kill work.
 
-Background state lives at `~/.pi/agent/orchestration-runs/<run-id>/`. Directories are `0700`. JSON is `0600` and atomic. State can contain source-derived text. Retention: 7 days and newest 30 records.
+Background state lives at `~/.pi/agent/orchestration-runs/<run-id>/`. Directories are `0700`. JSON is `0600`, atomic, size-bounded, and validated before use. Invalid records are skipped. State can contain source-derived text. Retention: 7 days and newest 30 records.
 
 `/runs` and `orchestration_control` can list, inspect, stop, and safely retry. `/orchestration-doctor` checks runtime without provider use. Completion goes once to the source session. Background child usage is shown in run output, not added to parent footer cost.
 
@@ -262,6 +250,8 @@ npm run check
 1. strict TypeScript check
 2. deterministic unit tests
 3. provider-free Pi package smoke test
+
+CI runs that check against both the lockfile-pinned Pi version and the latest published Pi packages. Runtime peer ranges remain open so the config can load with newer Pi releases.
 
 Optional provider smoke:
 

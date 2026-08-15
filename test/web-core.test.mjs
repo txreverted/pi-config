@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { gzipSync } from "node:zlib";
 import {
+  decompressBody,
   htmlToMarkdown,
   isPublicIp,
   parseDuckDuckGoHtml,
@@ -54,6 +56,21 @@ test("URL resolution rejects unsafe targets and mixed DNS answers", async () => 
   ]);
   assert.equal(resolved.url.toString(), "https://example.com/a");
   assert.deepEqual(resolved.addresses, [{ address: "93.184.216.34", family: 4 }]);
+});
+
+test("response decompression is bounded and rejects unsupported encodings", async () => {
+  assert.equal((await decompressBody(gzipSync("hello"), "gzip")).toString("utf8"), "hello");
+  await assert.rejects(() => decompressBody(Buffer.from("x"), "compress"), /Unsupported content encoding/);
+  await assert.rejects(() => decompressBody(gzipSync(Buffer.alloc(5 * 1024 * 1024 + 1)), "gzip"));
+});
+
+test("DNS resolution obeys cancellation", async () => {
+  const controller = new AbortController();
+  const pending = resolvePublicUrl("https://example.com/", controller.signal, async () =>
+    await new Promise(() => {})
+  );
+  controller.abort(new Error("cancelled lookup"));
+  await assert.rejects(() => pending, /cancelled lookup/);
 });
 
 test("Exa text results are parsed, deduplicated, and restricted to HTTP URLs", () => {

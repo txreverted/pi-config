@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  AGENT_NAMES,
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   type AgentDefinition,
   type AgentName,
 } from "../extensions/subagents-core.ts";
 
-export const AGENT_NAMES = ["scout", "reviewer", "worker", "researcher", "synthesizer"] as const satisfies readonly AgentName[];
+export { AGENT_NAMES };
 
 function prompt(name: AgentName): string {
   return readFileSync(fileURLToPath(new URL(`./prompts/${name}.md`, import.meta.url)), "utf8").trim();
@@ -18,7 +19,6 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
   const agents: AgentDefinition[] = [
     {
       name: "scout",
-      description: "Map relevant code, dependencies, conventions, and likely change surfaces without editing files.",
       tools: ["read", "grep", "find", "ls", "git_status", "git_diff"],
       extensions: [readOnlyGitExtensionPath],
       prompt: prompt("scout"),
@@ -32,7 +32,6 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "reviewer",
-      description: "Perform a fresh, evidence-based, read-only code review.",
       tools: ["read", "grep", "find", "ls", "git_status", "git_diff"],
       extensions: [readOnlyGitExtensionPath],
       prompt: prompt("reviewer"),
@@ -40,13 +39,12 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: true,
       maxTurns: 24,
-      maxToolCalls: 72,
-      maxReportedTokens: 1_500_000,
-      maxCostUsd: 1.5,
+      maxToolCalls: 96,
+      maxReportedTokens: 2_000_000,
+      maxCostUsd: 2,
     },
     {
       name: "worker",
-      description: "Implement one bounded task in the current checkout. This is the only file-writing role.",
       tools: ["read", "bash", "edit", "write"],
       prompt: prompt("worker"),
       thinking: "high",
@@ -56,7 +54,6 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "researcher",
-      description: "Research public sources using the hardened keyless web tools.",
       tools: ["web_search", "web_fetch"],
       extensions: [webExtensionPath],
       prompt: prompt("researcher"),
@@ -70,7 +67,6 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "synthesizer",
-      description: "Reconcile delegated evidence into a concise, verified final report.",
       tools: ["read", "grep", "find", "ls", "git_status", "git_diff"],
       extensions: [readOnlyGitExtensionPath],
       prompt: prompt("synthesizer"),
