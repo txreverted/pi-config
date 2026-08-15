@@ -15,7 +15,8 @@
       "./extensions/tools.ts",
       "./extensions/web.ts",
       "./extensions/ask.ts",
-      "./extensions/subagents.ts"
+      "./extensions/subagents.ts",
+      "./extensions/directives.ts"
     ],
     "prompts": [
       "./prompts"
