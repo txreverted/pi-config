@@ -4,8 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { visibleWidth } from "@earendil-works/pi-tui";
-import { OrchestrationRuntime, formatCompactRunLine } from "../extensions/orchestration-runtime.ts";
+import { OrchestrationRuntime } from "../extensions/orchestration-runtime.ts";
 import { compileDeclarativeWorkflowSpec } from "../extensions/workflows-core.ts";
 import { readRunById } from "../extensions/orchestration-state.ts";
 import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
@@ -60,19 +59,18 @@ async function waitForTerminal(runId, timeoutMs = 3_000) {
   return await waitForState(runId, (state) => ["completed", "completed_with_warnings", "failed", "aborted", "timed_out"].includes(state.status), timeoutMs);
 }
 
-test("compact run rows retain timers at narrow and wide terminal widths", () => {
-  const run = {
-    name: "a-very-long-background-workflow-name",
-    status: "running",
-    health: "quiet",
-    queuedAt: 0,
-    startedAt: 0,
-  };
-  for (const width of [40, 80, 120]) {
-    const line = formatCompactRunLine(run, width, 61_000);
-    assert.ok(visibleWidth(line) <= width);
-    assert.match(line, /1m01s/);
-  }
+test("orchestration keeps the area below the input empty", () => {
+  const pi = fakePi();
+  const runtime = new OrchestrationRuntime(pi);
+  const ctx = fakeContext(process.cwd());
+  const widgetCalls = [];
+  ctx.mode = "tui";
+  ctx.hasUI = true;
+  ctx.ui.setWidget = (...args) => widgetCalls.push(args);
+
+  runtime.bind(ctx);
+  assert.deepEqual(widgetCalls, [["orchestration-runs", undefined]]);
+  pi.handlers.get("session_shutdown")();
 });
 
 test("background runtime survives the tool return and delivers completion exactly once", async () => {

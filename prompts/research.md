@@ -1,9 +1,9 @@
 ---
-description: Start two background public-web research passes and synthesize sources
+description: Start two public-web research passes and synthesis
 argument-hint: "<research question>"
 ---
-Run the `research` workflow for this question:
+Call `workflow` with `name: "research"`, `background: true`, and this question as the objective:
 
 $ARGUMENTS
 
-Let the workflow run in the background. Preserve useful source URLs, distinguish evidence from inference, reconcile contradictory findings, and state unresolved uncertainty.
+Keep useful source URLs. Split fact from inference. Resolve conflicts. State what stays unknown.
