@@ -13,7 +13,8 @@
     "extensions": [
       "./extensions/ui.ts",
       "./extensions/tools.ts",
-      "./extensions/web.ts"
+      "./extensions/web.ts",
+      "./extensions/ask.ts"
     ],
     "themes": [
       "./themes/neutral.json"
