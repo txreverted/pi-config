@@ -1,20 +1,59 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createWorkflowRunFiles,
   ensureOrchestrationRoot,
+  listPersistedWorkflowRuns,
   readPersistedWorkflowRun,
   readWorkflowHostConfig,
 } from "../extensions/orchestration-state.ts";
 import { emptyUsage } from "../extensions/subagents-core.ts";
+import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
+import { ThrottledStateWriter } from "../extensions/workflow-host.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 const host = fileURLToPath(new URL("../extensions/workflow-host.ts", import.meta.url));
+
+function initialState(runId, cwd, queuedAt, definition) {
+  return {
+    version: 1,
+    kind: "workflow",
+    runId,
+    name: definition.name,
+    objectivePreview: "smoke",
+    cwd,
+    origin: { sessionId: "test-session" },
+    status: "queued",
+    health: "healthy",
+    queuedAt,
+    updatedAt: queuedAt,
+    durationMs: 0,
+    steps: definition.steps.map((step) => ({
+      id: step.id,
+      agent: step.agent,
+      ...(step.phase ? { phase: step.phase } : {}),
+      status: "queued",
+      health: "healthy",
+      output: "",
+      usage: emptyUsage(),
+      durationMs: 0,
+      attempt: 0,
+      maxAttempts: 1,
+      turns: 0,
+      toolCalls: 0,
+      recentEvents: [],
+      queuedAt,
+    })),
+    output: "",
+    usage: emptyUsage(),
+    hasWriter: false,
+  };
+}
 
 test("orchestration state rejects a symlinked root", async () => {
   const parent = await mkdtemp(join(tmpdir(), "pi-orchestration-symlink-"));
@@ -29,39 +68,48 @@ test("orchestration state rejects a symlinked root", async () => {
   }
 });
 
-test("private workflow host executes a declarative run and atomically persists completion", async () => {
+test("persisted state validates its full runtime shape and lists only valid records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-orchestration-validation-"));
+  const invalidDir = join(root, "invalid-run");
+  try {
+    await mkdir(invalidDir);
+    const invalidPath = join(invalidDir, "state.json");
+    await writeFile(invalidPath, JSON.stringify({ version: 1, kind: "workflow", runId: "invalid-run" }));
+    await assert.rejects(() => readPersistedWorkflowRun(invalidPath), /name|steps|objectivePreview/);
+    assert.deepEqual(await listPersistedWorkflowRuns(root), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("throttled state writer reports asynchronous persistence failure immediately", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-orchestration-writer-failure-"));
+  const target = join(root, "state-target");
+  const definition = createWorkflowRegistry().get("review");
+  assert.ok(definition);
+  await mkdir(target);
+  let reported;
+  const writer = new ThrottledStateWriter(
+    target,
+    initialState("writer-failure", root, Date.now(), definition),
+    (error) => { reported = error; },
+  );
+  try {
+    writer.update((state) => ({ ...state, updatedAt: Date.now() }), true);
+    await assert.rejects(() => writer.flush());
+    assert.ok(reported instanceof Error);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("private workflow host executes a built-in run and atomically persists completion", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-orchestration-state-"));
   const cwd = await mkdtemp(join(tmpdir(), "pi-orchestration-cwd-"));
   const runId = "host-test-run";
   const queuedAt = Date.now();
-  const spec = {
-    version: 1,
-    name: "host-smoke",
-    outputStep: "scan",
-    steps: [{ id: "scan", agent: "scout", task: "Inspect the fixture" }],
-  };
-  const initial = {
-    version: 1,
-    kind: "workflow",
-    runId,
-    name: spec.name,
-    description: "test",
-    objectivePreview: "smoke",
-    cwd,
-    origin: { sessionId: "test-session" },
-    status: "queued",
-    health: "healthy",
-    queuedAt,
-    updatedAt: queuedAt,
-    durationMs: 0,
-    steps: [{
-      id: "scan", agent: "scout", status: "queued", health: "healthy", output: "", usage: emptyUsage(),
-      durationMs: 0, attempt: 0, maxAttempts: 1, turns: 0, toolCalls: 0, recentEvents: [], queuedAt,
-    }],
-    output: "",
-    usage: emptyUsage(),
-    hasWriter: false,
-  };
+  const definition = createWorkflowRegistry().get("review");
+  assert.ok(definition);
   try {
     const files = await createWorkflowRunFiles({
       version: 1,
@@ -70,10 +118,10 @@ test("private workflow host executes a declarative run and atomically persists c
       origin: { sessionId: "test-session" },
       objective: "Smoke test",
       paths: [],
-      spec,
+      builtinName: "review",
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       hasWriter: false,
-    }, initial, root);
+    }, initialState(runId, cwd, queuedAt, definition), root);
     assert.equal((await stat(files.runDir)).mode & 0o777, 0o700);
     assert.equal((await stat(files.configPath)).mode & 0o777, 0o600);
     assert.equal((await stat(files.statePath)).mode & 0o777, 0o600);
@@ -95,7 +143,8 @@ test("private workflow host executes a declarative run and atomically persists c
     const completed = await readPersistedWorkflowRun(files.statePath);
     assert.equal(completed.status, "completed");
     assert.equal(completed.output, "fixture completed");
-    assert.equal(completed.steps[0].status, "completed");
+    assert.equal(completed.steps.length, 4);
+    assert.ok(completed.steps.every((step) => step.status === "completed"));
     assert.ok(completed.startedAt >= completed.queuedAt);
     assert.ok(completed.endedAt >= completed.startedAt);
   } finally {

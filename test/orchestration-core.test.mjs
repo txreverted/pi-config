@@ -6,14 +6,12 @@ import {
   formatRunDuration,
   healthForRun,
   isTerminalLifecycle,
-  queuedMs,
 } from "../extensions/orchestration-core.ts";
 
 const thresholds = { quietAfterMs: 30_000, longRunningAfterMs: 120_000, needsAttentionAfterMs: 300_000 };
 
 test("run timing uses queued, live, and frozen terminal timestamps", () => {
   const timing = { queuedAt: 1_000, startedAt: 2_000, lastActivityAt: 3_000 };
-  assert.equal(queuedMs(timing, 10_000), 1_000);
   assert.equal(elapsedMs(timing, 10_000), 8_000);
   assert.equal(activityAgeMs(timing, 10_000), 7_000);
   assert.equal(elapsedMs({ ...timing, endedAt: 6_000 }, 10_000), 4_000);

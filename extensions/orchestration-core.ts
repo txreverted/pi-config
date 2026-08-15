@@ -6,25 +6,23 @@ export const QUIET_AFTER_MS = 30_000;
 export const LONG_RUNNING_AFTER_MS = 2 * 60_000;
 export const NEEDS_ATTENTION_AFTER_MS = 5 * 60_000;
 
-export type RunLifecycle =
-  | "queued"
-  | "starting"
-  | "running"
-  | "retrying"
-  | "completed"
-  | "completed_with_warnings"
-  | "failed"
-  | "aborted"
-  | "timed_out"
-  | "paused"
-  | "skipped";
+export const RUN_LIFECYCLES = [
+  "queued",
+  "starting",
+  "running",
+  "retrying",
+  "completed",
+  "completed_with_warnings",
+  "failed",
+  "aborted",
+  "timed_out",
+  "paused",
+  "skipped",
+] as const;
+export type RunLifecycle = typeof RUN_LIFECYCLES[number];
 
-export type RunHealth =
-  | "healthy"
-  | "quiet"
-  | "long_running"
-  | "needs_attention"
-  | "dead";
+export const RUN_HEALTHS = ["healthy", "quiet", "long_running", "needs_attention", "dead"] as const;
+export type RunHealth = typeof RUN_HEALTHS[number];
 
 export interface RunTiming {
   queuedAt: number;
@@ -57,10 +55,6 @@ export function isTerminalLifecycle(status: RunLifecycle): boolean {
 export function elapsedMs(timing: RunTiming, now = Date.now()): number {
   const start = timing.startedAt ?? timing.queuedAt;
   return Math.max(0, (timing.endedAt ?? now) - start);
-}
-
-export function queuedMs(timing: RunTiming, now = Date.now()): number {
-  return Math.max(0, (timing.startedAt ?? timing.endedAt ?? now) - timing.queuedAt);
 }
 
 export function activityAgeMs(timing: RunTiming, now = Date.now()): number | undefined {

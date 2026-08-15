@@ -343,7 +343,3 @@ export function registerSubagentTool(
     },
   });
 }
-
-export default function subagentsExtension(pi: ExtensionAPI): void {
-  registerSubagentTool(pi);
-}

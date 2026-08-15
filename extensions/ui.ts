@@ -42,6 +42,17 @@ export default function uiExtension(pi: ExtensionAPI) {
   let responseStartedAt: number | undefined;
   let responseTimer: ReturnType<typeof setInterval> | undefined;
   let requestStatusRender: (() => void) | undefined;
+  let cachedEntryCount = -1;
+  let cachedCost = 0;
+
+  const sessionCost = (ctx: ExtensionContext): number => {
+    const entries = ctx.sessionManager.getEntries();
+    if (entries.length !== cachedEntryCount) {
+      cachedEntryCount = entries.length;
+      cachedCost = entries.reduce((total, entry) => total + usageCost(entry), 0);
+    }
+    return cachedCost;
+  };
 
   const stopResponseTimer = () => {
     if (responseTimer) clearInterval(responseTimer);
@@ -92,11 +103,11 @@ export default function uiExtension(pi: ExtensionAPI) {
               `${formatCwd(ctx.cwd)}${branch ? `(${branch})` : ""}`,
               sessionName,
             ].filter(Boolean).join(" · ");
-            const cost = ctx.sessionManager.getEntries().reduce((total, entry) => total + usageCost(entry), 0);
+            const cost = sessionCost(ctx);
             const usage = ctx.getContextUsage();
             const contextWindow = usage?.contextWindow ?? currentModel?.contextWindow ?? 0;
             const contextPercentValue = usage?.percent ?? 0;
-            const contextPercent = usage?.percent === null ? "?" : contextPercentValue.toFixed(1);
+            const contextPercent = usage?.percent == null ? "?" : contextPercentValue.toFixed(1);
             const subscription = isSubscription(ctx, currentModel) ? " (sub)" : "";
             const elapsed = responseStartedAt === undefined ? undefined : formatElapsed(Date.now() - responseStartedAt);
             const model = currentModel?.id ?? "no-model";
@@ -164,5 +175,7 @@ export default function uiExtension(pi: ExtensionAPI) {
     responseTimer = undefined;
     responseStartedAt = undefined;
     requestStatusRender = undefined;
+    cachedEntryCount = -1;
+    cachedCost = 0;
   });
 }
