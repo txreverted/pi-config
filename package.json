@@ -22,7 +22,11 @@
       "./extensions/tools.ts",
       "./extensions/web.ts",
       "./extensions/ask.ts",
-      "./extensions/orchestration.ts"
+      "./extensions/orchestration.ts",
+      "./extensions/ponytail.ts"
+    ],
+    "skills": [
+      "./skills"
     ],
     "prompts": [
       "./prompts"

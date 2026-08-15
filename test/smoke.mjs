@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "orchestration.ts", "subagent-tools.ts"];
+const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "orchestration.ts", "ponytail.ts", "subagent-tools.ts"];
 const args = [
   "--no-extensions",
   "--no-skills",
@@ -12,6 +12,9 @@ const args = [
   "--no-themes",
 ];
 for (const extension of extensions) args.push("--extension", resolve(root, "extensions", extension));
+for (const skill of ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-gain", "ponytail-help"]) {
+  args.push("--skill", resolve(root, "skills", skill, "SKILL.md"));
+}
 args.push("--theme", resolve(root, "themes", "neutral.json"));
 args.push("--use-theme", "neutral");
 args.push("--list-models", "__pi_config_smoke_no_such_model__");
