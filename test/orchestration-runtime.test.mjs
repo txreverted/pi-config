@@ -4,10 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OrchestrationRuntime } from "../extensions/orchestration-runtime.ts";
-import { compileDeclarativeWorkflowSpec } from "../extensions/workflows-core.ts";
+import { commandMatchesWorkflowHost, OrchestrationRuntime } from "../extensions/orchestration-runtime.ts";
 import { readRunById } from "../extensions/orchestration-state.ts";
-import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 
@@ -38,7 +36,6 @@ function fakeContext(cwd) {
     },
     sessionManager: {
       getSessionId: () => "runtime-test-session",
-      getSessionFile: () => undefined,
       getEntries: () => [],
     },
     isIdle: () => true,
@@ -73,7 +70,34 @@ test("orchestration keeps the area below the input empty", () => {
   pi.handlers.get("session_shutdown")();
 });
 
-test("background runtime survives the tool return and delivers completion exactly once", async () => {
+test("workflow host ownership matching is strict and Windows-case-insensitive", () => {
+  const host = "C:\\Pi\\workflow-host.ts";
+  const config = "C:\\Runs\\review\\config.json";
+  assert.equal(commandMatchesWorkflowHost(`node ${host} ${config}`, host, config, true), true);
+  assert.equal(commandMatchesWorkflowHost(`node c:\\pi\\WORKFLOW-HOST.ts c:\\runs\\review\\CONFIG.json`, host, config, true), true);
+  assert.equal(commandMatchesWorkflowHost(`node ${host} C:\\Runs\\other\\config.json`, host, config, true), false);
+  assert.equal(commandMatchesWorkflowHost(`node ${host}.bak ${config}.bak`, host, config, true), false);
+  assert.equal(commandMatchesWorkflowHost(`node "${host}" "${config}"`, host, config, true), true);
+});
+
+test("background runtime rejects caller-supplied workflow graphs", async () => {
+  const pi = fakePi();
+  const runtime = new OrchestrationRuntime(pi);
+  const ctx = fakeContext(process.cwd());
+  await assert.rejects(
+    () => runtime.startBackgroundWorkflow({
+      builtinName: "review",
+      definition: { name: "review", steps: [] },
+      objective: "spoof",
+      paths: [],
+      cwd: process.cwd(),
+      ctx,
+    }),
+    /Caller-supplied workflow definitions/,
+  );
+});
+
+test("background runtime survives tool return, delivers once, and can stop a live host", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-orchestration-runtime-"));
   const cwd = await mkdtemp(join(tmpdir(), "pi-orchestration-runtime-cwd-"));
   const previousRoot = process.env.PI_CONFIG_ORCHESTRATION_DIR;
@@ -81,18 +105,10 @@ test("background runtime survives the tool return and delivers completion exactl
   const pi = fakePi();
   const runtime = new OrchestrationRuntime(pi);
   const ctx = fakeContext(cwd);
-  const spec = {
-    version: 1,
-    name: "background-smoke",
-    outputStep: "scan",
-    steps: [{ id: "scan", agent: "scout", task: "Inspect" }],
-  };
-  const definition = compileDeclarativeWorkflowSpec(spec, (agent) => agent === "worker");
   try {
     const receipt = await runtime.startBackgroundWorkflow({
-      definition,
-      spec,
-      objective: "Smoke",
+      builtinName: "review",
+      objective: "Static graph smoke",
       paths: [],
       cwd,
       ctx,
@@ -101,7 +117,8 @@ test("background runtime survives the tool return and delivers completion exactl
     const completed = await waitForTerminal(receipt.runId);
     assert.equal(completed.status, "completed");
     assert.equal(completed.output, "fixture completed");
-    assert.equal(completed.steps[0].thinking, "low");
+    assert.equal(completed.steps.length, 4);
+    assert.ok(completed.steps.every((step) => step.status === "completed"));
 
     await runtime.scan(true);
     assert.equal(pi.messages.length, 1);
@@ -111,34 +128,9 @@ test("background runtime survives the tool return and delivers completion exactl
     assert.equal(pi.messages.length, 1);
     assert.ok((await readRunById(receipt.runId)).deliveredAt);
 
-    const review = createWorkflowRegistry().get("review");
-    assert.ok(review);
-    const staticReceipt = await runtime.startBackgroundWorkflow({
-      definition: review,
-      builtinName: "review",
-      objective: "Static graph smoke",
-      paths: [],
-      cwd,
-      ctx,
-      invocation: { command: process.execPath, argsPrefix: [fixture] },
-    });
-    const staticCompleted = await waitForTerminal(staticReceipt.runId);
-    assert.equal(staticCompleted.status, "completed");
-    assert.equal(staticCompleted.steps.length, 4);
-    assert.ok(staticCompleted.steps.every((step) => step.status === "completed"));
-    assert.deepEqual(Object.fromEntries(staticCompleted.steps.map((step) => [step.id, step.thinking])), {
-      scout: "low",
-      "correctness-review": "high",
-      "security-review": "high",
-      synthesis: "high",
-    });
-    await runtime.scan(true);
-    assert.equal(pi.messages.length, 2);
-
     process.env.FAKE_PI_MODE = "quiet";
     const stoppable = await runtime.startBackgroundWorkflow({
-      definition,
-      spec,
+      builtinName: "review",
       objective: "Stop smoke",
       paths: [],
       cwd,

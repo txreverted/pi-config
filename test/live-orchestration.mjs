@@ -46,7 +46,6 @@ if (single.status === "timed_out") {
 if (process.env.PI_LIVE_WORKFLOW === "1" && single.status === "completed") {
   const definition = {
     name: "live-smoke",
-    description: "Minimal bounded multi-child startup smoke",
     outputStep: "synthesis",
     steps: [
       { id: "probe-a", agent: "scout", onFailure: "stop", buildTask: () => "Do not call tools. Respond exactly: PROBE_A_READY" },

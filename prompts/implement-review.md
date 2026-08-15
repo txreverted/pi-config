@@ -2,7 +2,7 @@
 description: Start scout, one writer, two fresh reviews, and synthesis
 argument-hint: "<implementation objective>"
 ---
-Call `workflow` with `name: "implement-review"`, `background: true`, `allowWrite: true`, and this authorized objective:
+Call `workflow` with `name: "implement-review"`, `allowWrite: true`, and this authorized objective:
 
 $ARGUMENTS
 

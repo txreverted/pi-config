@@ -19,7 +19,6 @@ import {
 const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 const definition = {
   name: "scout",
-  description: "test",
   tools: ["read", "grep"],
   prompt: "Test role",
   thinking: "low",

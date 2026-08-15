@@ -538,7 +538,7 @@ async function readNodeStream(stream: Readable, maxBytes: number, declaredLength
   return Buffer.concat(chunks, total);
 }
 
-async function decompressBody(body: Buffer, encodingHeader: string | undefined): Promise<Buffer> {
+export async function decompressBody(body: Buffer, encodingHeader: string | undefined): Promise<Buffer> {
   const encoding = encodingHeader?.trim().toLowerCase();
   if (!encoding || encoding === "identity") return body;
 

@@ -40,24 +40,22 @@ import {
   isProcessAlive,
   resolvePiInvocation,
   truncateText,
-  type AgentName,
   type ChildRunProgress,
   type PiInvocation,
   type UsageSummary,
 } from "./subagents-core.ts";
 import type {
   BuiltinWorkflowName,
-  DeclarativeWorkflowSpec,
-  WorkflowDefinition,
   WorkflowStepOutcome,
 } from "./workflows-core.ts";
 import { createAgentRegistry } from "../subagents/registry.ts";
 import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
-import { compileDeclarativeWorkflowSpec, validateWorkflowDefinition } from "./workflows-core.ts";
+import { validateWorkflowDefinition } from "./workflows-core.ts";
 
 const DEAD_HOST_GRACE_MS = 5_000;
 const HOST_SPAWN_TIMEOUT_MS = 5_000;
 const MAX_RECENT_FOREGROUND_RUNS = 20;
+const STATE_SCAN_INTERVAL_MS = 5_000;
 const CONTROL_ACTIONS = ["list", "status", "stop", "retry", "doctor"] as const;
 
 export interface ForegroundRunRecord {
@@ -80,9 +78,7 @@ export interface ForegroundRunRecord {
 }
 
 export interface StartBackgroundWorkflowOptions {
-  definition: WorkflowDefinition;
-  builtinName?: BuiltinWorkflowName;
-  spec?: DeclarativeWorkflowSpec;
+  builtinName: BuiltinWorkflowName;
   objective: string;
   paths: string[];
   cwd: string;
@@ -143,46 +139,18 @@ function statusIcon(status: RunLifecycle): string {
   return "◆";
 }
 
-function terminalStatus(status: RunLifecycle): boolean {
-  return isTerminalLifecycle(status);
-}
-
-function aggregateChildHealth(children: readonly ChildRunProgress[], now = Date.now()): RunHealth {
+function aggregateChildHealth(children: readonly (ChildRunProgress | WorkflowStepOutcome)[], now = Date.now()): RunHealth {
   const order: RunHealth[] = ["healthy", "quiet", "long_running", "needs_attention", "dead"];
   return children.reduce<RunHealth>((worst, child) => {
-    const health = healthForRun(child.lifecycle, child, now);
+    const status = "lifecycle" in child ? child.lifecycle : child.status;
+    const health = healthForRun(status, child, now);
     return order.indexOf(health) > order.indexOf(worst) ? health : worst;
   }, "healthy");
 }
 
-function workflowChildrenToProgress(steps: readonly WorkflowStepOutcome[]): ChildRunProgress[] {
-  return steps.map((step) => ({
-    id: step.id,
-    agent: step.agent,
-    ...(step.thinking ? { thinking: step.thinking } : {}),
-    lifecycle: step.status,
-    health: step.health,
-    queuedAt: step.queuedAt,
-    ...(step.startedAt !== undefined ? { startedAt: step.startedAt } : {}),
-    ...(step.endedAt !== undefined ? { endedAt: step.endedAt } : {}),
-    ...(step.spawnedAt !== undefined ? { spawnedAt: step.spawnedAt } : {}),
-    ...(step.firstProtocolAt !== undefined ? { firstProtocolAt: step.firstProtocolAt } : {}),
-    ...(step.lastActivityAt !== undefined ? { lastActivityAt: step.lastActivityAt } : {}),
-    ...(step.currentTool !== undefined ? { currentTool: step.currentTool } : {}),
-    ...(step.currentToolStartedAt !== undefined ? { currentToolStartedAt: step.currentToolStartedAt } : {}),
-    attempt: step.attempt,
-    maxAttempts: step.maxAttempts,
-    turns: step.turns,
-    toolCalls: step.toolCalls,
-    recentEvents: [...step.recentEvents],
-    text: step.output,
-    usage: step.usage,
-  }));
-}
-
 function runViewFromPersisted(run: PersistedWorkflowRun, now = Date.now()): RunView {
-  const active = !terminalStatus(run.status);
-  const childHealth = aggregateChildHealth(workflowChildrenToProgress(run.steps), now);
+  const active = !isTerminalLifecycle(run.status);
+  const childHealth = aggregateChildHealth(run.steps, now);
   const overallHealth = healthForRun(run.status, run, now);
   const healthOrder: RunHealth[] = ["healthy", "quiet", "long_running", "needs_attention", "dead"];
   const dynamicHealth = active
@@ -200,7 +168,7 @@ function runViewFromPersisted(run: PersistedWorkflowRun, now = Date.now()): RunV
     ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
     updatedAt: run.updatedAt,
     ...(run.lastActivityAt !== undefined ? { lastActivityAt: run.lastActivityAt } : {}),
-    durationMs: terminalStatus(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt)),
+    durationMs: isTerminalLifecycle(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt)),
     children: run.steps,
     usage: run.usage,
     output: run.output,
@@ -218,7 +186,7 @@ function runViewFromForeground(run: ForegroundRunRecord, now = Date.now()): RunV
     name: run.name,
     objectivePreview: run.objectivePreview,
     status: run.status,
-    health: terminalStatus(run.status)
+    health: isTerminalLifecycle(run.status)
       ? (run.status === "failed" || run.status === "timed_out" ? "dead" : run.health)
       : aggregateChildHealth(run.children, now),
     queuedAt: run.queuedAt,
@@ -226,7 +194,7 @@ function runViewFromForeground(run: ForegroundRunRecord, now = Date.now()): RunV
     ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
     updatedAt: run.updatedAt,
     ...(run.lastActivityAt !== undefined ? { lastActivityAt: run.lastActivityAt } : {}),
-    durationMs: terminalStatus(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt)),
+    durationMs: isTerminalLifecycle(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt)),
     children: run.children,
     usage: run.usage,
     output: "",
@@ -242,14 +210,14 @@ function safePreview(value: string, max = 120): string {
 }
 
 function formatRunLine(run: RunView, now = Date.now()): string {
-  const duration = terminalStatus(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt));
+  const duration = isTerminalLifecycle(run.status) ? run.durationMs : Math.max(0, now - (run.startedAt ?? run.queuedAt));
   return `${statusIcon(run.status)} ${run.name} · ${formatRunDuration(duration)} · ${run.status}${run.health !== "healthy" ? ` · ${healthLabel(run.health)}` : ""}`;
 }
 
 function formatChildLine(child: ChildRunProgress | WorkflowStepOutcome, now = Date.now()): string {
   const status = "lifecycle" in child ? child.lifecycle : child.status;
   const timing = child;
-  const duration = "durationMs" in child && terminalStatus(status) ? child.durationMs : elapsedMs(timing, now);
+  const duration = "durationMs" in child && isTerminalLifecycle(status) ? child.durationMs : elapsedMs(timing, now);
   const tool = child.currentTool
     ? ` · ${child.currentTool}${child.currentToolStartedAt ? ` ${formatRunDuration(now - child.currentToolStartedAt)}` : ""}`
     : "";
@@ -284,15 +252,65 @@ async function executableAvailable(command: string): Promise<boolean> {
   return false;
 }
 
+function commandArguments(output: string): string[] | undefined {
+  const args: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | undefined;
+  let started = false;
+  for (let index = 0; index < output.length; index++) {
+    const character = output[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else current += character;
+      started = true;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        args.push(current);
+        current = "";
+        started = false;
+      }
+    } else if (character === "\\" && index + 1 < output.length && /[\s"']/.test(output[index + 1])) {
+      current += output[++index];
+      started = true;
+    } else {
+      current += character;
+      started = true;
+    }
+  }
+  if (quote) return undefined;
+  if (started) args.push(current);
+  return args;
+}
+
+export function commandMatchesWorkflowHost(
+  output: string,
+  expectedHost: string,
+  expectedConfig: string,
+  caseInsensitive = process.platform === "win32",
+): boolean {
+  const args = commandArguments(output);
+  if (!args) return false;
+  const normalize = (value: string) => caseInsensitive ? value.toLowerCase() : value;
+  const host = normalize(expectedHost);
+  const config = normalize(expectedConfig);
+  return args.some((value, index) => normalize(value) === host && normalize(args[index + 1] ?? "") === config);
+}
+
 async function isOwnedWorkflowHost(pid: number, runId: string): Promise<boolean> {
-  if (!isProcessAlive(pid) || process.platform === "win32") return false;
+  if (!isProcessAlive(pid)) return false;
   const expectedHost = fileURLToPath(new URL("./workflow-host.ts", import.meta.url));
   const expectedConfig = join(orchestrationRoot(), runId, "config.json");
+  const command = process.platform === "win32" ? "powershell.exe" : "ps";
+  const args = process.platform === "win32"
+    ? ["-NoProfile", "-NonInteractive", "-Command", `$p = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"; if ($p) { $p.CommandLine }`]
+    : ["-ww", "-p", String(pid), "-o", "command="];
   return await new Promise((resolveOwnership) => {
-    const child = spawn("ps", ["-ww", "-p", String(pid), "-o", "command="], {
-      shell: false,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const child = spawn(command, args, { shell: false, stdio: ["ignore", "pipe", "ignore"] });
     let output = "";
     let settled = false;
     const finish = (owned: boolean) => {
@@ -309,7 +327,7 @@ async function isOwnedWorkflowHost(pid: number, runId: string): Promise<boolean>
       if (output.length < 16_000) output += chunk.toString("utf8");
     });
     child.once("error", () => finish(false));
-    child.once("close", (code) => finish(code === 0 && output.includes(expectedHost) && output.includes(expectedConfig)));
+    child.once("close", (code) => finish(code === 0 && commandMatchesWorkflowHost(output, expectedHost, expectedConfig)));
   });
 }
 
@@ -408,13 +426,16 @@ export class OrchestrationRuntime {
   }
 
   async startBackgroundWorkflow(options: StartBackgroundWorkflowOptions): Promise<BackgroundWorkflowReceipt> {
+    if (Object.hasOwn(options, "definition")) throw new Error("Caller-supplied workflow definitions are not accepted");
     this.bind(options.ctx);
     const agents = createAgentRegistry();
-    validateWorkflowDefinition(options.definition, (agent) => agents.get(agent)?.writer === true);
-    const hasWriter = options.definition.steps.some((step) => agents.get(step.agent)?.writer === true);
-    const runId = createRunId(options.definition.name);
+    const definition = createWorkflowRegistry().get(options.builtinName);
+    if (!definition) throw new Error(`Unknown built-in workflow '${options.builtinName}'`);
+    validateWorkflowDefinition(definition, (agent) => agents.get(agent)?.writer === true);
+    const hasWriter = definition.steps.some((step) => agents.get(step.agent)?.writer === true);
+    const runId = createRunId(definition.name);
     const queuedAt = Date.now();
-    const steps: WorkflowStepOutcome[] = options.definition.steps.map((step) => ({
+    const steps: WorkflowStepOutcome[] = definition.steps.map((step) => ({
       id: step.id,
       agent: step.agent,
       ...(step.phase ? { phase: step.phase } : {}),
@@ -431,16 +452,12 @@ export class OrchestrationRuntime {
       recentEvents: [],
       queuedAt,
     }));
-    const origin = {
-      sessionId: options.ctx.sessionManager.getSessionId(),
-      ...(options.ctx.sessionManager.getSessionFile() ? { sessionFile: options.ctx.sessionManager.getSessionFile() } : {}),
-    };
+    const origin = { sessionId: options.ctx.sessionManager.getSessionId() };
     const initial: PersistedWorkflowRun = {
       version: 1,
       kind: "workflow",
       runId,
-      name: options.definition.name,
-      description: options.definition.description,
+      name: definition.name,
       objectivePreview: safePreview(options.objective),
       cwd: options.cwd,
       origin,
@@ -466,8 +483,7 @@ export class OrchestrationRuntime {
       origin,
       objective: options.objective,
       paths: options.paths,
-      ...(options.builtinName ? { builtinName: options.builtinName } : {}),
-      ...(options.spec ? { spec: options.spec } : {}),
+      builtinName: options.builtinName,
       ...(modelName(options.ctx) ? { model: modelName(options.ctx) } : {}),
       ...(options.ctx.model ? { modelReasoning: options.ctx.model.reasoning } : {}),
       invocation: { command: resolvedInvocation.command, argsPrefix: resolvedInvocation.args },
@@ -511,20 +527,20 @@ export class OrchestrationRuntime {
     });
     child.unref();
     await this.scan();
-    return { runId, name: options.definition.name, status: "starting", statePath: files.statePath };
+    return { runId, name: definition.name, status: "starting", statePath: files.statePath };
   }
 
   private ensureTicker(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
       void this.scan();
-    }, RUN_UI_TICK_MS);
+    }, STATE_SCAN_INTERVAL_MS);
     this.ticker.unref?.();
   }
 
   private async scan(force = false): Promise<void> {
     const now = Date.now();
-    if (!force && now - this.lastScanAt < 5_000) return;
+    if (!force && now - this.lastScanAt < STATE_SCAN_INTERVAL_MS) return;
     if (this.scanning) {
       if (!force) return;
       while (this.scanning) await new Promise((resolveWait) => setTimeout(resolveWait, 10));
@@ -536,43 +552,48 @@ export class OrchestrationRuntime {
       const runs = await listPersistedWorkflowRuns();
       this.persisted = new Map(runs.map((run) => [run.runId, run]));
       for (const run of runs) {
-        const missingHost = run.pid === undefined && now - run.updatedAt >= DEAD_HOST_GRACE_MS * 2;
-        const hostStale = run.pid !== undefined && now - run.updatedAt >= DEAD_HOST_GRACE_MS;
-        let deadHost = false;
-        if (!hostStale || terminalStatus(run.status)) this.hostIdentityMisses.delete(run.runId);
-        if (hostStale && run.pid !== undefined) {
-          if (!isProcessAlive(run.pid)) {
-            deadHost = true;
-          } else if (process.platform !== "win32" && !(await isOwnedWorkflowHost(run.pid, run.runId))) {
-            const misses = (this.hostIdentityMisses.get(run.runId) ?? 0) + 1;
-            this.hostIdentityMisses.set(run.runId, misses);
-            deadHost = misses >= 2;
-          } else {
-            this.hostIdentityMisses.delete(run.runId);
+        try {
+          const missingHost = run.pid === undefined && now - run.updatedAt >= DEAD_HOST_GRACE_MS * 2;
+          const hostStale = run.pid !== undefined && now - run.updatedAt >= DEAD_HOST_GRACE_MS;
+          let deadHost = false;
+          if (!hostStale || isTerminalLifecycle(run.status)) this.hostIdentityMisses.delete(run.runId);
+          if (hostStale && run.pid !== undefined) {
+            if (!isProcessAlive(run.pid)) {
+              deadHost = true;
+            } else if (process.platform !== "win32" && !(await isOwnedWorkflowHost(run.pid, run.runId))) {
+              const misses = (this.hostIdentityMisses.get(run.runId) ?? 0) + 1;
+              this.hostIdentityMisses.set(run.runId, misses);
+              deadHost = misses >= 2;
+            } else {
+              this.hostIdentityMisses.delete(run.runId);
+            }
           }
+          if (!isTerminalLifecycle(run.status) && (missingHost || deadHost)) {
+            const repaired = await updatePersistedWorkflowRun(run.runId, (state) => ({
+              ...state,
+              status: "failed",
+              health: "dead",
+              error: state.error ?? "Workflow host exited without recording a terminal state",
+              endedAt: now,
+              updatedAt: now,
+              durationMs: Math.max(0, now - (state.startedAt ?? state.queuedAt)),
+            }));
+            this.persisted.set(run.runId, repaired);
+            this.hostIdentityMisses.delete(run.runId);
+            continue;
+          }
+          const view = runViewFromPersisted(run, now);
+          const previous = this.notifiedHealth.get(run.runId);
+          this.notifiedHealth.set(run.runId, view.health);
+          if ((view.health === "needs_attention" || view.health === "dead") && previous !== view.health && !isTerminalLifecycle(view.status)) {
+            this.ctx?.ui.notify(`${view.name} (${view.runId}) ${healthLabel(view.health)}. Use /runs to inspect it.`, "warning");
+          }
+          if (isTerminalLifecycle(run.status) && run.deliveredAt === undefined) await this.deliver(run);
+        } catch (error) {
+          this.persisted.delete(run.runId);
+          const message = error instanceof Error ? error.message : String(error);
+          this.ctx?.ui.notify(`Skipped invalid orchestration run ${run.runId}: ${message}`, "warning");
         }
-        if (!terminalStatus(run.status) && (missingHost || deadHost)) {
-          const repaired = await updatePersistedWorkflowRun(run.runId, (state) => ({
-            ...state,
-            status: "failed",
-            health: "dead",
-            healthReason: "Workflow host process is no longer alive",
-            error: state.error ?? "Workflow host exited without recording a terminal state",
-            endedAt: now,
-            updatedAt: now,
-            durationMs: Math.max(0, now - (state.startedAt ?? state.queuedAt)),
-          }));
-          this.persisted.set(run.runId, repaired);
-          this.hostIdentityMisses.delete(run.runId);
-          continue;
-        }
-        const view = runViewFromPersisted(run, now);
-        const previous = this.notifiedHealth.get(run.runId);
-        this.notifiedHealth.set(run.runId, view.health);
-        if ((view.health === "needs_attention" || view.health === "dead") && previous !== view.health && !terminalStatus(view.status)) {
-          this.ctx?.ui.notify(`${view.name} (${view.runId}) ${healthLabel(view.health)}. Use /runs to inspect it.`, "warning");
-        }
-        if (terminalStatus(run.status) && run.deliveredAt === undefined) await this.deliver(run);
       }
       if (now - this.lastCleanupAt >= 60 * 60_000) {
         await cleanupPersistedRuns();
@@ -643,13 +664,13 @@ export class OrchestrationRuntime {
 
   private async stopRun(id: string): Promise<string> {
     const foreground = this.foreground.get(id);
-    if (foreground && !terminalStatus(foreground.status)) {
+    if (foreground && !isTerminalLifecycle(foreground.status)) {
       foreground.stop?.();
       return `Stop requested for foreground run ${id}`;
     }
     const run = await readRunById(id);
     if (!run) throw new Error(`Unknown orchestration run '${id}'`);
-    if (terminalStatus(run.status)) return `Run ${id} is already ${run.status}`;
+    if (isTerminalLifecycle(run.status)) return `Run ${id} is already ${run.status}`;
     if (!run.pid) throw new Error(`Run ${id} has no live host pid`);
     if (!(await isOwnedWorkflowHost(run.pid, run.runId))) {
       throw new Error(`Refusing to signal pid ${run.pid}: it is not the verified host for ${run.runId}`);
@@ -664,7 +685,7 @@ export class OrchestrationRuntime {
     const runId = run.runId;
     const escalation = setTimeout(async () => {
       const current = await readRunById(runId).catch(() => undefined);
-      if (!current || terminalStatus(current.status) || !(await isOwnedWorkflowHost(pid, runId))) return;
+      if (!current || isTerminalLifecycle(current.status) || !(await isOwnedWorkflowHost(pid, runId))) return;
       try {
         if (process.platform !== "win32") process.kill(-pid, "SIGKILL");
         else process.kill(pid, "SIGKILL");
@@ -679,23 +700,13 @@ export class OrchestrationRuntime {
   private async retryRun(id: string, ctx: ExtensionContext): Promise<string> {
     const run = await readRunById(id);
     if (!run) throw new Error(`Unknown persisted workflow run '${id}'`);
-    if (!terminalStatus(run.status)) throw new Error(`Run ${id} is still ${run.status}`);
+    if (!isTerminalLifecycle(run.status)) throw new Error(`Run ${id} is still ${run.status}`);
     if (run.status === "completed") throw new Error(`Run ${id} already completed cleanly`);
     if (run.hasWriter) throw new Error("Writer workflows cannot be retried automatically");
     const configPath = join(orchestrationRoot(), id, "config.json");
     const config = await readWorkflowHostConfig(configPath);
-    const agents = createAgentRegistry();
-    const definition = config.builtinName
-      ? createWorkflowRegistry().get(config.builtinName)
-      : undefined;
-    const resolved = definition ?? (config.spec
-      ? compileDeclarativeWorkflowSpec(config.spec, (agent: AgentName) => agents.get(agent)?.writer === true)
-      : undefined);
-    if (!resolved) throw new Error("Unable to recover workflow definition for retry");
     const receipt = await this.startBackgroundWorkflow({
-      definition: resolved,
-      ...(config.builtinName ? { builtinName: config.builtinName } : {}),
-      ...(config.spec ? { spec: config.spec } : {}),
+      builtinName: config.builtinName,
       objective: config.objective,
       paths: config.paths,
       cwd: config.cwd,
@@ -710,7 +721,7 @@ export class OrchestrationRuntime {
     const now = Date.now();
     return [
       `${run.kind} ${run.name} (${run.runId})`,
-      `Status: ${run.status} · health: ${healthLabel(run.health)} · elapsed: ${formatRunDuration(terminalStatus(run.status) ? run.durationMs : now - (run.startedAt ?? run.queuedAt))}`,
+      `Status: ${run.status} · health: ${healthLabel(run.health)} · elapsed: ${formatRunDuration(isTerminalLifecycle(run.status) ? run.durationMs : now - (run.startedAt ?? run.queuedAt))}`,
       `Objective: ${run.objectivePreview || "(not recorded)"}`,
       `Usage: ${run.usage.totalTokens} tokens · $${run.usage.cost.total.toFixed(4)}`,
       ...run.children.flatMap((child) => [
@@ -793,8 +804,8 @@ export class OrchestrationRuntime {
     const index = options.indexOf(selected);
     const run = runs[index];
     if (!run) return;
-    const retryable = run.persisted && terminalStatus(run.status) && run.status !== "completed" && !run.hasWriter;
-    const actions = ["Details", ...(run.output ? ["Output tail"] : []), ...(!terminalStatus(run.status) ? ["Stop"] : []), ...(retryable ? ["Retry"] : [])];
+    const retryable = run.persisted && isTerminalLifecycle(run.status) && run.status !== "completed" && !run.hasWriter;
+    const actions = ["Details", ...(run.output ? ["Output tail"] : []), ...(!isTerminalLifecycle(run.status) ? ["Stop"] : []), ...(retryable ? ["Retry"] : [])];
     const action = await ctx.ui.select(`${run.name} · ${run.runId}`, actions);
     if (action === "Details") {
       await this.showText(ctx, `${run.name} · ${run.runId}`, () => {
@@ -861,7 +872,7 @@ export class OrchestrationRuntime {
       label: "Selected model",
       detail: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected; launches will fail until one is selected",
     });
-    const active = this.runViews().filter((run) => !terminalStatus(run.status));
+    const active = this.runViews().filter((run) => !isTerminalLifecycle(run.status));
     const unhealthy = active.filter((run) => run.health === "dead" || run.health === "needs_attention");
     checks.push({
       status: unhealthy.length > 0 ? "warn" : "pass",

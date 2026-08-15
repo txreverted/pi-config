@@ -14,7 +14,6 @@ function scope(input: WorkflowInput): string {
 function reviewWorkflow(): WorkflowDefinition {
   return {
     name: "review",
-    description: "Map the relevant code, perform two independent read-only reviews, and synthesize confirmed findings.",
     outputStep: "synthesis",
     steps: [
       {
@@ -56,7 +55,6 @@ function reviewWorkflow(): WorkflowDefinition {
 function implementationWorkflow(): WorkflowDefinition {
   return {
     name: "implement-review",
-    description: "Scout, run exactly one writer, perform two fresh read-only reviews, and synthesize remaining concerns.",
     outputStep: "synthesis",
     steps: [
       {
@@ -106,7 +104,6 @@ function implementationWorkflow(): WorkflowDefinition {
 function researchWorkflow(): WorkflowDefinition {
   return {
     name: "research",
-    description: "Run two independent public-web research passes and synthesize source-backed conclusions.",
     outputStep: "synthesis",
     steps: [
       {

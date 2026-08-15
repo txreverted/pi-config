@@ -11,6 +11,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: [pinned, latest]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -18,4 +22,6 @@ jobs:
           node-version: "22.20.0"
           cache: npm
       - run: npm ci --ignore-scripts
+      - if: matrix.pi == 'latest'
+        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest
       - run: npm run check
