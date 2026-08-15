@@ -1,0 +1,19 @@
+# Secrets and local authentication
+.env
+.env.*
+!.env.example
+auth.json
+credentials.json
+*.pem
+*.key
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+
+# Logs and editor/OS files
+*.log
+.DS_Store
+.idea/
+.vscode/
