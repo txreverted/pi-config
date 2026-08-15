@@ -1,6 +1,6 @@
 import { StringEnum, type Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { AGENT_NAMES, createAgentRegistry } from "../subagents/registry.ts";
 import {
@@ -15,7 +15,6 @@ import {
   type AgentName,
   type ChildRunProgress,
   type ChildRunResult,
-  type ChildStatus,
   type ChildTask,
   type UsageSummary,
 } from "./subagents-core.ts";
@@ -51,8 +50,33 @@ function cleanId(value: string | undefined, index: number): string {
 }
 
 function duration(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1_000).toFixed(1)}s`;
   const seconds = Math.floor(ms / 1_000);
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+export function safeSubagentDisplay(value: string): string {
+  return stripTerminalSequences(value)
+    .replace(/\r/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
+}
+
+function safeStatusText(value: string): string {
+  return safeSubagentDisplay(value).replace(/\s+/g, " ").trim();
+}
+
+function shortStatusText(value: string, maxChars = 64): string {
+  const characters = Array.from(safeStatusText(value));
+  return characters.length <= maxChars ? characters.join("") : `${characters.slice(0, maxChars - 1).join("")}…`;
+}
+
+function roleLabel(agent: AgentName): string {
+  return agent === "reviewer" ? "Review" : "Research";
+}
+
+function taskLabel(task: string | undefined, fallback: string): string {
+  const visibleTask = task?.split("\n\n--- Active parent coding policy ---", 1)[0];
+  return shortStatusText(visibleTask || fallback);
 }
 
 function untrustedOutput(results: readonly ChildRunResult[]): string {
@@ -69,13 +93,6 @@ function untrustedOutput(results: readonly ChildRunResult[]): string {
     );
   }
   return truncateText(sections.join("\n"), 40_000).text;
-}
-
-function statusIcon(status: ChildStatus, theme: { fg(color: "success" | "error" | "dim" | "accent", text: string): string }): string {
-  if (status === "completed") return theme.fg("success", "✓");
-  if (status === "failed" || status === "aborted" || status === "timed_out") return theme.fg("error", "✗");
-  if (status === "starting") return theme.fg("dim", "◦");
-  return theme.fg("accent", "◆");
 }
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
@@ -112,7 +129,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           id: task.id,
           agent: task.agent,
           thinking: agentDefinitionForTask(definition, ctx.model?.reasoning).thinking,
-          status: "starting",
+          status: "queued",
           startedAt: Date.now(),
           turns: 0,
           toolCalls: 0,
@@ -155,21 +172,40 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         usage: usage as Usage,
       };
     },
-    renderCall(args, theme) {
-      const roles = args.tasks?.map((task) => task.agent).join(", ") || "…";
-      return new Text(`${theme.fg("toolTitle", theme.bold("subagent"))}\n  ${theme.fg("dim", roles)}`, 0, 0);
+    renderShell: "self",
+    renderCall(_args, theme) {
+      return new Text(theme.bold("Agents"), 0, 0);
     },
-    renderResult(result, { expanded }, theme) {
+    renderResult(result, { expanded }, theme, context) {
       const details = result.details as SubagentToolDetails | undefined;
       const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
-      if (!details || expanded) return new Text(content, 0, 0);
-      return new Text(details.progress.map((entry) => {
+      if (!details || expanded) return new Text(safeSubagentDisplay(content), 0, 0);
+
+      const active = details.progress.filter((entry) => entry.status !== "queued");
+      const queued = details.progress.length - active.length;
+      const lines: string[] = [];
+      active.forEach((entry, index) => {
+        const last = index === active.length - 1 && queued === 0;
+        const branch = theme.fg("dim", last ? "  └─" : "  ├─");
+        const continuation = theme.fg("dim", last ? "      └" : "  │   └");
         const elapsed = (entry.status === "completed" || entry.status === "failed" || entry.status === "aborted" || entry.status === "timed_out") && "endedAt" in entry
           ? (entry as ChildRunResult).endedAt - entry.startedAt
           : Date.now() - entry.startedAt;
-        const tool = entry.currentTool ? ` · ${entry.currentTool}` : "";
-        return `${statusIcon(entry.status, theme)} ${theme.fg("accent", `${entry.agent}/${entry.thinking}`)} ${theme.fg("dim", `${entry.id} · ${duration(elapsed)} · ${entry.status}${tool}`)}`;
-      }).join("\n"), 0, 0);
+        const taskIndex = details.progress.indexOf(entry);
+        const task = context.args.tasks?.[taskIndex]?.task;
+        const activity = entry.currentTool
+          ? `${shortStatusText(entry.currentTool)}…`
+          : entry.status === "running" ? "thinking…"
+            : entry.status === "starting" ? "starting…"
+              : entry.status === "completed" ? "done"
+                : shortStatusText((entry as ChildRunResult).error || entry.status);
+        lines.push(
+          `${branch} ${theme.bold(roleLabel(entry.agent))}  ${theme.fg("dim", taskLabel(task, entry.id))} ${theme.fg("dim", `· ${duration(elapsed)}`)}`,
+          `${continuation} ${theme.fg("dim", activity)}`,
+        );
+      });
+      if (queued > 0) lines.push(`${theme.fg("dim", "  └─")} ${theme.fg("dim", `${queued} queued`)}`);
+      return new Text(lines.join("\n"), 0, 0);
     },
   });
 }

@@ -79,9 +79,11 @@ test("protocol parsing keeps visible text, final output, and usage", () => {
   assert.equal(protocol.partialText, undefined);
   consumeProtocolEvent(JSON.stringify({
     type: "message_update",
+    usage: { input: 2, totalTokens: 2, cost: { total: 0.02 } },
     assistantMessageEvent: { type: "text_delta", delta: "visible" },
   }), protocol);
   assert.equal(protocol.partialText, "visible");
+  assert.equal(protocol.streamingUsage.input, 2);
   consumeProtocolEvent(JSON.stringify({
     type: "message_end",
     message: {
@@ -98,6 +100,7 @@ test("protocol parsing keeps visible text, final output, and usage", () => {
   assert.equal(protocol.turns, 1);
   assert.equal(protocol.usage.input, 5);
   assert.equal(protocol.usage.cost.total, 0.1);
+  assert.equal(protocol.streamingUsage, undefined);
 });
 
 test("workspace cwd resolution rejects directory and symlink escapes", async () => {
@@ -204,6 +207,16 @@ test("startup and tool budgets stop bounded children", async () => {
     assert.equal(cost.status, "failed");
     assert.equal(cost.output, "fixture completed");
     assert.match(cost.error, /cost budget/);
+
+    const streamingCost = await runChildAgent({
+      definition: { ...definition, maxCostUsd: 1 },
+      task: { id: "stream-cost", agent: "reviewer", task: "Stream cost", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "stream-budget" },
+    });
+    assert.equal(streamingCost.status, "failed");
+    assert.equal(streamingCost.usage.cost.total, 2);
+    assert.match(streamingCost.error, /cost budget/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

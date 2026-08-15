@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import type { Usage } from "@earendil-works/pi-ai";
 import { access, chmod, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
-export const MAX_SUBAGENT_TASKS = 6;
+export const MAX_SUBAGENT_TASKS = 3;
 export const MAX_SUBAGENT_CONCURRENCY = 3;
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60_000;
 export const MAX_SUBAGENT_TIMEOUT_MS = 30 * 60_000;
@@ -18,24 +19,9 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
 export const AGENT_NAMES = ["reviewer", "researcher"] as const;
 export type AgentName = typeof AGENT_NAMES[number];
-export type ChildStatus = "starting" | "running" | "completed" | "failed" | "aborted" | "timed_out";
+export type ChildStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "timed_out";
 
-export interface UsageSummary {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cacheWrite1h?: number;
-  reasoning?: number;
-  totalTokens: number;
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    total: number;
-  };
-}
+export type UsageSummary = Usage;
 
 export interface AgentDefinition {
   name: AgentName;
@@ -110,6 +96,7 @@ interface ProtocolState {
   stopReason?: string;
   assistantError?: string;
   usage: UsageSummary;
+  streamingUsage?: UsageSummary;
   turns: number;
   toolCalls: number;
 }
@@ -190,6 +177,10 @@ export function aggregateUsage(values: Iterable<UsageSummary>): UsageSummary {
   return total;
 }
 
+function reportedUsage(state: ProtocolState): UsageSummary {
+  return state.streamingUsage ? addUsage(state.usage, state.streamingUsage) : state.usage;
+}
+
 export function truncateText(value: string, maxChars = MAX_RESULT_CHARS): { text: string; truncated: boolean } {
   if (value.length <= maxChars) return { text: value, truncated: false };
   const notice = `\n\n[Subagent output truncated; ${value.length - maxChars} or more characters omitted.]`;
@@ -222,10 +213,13 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
   if (typeof event.type !== "string" || !event.type) return undefined;
   const summary: ProtocolEventSummary = { type: event.type };
 
-  if (event.type === "message_update" && event.assistantMessageEvent && typeof event.assistantMessageEvent === "object") {
-    const update = event.assistantMessageEvent as Record<string, unknown>;
-    if (update.type === "text_delta" && typeof update.delta === "string") {
-      state.partialText = `${state.partialText ?? ""}${update.delta}`.slice(-MAX_RESULT_CHARS);
+  if (event.type === "message_update") {
+    if (event.usage !== undefined) state.streamingUsage = normalizeUsage(event.usage);
+    if (event.assistantMessageEvent && typeof event.assistantMessageEvent === "object") {
+      const update = event.assistantMessageEvent as Record<string, unknown>;
+      if (update.type === "text_delta" && typeof update.delta === "string") {
+        state.partialText = `${state.partialText ?? ""}${update.delta}`.slice(-MAX_RESULT_CHARS);
+      }
     }
   }
   if (event.type.startsWith("tool_execution_")) {
@@ -238,6 +232,7 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
   if (message.role !== "assistant") return summary;
   state.turns++;
   state.usage = addUsage(state.usage, normalizeUsage(message.usage));
+  state.streamingUsage = undefined;
   const text = assistantText(message);
   if (text) state.output = text;
   state.partialText = undefined;
@@ -388,7 +383,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       turns: state.turns,
       toolCalls: state.toolCalls,
       text: truncateText(state.output || state.partialText || progress.text).text,
-      usage: state.usage,
+      usage: reportedUsage(state),
     };
     try {
       options.onUpdate?.({ ...progress, usage: { ...progress.usage, cost: { ...progress.usage.cost } } });
@@ -450,9 +445,9 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
         ? `Subagent exceeded its ${definition.maxTurns}-turn budget`
         : state.toolCalls > definition.maxToolCalls
           ? `Subagent exceeded its ${definition.maxToolCalls}-tool-call budget`
-          : state.usage.totalTokens > definition.maxReportedTokens
+          : reportedUsage(state).totalTokens > definition.maxReportedTokens
             ? `Subagent exceeded its ${definition.maxReportedTokens}-reported-token budget`
-            : state.usage.cost.total > definition.maxCostUsd
+            : reportedUsage(state).cost.total > definition.maxCostUsd
               ? `Subagent exceeded its $${definition.maxCostUsd.toFixed(2)} cost budget`
               : undefined;
       if (budgetError) {
@@ -528,7 +523,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   }
 
   const endedAt = Date.now();
-  progress = { ...progress, status, text: bounded.text, turns: state.turns, toolCalls: state.toolCalls, usage: state.usage };
+  progress = { ...progress, status, text: bounded.text, turns: state.turns, toolCalls: state.toolCalls, usage: reportedUsage(state) };
   emit();
   return {
     ...progress,

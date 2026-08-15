@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 
 const mode = process.env.FAKE_PI_MODE ?? "success";
 const args = process.argv.slice(2);
@@ -49,17 +49,8 @@ if (mode === "hang" || mode === "startup-hang") {
 } else if (mode === "quiet") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   setInterval(() => {}, 1_000);
-} else if (mode === "fail") {
-  process.stderr.write("fake failure\n");
-  process.exitCode = 7;
 } else if (mode === "malformed") {
   process.stdout.write("not json\n");
-} else if (mode === "mixed") {
-  process.stdout.write("not json\n");
-  await writeSuccess(false);
-} else if (mode === "delayed-start") {
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
-  await writeSuccess(false);
 } else if (mode === "tool") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({ type: "agent_start" });
@@ -79,22 +70,14 @@ if (mode === "hang" || mode === "startup-hang") {
     writeEvent({ type: "tool_execution_end", toolCallId: `tool-${index}`, toolName: "read", result: {}, isError: false });
   }
   setInterval(() => {}, 1_000);
-} else if (mode === "transient") {
-  const attemptFile = process.env.FAKE_PI_ATTEMPT_FILE;
-  if (!attemptFile) throw new Error("transient mode requires FAKE_PI_ATTEMPT_FILE");
-  let attempt = 0;
-  try {
-    attempt = Number(await readFile(attemptFile, "utf8"));
-  } catch {
-    // First attempt.
-  }
-  await writeFile(attemptFile, String(attempt + 1));
-  if (attempt === 0) {
-    process.stderr.write("transient startup failure\n");
-    process.exitCode = 7;
-  } else {
-    await writeSuccess(false);
-  }
+} else if (mode === "stream-budget") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({
+    type: "message_update",
+    usage: { totalTokens: 1_000, cost: { total: 2 } },
+    assistantMessageEvent: { type: "text_delta", delta: "streaming" },
+  });
+  setInterval(() => {}, 1_000);
 } else {
   await writeSuccess(true);
 }
