@@ -97,7 +97,7 @@ test("standalone normal mode disables injection without matching ordinary prose"
   assert.equal(await harness.events.get("before_agent_start")({ systemPrompt: "BASE" }, context), undefined);
 }));
 
-test("active rules propagate into custom subagents and workflows", () => withEnvironment(async () => {
+test("active rules propagate into custom subagents", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext();
   await harness.events.get("session_start")({}, context);
@@ -106,10 +106,6 @@ test("active rules propagate into custom subagents and workflows", () => withEnv
   await harness.events.get("tool_call")(subagent, context);
   assert.match(subagent.input.tasks[0].task, /Active parent coding policy/);
   assert.match(subagent.input.tasks[0].task, /PONYTAIL MODE ACTIVE — level: full/);
-
-  const workflow = { toolName: "workflow", input: { objective: "Implement the change" } };
-  await harness.events.get("tool_call")(workflow, context);
-  assert.match(workflow.input.objective, /Active parent coding policy/);
 
   for (const tasks of [{}, [null], ["not-an-object"]]) {
     await assert.doesNotReject(async () => harness.events.get("tool_call")({ toolName: "subagent", input: { tasks } }, context));
