@@ -14,7 +14,11 @@
       "./extensions/ui.ts",
       "./extensions/tools.ts",
       "./extensions/web.ts",
-      "./extensions/ask.ts"
+      "./extensions/ask.ts",
+      "./extensions/subagents.ts"
+    ],
+    "prompts": [
+      "./prompts"
     ],
     "themes": [
       "./themes/neutral.json"
