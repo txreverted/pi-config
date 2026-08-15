@@ -6,14 +6,23 @@
   "keywords": [
     "pi-package"
   ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
+  },
   "pi": {
     "extensions": [
       "./extensions/ui.ts",
-      "./extensions/tools.ts"
+      "./extensions/tools.ts",
+      "./extensions/web.ts"
     ],
     "themes": [
       "./themes/neutral.json"
     ]
+  },
+  "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.16.11",
+    "turndown": "7.2.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
