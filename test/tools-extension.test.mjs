@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 process.env.PI_OFFLINE = "1";
 const {
@@ -60,6 +63,30 @@ test("jq adapter executes shell-free input and enforces exclusive input modes", 
     () => jq.execute("jq-test", { filter: ".", input: "{}", files: ["package.json"] }, undefined, undefined, { cwd: process.cwd() }),
     /either input or files/,
   );
+});
+
+test("find returns records when NUL-delimited output exceeds its display cap", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-find-extension-test-"));
+  const pi = fakePi();
+  await toolsExtension(pi);
+  try {
+    await Promise.all(Array.from({ length: 300 }, (_, index) =>
+      writeFile(join(root, `${String(index).padStart(3, "0")}-${"x".repeat(190)}.txt`), "")));
+    const result = await pi.tools.get("find").execute(
+      "find-test",
+      { pattern: "*", path: root, limit: 250 },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.doesNotMatch(result.content[0].text, /No files found/);
+    assert.match(result.content[0].text, /000-x+\.txt/);
+    assert.equal(result.details?.truncation?.truncated, true);
+    assert.equal(result.details?.resultLimitReached, 250);
+  } finally {
+    await pi.handlers.get("session_shutdown")();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("find record parsing preserves legal whitespace and escapes embedded newlines", () => {

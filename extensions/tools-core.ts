@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_PROCESS_TIMEOUT_MS = 2 * 60_000;
+export const DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const STDERR_MAX_BYTES = 16 * 1024;
 const CAPTURE_PADDING_BYTES = 4;
 const KILL_GRACE_MS = 2_000;
@@ -35,6 +36,7 @@ export interface BoundedProcessOptions {
   timeoutMs?: number;
   tempPrefix?: string;
   maxOutputBytes?: number;
+  outputDelimiter?: "newline" | "nul";
 }
 
 export type ManagedSearchTool = "fd" | "rg";
@@ -121,29 +123,53 @@ function appendTail(current: Buffer, chunk: Buffer, maxBytes: number): Buffer {
   return Buffer.concat([current.subarray(current.length - keep), chunk]);
 }
 
-function totalLines(totalBytes: number, newlineCount: number, endsWithNewline: boolean): number {
-  return newlineCount + (totalBytes > 0 && !endsWithNewline ? 1 : 0);
+function totalRecords(totalBytes: number, delimiterCount: number, endsWithDelimiter: boolean): number {
+  return delimiterCount + (totalBytes > 0 && !endsWithDelimiter ? 1 : 0);
 }
 
 function actualTruncation(
-  sample: string,
+  sample: Buffer,
   totalBytes: number,
-  lines: number,
+  records: number,
+  delimiter: "newline" | "nul",
 ): TruncationResult {
-  const base = truncateHead(sample, {
+  if (delimiter === "newline") {
+    const base = truncateHead(sample.toString("utf8"), {
+      maxLines: DEFAULT_MAX_LINES,
+      maxBytes: DEFAULT_MAX_BYTES,
+    });
+    const truncated = totalBytes > DEFAULT_MAX_BYTES || records > DEFAULT_MAX_LINES;
+    return {
+      ...base,
+      truncated,
+      truncatedBy: base.truncatedBy ??
+        (records > DEFAULT_MAX_LINES ? "lines" : totalBytes > DEFAULT_MAX_BYTES ? "bytes" : null),
+      totalBytes,
+      totalLines: records,
+    };
+  }
+
+  let outputBytes = 0;
+  let outputLines = 0;
+  for (let index = 0; index < sample.length && index < DEFAULT_MAX_BYTES; index++) {
+    if (sample[index] !== 0) continue;
+    outputBytes = index + 1;
+    outputLines++;
+    if (outputLines === DEFAULT_MAX_LINES) break;
+  }
+  const truncated = totalBytes > outputBytes;
+  return {
+    content: sample.subarray(0, outputBytes).toString("utf8"),
+    truncated,
+    truncatedBy: !truncated ? null : outputLines === DEFAULT_MAX_LINES ? "lines" : "bytes",
+    totalBytes,
+    totalLines: records,
+    outputBytes,
+    outputLines,
+    lastLinePartial: false,
+    firstLineExceedsLimit: records > 0 && outputLines === 0,
     maxLines: DEFAULT_MAX_LINES,
     maxBytes: DEFAULT_MAX_BYTES,
-  });
-  const truncated = totalBytes > DEFAULT_MAX_BYTES || lines > DEFAULT_MAX_LINES;
-  const truncatedBy = base.truncatedBy ??
-    (lines > DEFAULT_MAX_LINES ? "lines" : totalBytes > DEFAULT_MAX_BYTES ? "bytes" : null);
-
-  return {
-    ...base,
-    truncated,
-    truncatedBy,
-    totalBytes,
-    totalLines: lines,
   };
 }
 
@@ -162,10 +188,13 @@ export async function runBoundedProcess(
   const outputStream = createWriteStream(fullOutputPath, { flags: "wx", mode: 0o600 });
   const captureLimit = DEFAULT_MAX_BYTES + CAPTURE_PADDING_BYTES;
   const captured: Buffer[] = [];
+  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES;
+  const delimiter = options.outputDelimiter ?? "newline";
+  const delimiterByte = delimiter === "nul" ? 0x00 : 0x0a;
   let capturedBytes = 0;
   let stdoutBytes = 0;
-  let newlineCount = 0;
-  let endsWithNewline = false;
+  let delimiterCount = 0;
+  let endsWithDelimiter = false;
   let stderr: Buffer = Buffer.alloc(0);
   let stderrBytes = 0;
   let streamError: Error | undefined;
@@ -196,15 +225,13 @@ export async function runBoundedProcess(
   child.stdout.on("data", (chunk: Buffer) => {
     if (stopReason === "output_limit") return;
 
-    const remaining = options.maxOutputBytes === undefined
-      ? chunk.length
-      : Math.max(0, options.maxOutputBytes - stdoutBytes);
+    const remaining = Math.max(0, maxOutputBytes - stdoutBytes);
     const portion = chunk.subarray(0, Math.min(chunk.length, remaining));
     stdoutBytes += portion.length;
     for (const byte of portion) {
-      if (byte === 0x0a) newlineCount++;
+      if (byte === delimiterByte) delimiterCount++;
     }
-    if (portion.length > 0) endsWithNewline = portion[portion.length - 1] === 0x0a;
+    if (portion.length > 0) endsWithDelimiter = portion[portion.length - 1] === delimiterByte;
 
     if (capturedBytes < captureLimit) {
       const capturedPortion = portion.subarray(0, captureLimit - capturedBytes);
@@ -216,10 +243,7 @@ export async function runBoundedProcess(
       child.stdout.pause();
       outputStream.once("drain", () => child.stdout.resume());
     }
-    if (
-      portion.length < chunk.length ||
-      (options.maxOutputBytes !== undefined && stdoutBytes >= options.maxOutputBytes)
-    ) requestStop("output_limit");
+    if (portion.length < chunk.length) requestStop("output_limit");
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
@@ -276,9 +300,9 @@ export async function runBoundedProcess(
     throw new Error(`Failed to capture ${command} output: ${streamError.message}`);
   }
 
-  const lines = totalLines(stdoutBytes, newlineCount, endsWithNewline);
-  const sample = Buffer.concat(captured, capturedBytes).toString("utf8");
-  const truncation = actualTruncation(sample, stdoutBytes, lines);
+  const records = totalRecords(stdoutBytes, delimiterCount, endsWithDelimiter);
+  const sample = Buffer.concat(captured, capturedBytes);
+  const truncation = actualTruncation(sample, stdoutBytes, records, delimiter);
   const stderrText = stderr.toString("utf8");
   const stderrNotice = stderrBytes > stderr.length
     ? `[stderr truncated: showing last ${stderr.length} of ${stderrBytes} bytes]\n${stderrText}`
@@ -291,6 +315,6 @@ export async function runBoundedProcess(
     stderr: stderrNotice,
     code: code ?? 1,
     ...(truncation.truncated ? { truncation, fullOutputPath } : {}),
-    ...(stopReason === "output_limit" ? { outputLimitReached: options.maxOutputBytes } : {}),
+    ...(stopReason === "output_limit" ? { outputLimitReached: maxOutputBytes } : {}),
   };
 }

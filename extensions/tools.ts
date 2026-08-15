@@ -175,7 +175,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "jq",
     label: "jq",
-    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes. Output is streamed with bounded memory and truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; complete truncated stdout is saved to a mode-0600 temporary file.`,
+    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes and ${formatSize(SEARCH_OUTPUT_HARD_LIMIT_BYTES)} of stdout. Output is streamed with bounded memory and truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; captured truncated stdout is saved to a mode-0600 temporary file.`,
     promptSnippet: "Query and transform JSON with jq filters",
     promptGuidelines: ["Use jq for structured JSON queries and transformations instead of parsing JSON with shell text tools."],
     parameters: jqSchema,
@@ -205,7 +205,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
         input: params.input,
         tempPrefix: "pi-jq",
       });
-      if (result.code !== 0) {
+      if (result.code !== 0 && !result.outputLimitReached) {
         if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
         throw processError("jq", result);
       }
@@ -260,6 +260,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
         signal,
         tempPrefix: "pi-find",
         maxOutputBytes: SEARCH_OUTPUT_HARD_LIMIT_BYTES,
+        outputDelimiter: "nul",
       });
       if (result.code !== 0 && !result.outputLimitReached) {
         if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
@@ -274,12 +275,13 @@ export default function toolsExtension(pi: ExtensionAPI) {
         .sort((a, b) => a.localeCompare(b));
 
       if (matches.length === 0) {
+        if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
         return { content: [{ type: "text", text: "No files found matching pattern" }], details: undefined };
       }
 
       const details: FindToolDetails = {};
       const notices: string[] = [];
-      if (matches.length > limit) {
+      if (matches.length > limit || (result.truncation?.totalLines ?? 0) > limit) {
         details.resultLimitReached = limit;
         notices.push(`${limit} results limit reached; refine pattern or increase limit`);
       }
