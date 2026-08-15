@@ -370,6 +370,11 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     };
 
     const processLine = (line: string) => {
+      if (line.length > MAX_JSON_LINE_CHARS) {
+        protocolError = `Child JSON event exceeded ${MAX_JSON_LINE_CHARS} characters`;
+        requestStop("protocol");
+        return;
+      }
       const previousOutput = state.output;
       const consumed = consumeProtocolLine(line, state);
       if (!consumed && line.trim() && !protocolError) protocolError = "Child emitted malformed JSON output";
@@ -438,6 +443,9 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   } else if (spawnError) {
     status = "failed";
     error = `Failed to start subagent: ${spawnError}`;
+  } else if (protocolError) {
+    status = "failed";
+    error = protocolError;
   } else if (exitCode !== 0) {
     status = "failed";
     error = `Subagent exited with code ${exitCode ?? "unknown"}`;

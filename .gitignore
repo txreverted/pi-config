@@ -4,8 +4,17 @@
 !.env.example
 auth.json
 credentials.json
+settings.json
+models.json
+trust.json
 *.pem
 *.key
+
+# Pi-local state and session transcripts
+.pi/
+.agents/
+sessions/
+*.jsonl
 
 # Dependencies and generated output
 node_modules/

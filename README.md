@@ -7,26 +7,26 @@ Private, version-controlled custom configuration for [pi](https://github.com/ear
 The `ui.ts` extension replaces the startup chrome and footer with one compact, sticky line directly above the editor:
 
 ```text
-π v0.84.2 > ~/Documents/pi-config(main) > gpt-5.6-sol (xhigh) > 0.0%/272k (auto) > $0.000 (sub)
+π v0.84.2 > ~/Documents/pi-config(main) · review > gpt-5.6-sol (xhigh) > 23.2%/272k > $9.077 (sub) > 27s
 ────────────────────────────────────────────────────────────────────────
 
 ────────────────────────────────────────────────────────────────────────
 ```
 
-The line shows the working directory and git branch, model and thinking level, context usage, cost, and subscription status. It stays docked to the editor while messages, working indicators, tool calls, and diffs render above it. Extensions and context files remain fully loaded but are not listed in the UI.
+The line shows the working directory, git branch and optional session name, model and thinking level, context usage, cost, and subscription status. While Pi is responding, it also appends a live elapsed timer that resets for each response and disappears when Pi settles. On narrow terminals it progressively removes optional left-side detail before sacrificing the cost or timer. It stays docked to the editor while messages, working indicators, tool calls, and diffs render above it. Extensions and context files remain fully loaded but are not listed in the UI.
 
-The `neutral` theme keeps the UI mostly monochrome with white and gray tones, while retaining green and red for added and removed diff lines. Thinking-level borders brighten progressively from dark gray for `off` through near-white for `max`.
+The `neutral` theme remains mostly monochrome, with subtle green, red, and amber reserved for success, error, warning, and diff semantics. Thinking-level borders brighten progressively from dark gray for `off` through near-white for `max`.
 
 ## Custom tools
 
-`tools.ts` registers dedicated `jq`, `find`, and `rg` tools. They use the canonical tool names, so Pi selects them over same-named built-ins (notably `find`). Each tool supports cancellation and truncates large output to 2000 lines or 50KB, saving complete truncated output to a temporary file.
+`tools.ts` registers a dedicated `jq` tool. It uses shell-free argument passing, a two-minute timeout, process-group cancellation with a kill fallback, bounded in-memory output, and a private streamed temporary file for complete truncated stdout. Retained output is removed when the session shuts down. Pi's maintained built-in `find` and `grep` tools handle file discovery and content search; this package no longer overrides them.
 
 ## Web access
 
 `web.ts` adds two keyless tools:
 
 - `web_search` searches through Exa's zero-config MCP service, falls back to DuckDuckGo's keyless HTML endpoint, and returns titles, URLs, and snippets.
-- `web_fetch` reads public HTTP(S) pages directly, converts readable HTML to Markdown, and falls back to the keyless Jina Reader for blocked, JavaScript-heavy, PDF, or unsupported pages.
+- `web_fetch` reads public HTTP(S) pages directly, converts readable HTML to Markdown, and falls back to the keyless Jina Reader when direct retrieval fails, is unsupported, or extracts no readable content. Short but readable direct pages are returned without disclosure to Jina.
 
 The extension has no credential configuration and cannot use local files, browser cookies, authenticated pages, or private-network addresses. DNS results are validated and the direct connection is pinned to a validated public address across each redirect. Responses, redirects, time, and output size are bounded. Search queries are disclosed to Exa or the DuckDuckGo fallback; URLs handled by the reader fallback are disclosed to Jina.
 
@@ -38,22 +38,13 @@ Web content is always marked and prompted as untrusted. Instructions embedded in
 
 The tool uses Pi's native selection and editor dialogs in TUI and RPC clients. It is removed from the active tool set in non-interactive print and JSON modes.
 
-## Internal subagents and workflows
+## Internal subagents
 
-`subagents.ts` adds a small, auditable foreground runtime with no third-party orchestration dependency:
+`subagents.ts` adds a small, auditable foreground runtime with no third-party orchestration dependency. The `subagent` tool runs one fixed-role child Pi process or a bounded parallel read-only batch.
 
-- `subagent` runs one fixed-role child Pi process or a bounded parallel read-only batch.
-- `workflow` runs one of three static workflows: `review`, `implement-review`, or `research`.
+Children are ephemeral separate processes with strict role-specific tools, ambient extensions and trusted project config resources disabled, bounded output/time/concurrency, process-group cancellation, and aggregate usage reporting. Coding roles receive normal repository context files plus fixed non-mutating `git_status` and `git_diff` tools. The public-web researcher has no local read capability. The only writer is `worker`; project agent discovery, dynamic scripts, nesting, background jobs, external runners, MCP imports, and session sharing are intentionally unsupported.
 
-Children are ephemeral separate processes with strict role-specific tools, ambient extensions and trusted project config resources disabled, bounded output/time/concurrency, process-group cancellation, and aggregate usage reporting. Coding roles still receive normal repository context files such as `AGENTS.md`. The only writer is `worker`; project agent discovery, dynamic scripts, nesting, background jobs, external runners, MCP imports, and session sharing are intentionally unsupported.
-
-Use `/review`, `/implement-review`, or `/research` for the corresponding native prompt templates. See [`docs/subagents.md`](docs/subagents.md) for roles, workflow graphs, security boundaries, and testing.
-
-## Compaction-safe directives
-
-`directives.ts` augments Pi's native Enter/Alt+Enter steering and follow-up queues. It records queued text in hidden session entries, observes the actual delivered message after template expansion, and reintroduces an active directive only when compaction-aware model context no longer contains it. Directives remain active through retries, compaction, and queued continuations, then retire at `agent_settled`.
-
-The extension does not replace or replay Pi's native queue. `/directives` shows its active ledger; `/directives-clear` stops reinforcement without removing native undelivered messages. See [`docs/directives.md`](docs/directives.md).
+The static workflow implementation and prompt templates remain in source for repair, but are not loaded by the package and no `workflow` tool is exposed. See [`docs/subagents.md`](docs/subagents.md) for roles, security boundaries, dormant workflow graphs, and testing.
 
 ## Sources
 
@@ -67,11 +58,11 @@ The extensions and workflows in this repository were informed by these Pi resour
 
 ## Install
 
-Install the pinned HTML extraction dependencies, then load this repository as a local user-scoped pi package:
+The package is tested against Pi 0.84.2 and requires Node 22.19 or newer plus `jq` on `PATH`. Install the pinned HTML extraction dependencies, then load this repository as a local user-scoped pi package:
 
 ```bash
 cd ~/Documents/pi-config
-npm ci --ignore-scripts --legacy-peer-deps
+npm ci --ignore-scripts --omit=dev --legacy-peer-deps
 pi install ~/Documents/pi-config
 ```
 
@@ -80,27 +71,31 @@ Set `quietStartup` to `true` and `theme` to `neutral` in `~/.pi/agent/settings.j
 ## Structure
 
 - `extensions/ui.ts` — minimal header and footer UI
-- `extensions/tools.ts` — `jq`, `find`, and `rg` tools
+- `extensions/tools.ts` — bounded `jq` tool
+- `extensions/tools-core.ts` — streamed subprocess capture, timeout, and cancellation
 - `extensions/web.ts` — minimal `web_search` and `web_fetch` Pi tools
 - `extensions/web-core.ts` — keyless providers, extraction, limits, and SSRF protections
 - `extensions/ask.ts` — interactive `ask_user_question` tool
 - `extensions/ask-core.ts` — questionnaire validation and answer formatting
-- `extensions/subagents.ts` — `subagent` and static `workflow` tools
+- `extensions/subagents.ts` — stable `subagent` tool
 - `extensions/subagents-core.ts` — isolated child runner, protocol parsing, limits, and usage
-- `extensions/workflows-core.ts` — deterministic workflow validation and execution
-- `extensions/directives.ts` — compaction-safe steering/follow-up lifecycle hooks
-- `extensions/directives-core.ts` — directive ledger, matching, and bounded reinjection
+- `extensions/subagent-tools.ts` — fixed read-only Git tools for coding children
+- `extensions/workflows.ts` — dormant, explicitly loadable workflow adapter
+- `extensions/workflows-core.ts` — dormant deterministic workflow validation and execution
 - `subagents/` — fixed role registry and internal prompts
-- `prompts/` — native `/review`, `/implement-review`, and `/research` templates
+- `prompts/` — dormant workflow templates retained but not loaded
 - `docs/subagents.md` — architecture, trust boundaries, and usage
-- `docs/directives.md` — queue augmentation behavior and limitations
 - `test/web-core.test.mjs` — parser, extraction, and URL-safety tests
 - `test/ask-core.test.mjs` — questionnaire validation and formatting tests
 - `test/subagents-*.test.mjs` — child runner and security tests
-- `test/workflows-core.test.mjs` — workflow validation and execution tests
-- `test/directives-core.test.mjs` — ledger, compaction, and reinjection tests
+- `test/workflows-core.test.mjs` — dormant workflow validation and execution tests
+- `test/tools-core.test.mjs` — bounded subprocess, timeout, and cancellation tests
+- `test/ui-core.test.mjs` — compact UI formatting and adaptive-layout tests
+- `test/config.test.mjs` — stable resource manifest and privacy-ignore tests
 - `themes/neutral.json` — monochrome UI theme with a gray-to-white thinking-level ramp
 - `AGENTS.md` — project instructions loaded by pi
-- `package.json` — pi package manifest
+- `package.json` — pi package manifest and deterministic development checks
 
-> Keep credentials out of Git. Authentication files, environment files, sessions, and local dependencies are ignored. This web extension does not read or store credentials.
+For development, install dev dependencies with `npm ci --ignore-scripts`, then run `npm run check` for strict TypeScript checking, unit tests, and a real Pi extension-loading smoke test.
+
+> Keep credentials out of Git. Authentication files, environment files, Pi-local settings, sessions, and local dependencies are ignored. This web extension does not read or store credentials.

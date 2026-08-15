@@ -6,6 +6,7 @@ import {
   parseDuckDuckGoHtml,
   parseExaSearchText,
   resolvePublicUrl,
+  shouldUseReaderFallback,
   UnsafeUrlError,
 } from "../extensions/web-core.ts";
 
@@ -102,6 +103,19 @@ test("DuckDuckGo HTML results and redirect URLs are parsed", () => {
   assert.deepEqual(parseDuckDuckGoHtml(html).results, [
     { title: "Example docs", url: "https://example.com/docs", snippet: "A useful result." },
   ]);
+});
+
+test("reader fallback does not disclose short but readable direct pages", () => {
+  const page = {
+    url: "https://example.com/",
+    title: "Short page",
+    content: "Brief but useful.",
+    contentType: "text/plain",
+    status: 200,
+    source: "direct",
+  };
+  assert.equal(shouldUseReaderFallback(page), false);
+  assert.equal(shouldUseReaderFallback({ ...page, content: "  \n" }), true);
 });
 
 test("HTML extraction keeps article content and links but removes active content", () => {

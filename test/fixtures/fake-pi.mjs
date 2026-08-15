@@ -13,6 +13,7 @@ if (mode === "hang") {
 } else if (mode === "malformed") {
   process.stdout.write("not json\n");
 } else {
+  if (mode === "mixed") process.stdout.write("not json\n");
   const event = JSON.stringify({
     type: "message_end",
     message: {
