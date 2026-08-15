@@ -1,9 +1,9 @@
 ---
-description: Start one background writer followed by two fresh read-only reviews
+description: Start scout, one writer, two fresh reviews, and synthesis
 argument-hint: "<implementation objective>"
 ---
-Run the `implement-review` workflow with `allowWrite: true` for this explicitly authorized implementation objective:
+Call `workflow` with `name: "implement-review"`, `background: true`, `allowWrite: true`, and this authorized objective:
 
 $ARGUMENTS
 
-The background workflow may modify the current checkout. Use exactly one writer, preserve unrelated user changes, and report deterministic verification plus any confirmed review findings when it delivers.
+It may change this checkout. Use one writer. Keep unrelated user changes. Run deterministic checks. Report changed files, checks, and confirmed review findings.

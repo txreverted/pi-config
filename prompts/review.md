@@ -1,9 +1,9 @@
 ---
-description: Start the background read-only scout/reviewer/synthesis workflow
+description: Start scout, two read-only reviews, and synthesis
 argument-hint: "[review objective]"
 ---
-Run the `review` workflow with this objective:
+Call `workflow` with `name: "review"`, `background: true`, and this objective:
 
-${ARGUMENTS:-Review the current working tree for correctness, regressions, security issues, and meaningful missing tests.}
+${ARGUMENTS:-Review the current working tree for bugs, regressions, security issues, and important missing tests.}
 
-Let the workflow run in the background. Treat its delivered findings as evidence and verify consequential claims before presenting the final answer.
+Treat output as evidence. Verify important claims before final answer.
