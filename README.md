@@ -55,6 +55,16 @@ Use `/review`, `/implement-review`, or `/research` for the corresponding native 
 
 The extension does not replace or replay Pi's native queue. `/directives` shows its active ledger; `/directives-clear` stops reinforcement without removing native undelivered messages. See [`docs/directives.md`](docs/directives.md).
 
+## Sources
+
+The extensions and workflows in this repository were informed by these Pi resources and packages:
+
+- [Official Pi documentation](https://pi.dev/docs/latest)
+- [`@juicesharp/rpiv-ask-user-question`](https://pi.dev/packages/@juicesharp/rpiv-ask-user-question?name=ask)
+- [`pi-subagents`](https://pi.dev/packages/pi-subagents)
+- [`@quintinshaw/pi-dynamic-workflows`](https://pi.dev/packages/@quintinshaw/pi-dynamic-workflows)
+- [`pi-web-access`](https://pi.dev/packages/pi-web-access)
+
 ## Install
 
 Install the pinned HTML extraction dependencies, then load this repository as a local user-scoped pi package:
