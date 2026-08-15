@@ -1,20 +1,17 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 const mode = process.env.FAKE_PI_MODE ?? "success";
 const args = process.argv.slice(2);
 const taskArgument = args.find((arg) => arg.startsWith("@"));
 const task = taskArgument ? await readFile(taskArgument.slice(1), "utf8") : "";
+const delayMs = Number(process.env.FAKE_PI_DELAY_MS ?? 5);
 
-if (mode === "hang") {
-  setInterval(() => {}, 1_000);
-} else if (mode === "fail") {
-  process.stderr.write("fake failure\n");
-  process.exitCode = 7;
-} else if (mode === "malformed") {
-  process.stdout.write("not json\n");
-} else {
-  if (mode === "mixed") process.stdout.write("not json\n");
-  const event = JSON.stringify({
+function writeEvent(event) {
+  process.stdout.write(`${JSON.stringify(event)}\n`);
+}
+
+function finalEvent() {
+  return {
     type: "message_end",
     message: {
       role: "assistant",
@@ -31,8 +28,69 @@ if (mode === "hang") {
         cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0.002, total: 0.033 },
       },
     },
-  }) + "\n";
+  };
+}
+
+async function writeSuccess(chunked = true) {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "agent_start" });
+  if (!chunked) {
+    writeEvent(finalEvent());
+    return;
+  }
+  const event = `${JSON.stringify(finalEvent())}\n`;
   const split = Math.floor(event.length / 2);
   process.stdout.write(event.slice(0, split));
-  setTimeout(() => process.stdout.write(event.slice(split)), 5);
+  setTimeout(() => process.stdout.write(event.slice(split)), delayMs);
+}
+
+if (mode === "hang" || mode === "startup-hang") {
+  setInterval(() => {}, 1_000);
+} else if (mode === "quiet") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  setInterval(() => {}, 1_000);
+} else if (mode === "fail") {
+  process.stderr.write("fake failure\n");
+  process.exitCode = 7;
+} else if (mode === "malformed") {
+  process.stdout.write("not json\n");
+} else if (mode === "mixed") {
+  process.stdout.write("not json\n");
+  await writeSuccess(false);
+} else if (mode === "delayed-start") {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  await writeSuccess(false);
+} else if (mode === "tool") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "agent_start" });
+  writeEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "fixture" } });
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  writeEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "read", result: {}, isError: false });
+  writeEvent(finalEvent());
+} else if (mode === "tool-loop") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "agent_start" });
+  for (let index = 0; index < 10; index++) {
+    writeEvent({ type: "tool_execution_start", toolCallId: `tool-${index}`, toolName: "read", args: { path: "fixture" } });
+    writeEvent({ type: "tool_execution_end", toolCallId: `tool-${index}`, toolName: "read", result: {}, isError: false });
+  }
+  setInterval(() => {}, 1_000);
+} else if (mode === "transient") {
+  const attemptFile = process.env.FAKE_PI_ATTEMPT_FILE;
+  if (!attemptFile) throw new Error("transient mode requires FAKE_PI_ATTEMPT_FILE");
+  let attempt = 0;
+  try {
+    attempt = Number(await readFile(attemptFile, "utf8"));
+  } catch {
+    // First attempt.
+  }
+  await writeFile(attemptFile, String(attempt + 1));
+  if (attempt === 0) {
+    process.stderr.write("transient startup failure\n");
+    process.exitCode = 7;
+  } else {
+    await writeSuccess(false);
+  }
+} else {
+  await writeSuccess(true);
 }

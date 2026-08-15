@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { relative, resolve, sep } from "node:path";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export function formatCwd(cwd: string): string {
   const home = resolve(homedir());
@@ -34,10 +35,11 @@ export function formatElapsed(durationMs: number): string {
   return `${hours}h${minutes.toString().padStart(2, "0")}m`;
 }
 
-export function pickStatusCandidate(
-  candidates: readonly string[],
-  width: number,
-  measure: (value: string) => number,
-): string {
-  return candidates.find((candidate) => measure(candidate) <= width) ?? candidates[candidates.length - 1] ?? "";
+export function wrapStatusLine(line: string, width: number): string[] {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const wrapped = wrapTextWithAnsi(line, safeWidth);
+  const lines = wrapped.length > 0 ? wrapped : [""];
+  return lines.map((value) => visibleWidth(value) <= safeWidth
+    ? value
+    : truncateToWidth(value, safeWidth, ""));
 }

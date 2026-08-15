@@ -20,6 +20,17 @@ test("agent registry is fixed, minimal, and non-recursive", () => {
     assert.equal(agent.tools.includes("workflow"), false, agent.name);
     for (const tool of agent.tools) assert.ok(allowedTools.has(tool), `${agent.name}:${tool}`);
     assert.ok((agent.extensions?.length ?? 0) <= 1, agent.name);
+    if (agent.writer) {
+      assert.equal(agent.maxTurns, undefined);
+      assert.equal(agent.maxToolCalls, undefined);
+      assert.equal(agent.maxReportedTokens, undefined);
+      assert.equal(agent.maxCostUsd, undefined);
+    } else {
+      assert.ok(agent.maxTurns > 0, agent.name);
+      assert.ok(agent.maxToolCalls > 0, agent.name);
+      assert.ok(agent.maxReportedTokens > 0, agent.name);
+      assert.ok(agent.maxCostUsd > 0, agent.name);
+    }
   }
 
   const researcher = agents.get("researcher");
@@ -28,6 +39,14 @@ test("agent registry is fixed, minimal, and non-recursive", () => {
   assert.equal(researcher.extensions.length, 1);
   assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
   assert.equal(agents.get("worker").extensions, undefined);
+  assert.deepEqual(Object.fromEntries([...agents].map(([name, agent]) => [name, agent.thinking])), {
+    scout: "low",
+    reviewer: "high",
+    worker: "high",
+    researcher: "low",
+    synthesizer: "high",
+  });
+  assert.equal([...agents.values()].some((agent) => agent.thinking === "xhigh" || agent.thinking === "max"), false);
 
   for (const name of ["scout", "reviewer", "synthesizer"]) {
     const agent = agents.get(name);
@@ -50,4 +69,11 @@ test("all registered workflows are valid and have at most one static writer", ()
   assert.equal(createWorkflowRegistry().get("review").steps.some((step) => step.agent === "worker"), false);
   assert.equal(createWorkflowRegistry().get("research").steps.some((step) => step.agent === "worker"), false);
   assert.equal(createWorkflowRegistry().get("implement-review").steps.filter((step) => step.agent === "worker").length, 1);
+
+  const securitySteps = [...createWorkflowRegistry().values()]
+    .flatMap((workflow) => workflow.steps)
+    .filter((step) => step.id === "security-review");
+  assert.equal(securitySteps.length, 2);
+  assert.ok(securitySteps.every((step) => step.thinking === "high"));
+  assert.equal([...createWorkflowRegistry().values()].flatMap((workflow) => workflow.steps).some((step) => step.thinking === "xhigh" || step.thinking === "max"), false);
 });
