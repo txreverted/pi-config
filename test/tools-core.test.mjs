@@ -34,6 +34,21 @@ test("bounded process streams complete truncated output to a private temporary f
   await assert.rejects(() => stat(result.fullOutputPath));
 });
 
+test("bounded process stops at a hard stdout limit", async () => {
+  const hardLimit = 64 * 1024;
+  const result = await runBoundedProcess(
+    process.execPath,
+    ["-e", "process.stdout.write('x'.repeat(1024 * 1024))"],
+    { cwd: process.cwd(), maxOutputBytes: hardLimit, tempPrefix: "pi-tools-test-hard-limit" },
+  );
+
+  assert.equal(result.outputLimitReached, hardLimit);
+  assert.equal(result.truncation?.totalBytes, hardLimit);
+  assert.ok(result.fullOutputPath);
+  assert.equal((await stat(result.fullOutputPath)).size, hardLimit);
+  await removeBoundedOutput(result.fullOutputPath);
+});
+
 test("bounded process reports executable startup failures", async () => {
   await assert.rejects(
     () => runBoundedProcess("__pi_config_missing_executable__", [], {
@@ -42,9 +57,25 @@ test("bounded process reports executable startup failures", async () => {
     }),
     /Failed to start/,
   );
+  await assert.rejects(
+    () => runBoundedProcess(process.execPath, ["bad\0argument"], {
+      cwd: process.cwd(),
+      tempPrefix: "pi-tools-test-nul",
+    }),
+    /NUL bytes/,
+  );
 });
 
 test("bounded process enforces timeouts and cancellation", async () => {
+  const immediateController = new AbortController();
+  const immediate = runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    cwd: process.cwd(),
+    signal: immediateController.signal,
+    tempPrefix: "pi-tools-test-immediate-abort",
+  });
+  immediateController.abort();
+  await assert.rejects(() => immediate, /aborted/);
+
   await assert.rejects(
     () => runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
       cwd: process.cwd(),

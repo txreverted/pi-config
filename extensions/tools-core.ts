@@ -1,12 +1,15 @@
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { constants, createWriteStream } from "node:fs";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import {
+  createFindTool,
+  createGrepTool,
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
+  getAgentDir,
   truncateHead,
   type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
@@ -22,6 +25,7 @@ export interface BoundedProcessResult {
   code: number;
   truncation?: TruncationResult;
   fullOutputPath?: string;
+  outputLimitReached?: number;
 }
 
 export interface BoundedProcessOptions {
@@ -30,6 +34,70 @@ export interface BoundedProcessOptions {
   input?: string;
   timeoutMs?: number;
   tempPrefix?: string;
+  maxOutputBytes?: number;
+}
+
+export type ManagedSearchTool = "fd" | "rg";
+
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSearchExecutable(tool: ManagedSearchTool): Promise<string | undefined> {
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const managedPath = join(getAgentDir(), "bin", `${tool}${suffix}`);
+  if (await isExecutable(managedPath)) return managedPath;
+
+  const names = tool === "fd" ? ["fd", "fdfind"] : ["rg"];
+  const extensions = process.platform === "win32"
+    ? (process.env.PATHEXT ?? ".EXE;.COM").split(";").filter((extension) => [".EXE", ".COM"].includes(extension.toUpperCase()))
+    : [""];
+  for (const directory of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const name of names) {
+      for (const extension of extensions) {
+        const candidate = join(directory, process.platform === "win32" ? `${name}${extension}` : name);
+        if (await isExecutable(candidate)) return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Use Pi's maintained downloader to install fd/rg, then return the resolved executable. */
+export async function ensureSearchExecutable(
+  tool: ManagedSearchTool,
+  signal?: AbortSignal,
+): Promise<string> {
+  const existing = await resolveSearchExecutable(tool);
+  if (existing) return existing;
+
+  const probeDirectory = await mkdtemp(join(tmpdir(), `pi-${tool}-install-`));
+  try {
+    if (tool === "rg") {
+      await createGrepTool(probeDirectory).execute(
+        "install-rg",
+        { pattern: "__pi_config_install_probe_no_match__", path: ".", literal: true },
+        signal,
+      );
+    } else {
+      await createFindTool(probeDirectory).execute(
+        "install-fd",
+        { pattern: "__pi_config_install_probe_no_match__", path: ".", limit: 1 },
+        signal,
+      );
+    }
+  } finally {
+    await rm(probeDirectory, { recursive: true, force: true });
+  }
+
+  const installed = await resolveSearchExecutable(tool);
+  if (!installed) throw new Error(`${tool} is not installed and Pi could not install it`);
+  return installed;
 }
 
 export async function removeBoundedOutput(fullOutputPath: string): Promise<void> {
@@ -85,6 +153,9 @@ export async function runBoundedProcess(
   options: BoundedProcessOptions,
 ): Promise<BoundedProcessResult> {
   if (options.signal?.aborted) throw new Error("Operation aborted");
+  if ([command, options.cwd, ...args].some((value) => value.includes("\0"))) {
+    throw new Error(`Failed to start ${command}: command paths and arguments cannot contain NUL bytes`);
+  }
 
   const tempDir = await mkdtemp(join(tmpdir(), `${options.tempPrefix ?? `pi-${basename(command)}`}-`));
   const fullOutputPath = join(tempDir, "output.txt");
@@ -99,7 +170,7 @@ export async function runBoundedProcess(
   let stderrBytes = 0;
   let streamError: Error | undefined;
   let spawnError: Error | undefined;
-  let stopReason: "aborted" | "timed_out" | "stream_error" | undefined;
+  let stopReason: "aborted" | "timed_out" | "stream_error" | "output_limit" | undefined;
   let killTimer: NodeJS.Timeout | undefined;
 
   const child = spawn(command, [...args], {
@@ -123,22 +194,32 @@ export async function runBoundedProcess(
   });
 
   child.stdout.on("data", (chunk: Buffer) => {
-    stdoutBytes += chunk.length;
-    for (const byte of chunk) {
+    if (stopReason === "output_limit") return;
+
+    const remaining = options.maxOutputBytes === undefined
+      ? chunk.length
+      : Math.max(0, options.maxOutputBytes - stdoutBytes);
+    const portion = chunk.subarray(0, Math.min(chunk.length, remaining));
+    stdoutBytes += portion.length;
+    for (const byte of portion) {
       if (byte === 0x0a) newlineCount++;
     }
-    if (chunk.length > 0) endsWithNewline = chunk[chunk.length - 1] === 0x0a;
+    if (portion.length > 0) endsWithNewline = portion[portion.length - 1] === 0x0a;
 
     if (capturedBytes < captureLimit) {
-      const portion = chunk.subarray(0, captureLimit - capturedBytes);
-      captured.push(portion);
-      capturedBytes += portion.length;
+      const capturedPortion = portion.subarray(0, captureLimit - capturedBytes);
+      captured.push(capturedPortion);
+      capturedBytes += capturedPortion.length;
     }
 
-    if (!outputStream.write(chunk)) {
+    if (portion.length > 0 && !outputStream.write(portion)) {
       child.stdout.pause();
       outputStream.once("drain", () => child.stdout.resume());
     }
+    if (
+      portion.length < chunk.length ||
+      (options.maxOutputBytes !== undefined && stdoutBytes >= options.maxOutputBytes)
+    ) requestStop("output_limit");
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
@@ -151,6 +232,7 @@ export async function runBoundedProcess(
 
   const onAbort = () => requestStop("aborted");
   options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) onAbort();
   const timeoutMs = Math.max(1, options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS);
   const timeout = setTimeout(() => requestStop("timed_out"), timeoutMs);
   timeout.unref?.();
@@ -209,5 +291,6 @@ export async function runBoundedProcess(
     stderr: stderrNotice,
     code: code ?? 1,
     ...(truncation.truncated ? { truncation, fullOutputPath } : {}),
+    ...(stopReason === "output_limit" ? { outputLimitReached: options.maxOutputBytes } : {}),
   };
 }
