@@ -150,6 +150,16 @@ test("child runner handles malformed output, timeouts, and cancellation", async 
     assert.equal(malformed.status, "failed");
     assert.match(malformed.error, /malformed JSON/);
 
+    const mixed = await runChildAgent({
+      definition,
+      task: { id: "mixed", agent: "scout", task: "Mixed protocol", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "mixed" },
+    });
+    assert.equal(mixed.status, "failed");
+    assert.equal(mixed.output, "fixture completed");
+    assert.match(mixed.error, /malformed JSON/);
+
     const timedOut = await runChildAgent({
       definition,
       task: { id: "slow", agent: "scout", task: "Wait", cwd },

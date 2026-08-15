@@ -103,7 +103,7 @@ export default function webExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_fetch",
     label: "web fetch",
-    description: "Fetch a public HTTP(S) URL without credentials. Reads ordinary HTML, Markdown, text, JSON, and XML directly; in auto mode it falls back to the keyless Jina Reader for blocked, JavaScript-heavy, PDF, or otherwise unsupported pages. Local/private addresses, URL credentials, local files, browser cookies, and authenticated requests are blocked. Output is paginated and capped at 40KB per call.",
+    description: "Fetch a public HTTP(S) URL without credentials. Reads ordinary HTML, Markdown, text, JSON, and XML directly; in auto mode it falls back to the keyless Jina Reader only when direct retrieval fails, is unsupported, or extracts no readable content. Short readable pages stay direct. Local/private addresses, URL credentials, local files, browser cookies, and authenticated requests are blocked. Output is paginated and capped at 40KB per call.",
     promptSnippet: "Fetch readable content from a public webpage without an API key",
     promptGuidelines: [
       "Use web_fetch only for public HTTP(S) URLs; it does not access local files, private networks, browser sessions, or authenticated pages.",

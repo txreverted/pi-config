@@ -18,7 +18,6 @@ const ADDRESS_TIMEOUT_MS = 10_000;
 const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_FETCH_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
-const MIN_USEFUL_MARKDOWN_CHARS = 400;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 const gunzipAsync = promisify(gunzip);
@@ -720,6 +719,10 @@ async function fetchWithReader(target: ResolvedTarget, signal: AbortSignal, look
   return extractReader(response, target.url);
 }
 
+export function shouldUseReaderFallback(page: FetchedPage): boolean {
+  return page.content.trim().length === 0;
+}
+
 export async function fetchWebPage(
   rawUrl: string,
   options: { signal?: AbortSignal; readerMode?: ReaderMode; lookup?: DnsLookup } = {},
@@ -735,7 +738,10 @@ export async function fetchWebPage(
   let directError: unknown;
   try {
     directPage = extractDirect(await fetchHttp(target, signal, lookup));
-    if (readerMode === "never" || directPage.content.length >= MIN_USEFUL_MARKDOWN_CHARS) return directPage;
+    // A short but readable direct response is valid and should not be disclosed
+    // to Jina merely because of its length. Auto fallback is reserved for an
+    // empty extraction or a failed/unsupported direct fetch.
+    if (readerMode === "never" || !shouldUseReaderFallback(directPage)) return directPage;
   } catch (error) {
     if (error instanceof UnsafeUrlError) throw error;
     directError = error;
