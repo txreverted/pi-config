@@ -120,6 +120,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   pi.on("input", (event, ctx) => {
     if (event.source !== "extension" && currentMode !== "off" && isPonytailDeactivationCommand(event.text)) {
       setMode("off", ctx);
+      return { action: "handled" };
     }
   });
 
