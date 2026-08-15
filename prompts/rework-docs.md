@@ -1,40 +1,24 @@
 ---
-description: Audit and simplify all repository documentation
+description: Audit and simplify all repository Markdown
 ---
-Analyze the whole repo first. Understand the current code before touching docs.
+Read the whole repo first. Read code and tests. Code wins.
 
-Then audit every `.md` file.
+Audit every `.md` file.
 
-Goal:
+Before edits, print:
 
-* fewer docs
-* no duplicate docs
-* no stale docs
-* no future / planned implementation
-* code is source of truth
-* merge or delete docs when possible
-* keep only useful docs
-
-Make docs agent-first:
-
-* caveman language
-* short sentences
-* exact paths
-* easy to scan
-* easy to navigate
-* link docs together
-* one clear entry point
-* no repeated info
-
-Before editing, show:
 `file → keep / merge / delete / rewrite`
 
-Then make the changes.
+Then edit.
 
-Final check:
+Rules:
 
-* docs match current code
-* links work
-* paths are correct
-* no stale or speculative content
-* no unnecessary `.md` files
+- Keep one human entry point.
+- Keep runtime Markdown only for a real command, role, or skill.
+- Delete stale, duplicate, planned, and unused text.
+- Merge files when one file can do the job.
+- Use short sentences and exact paths.
+- Link the entry point to source, tests, and runtime Markdown.
+- Do not repeat code details.
+
+Finish by checking links, paths, current behavior, and remaining `.md` files.

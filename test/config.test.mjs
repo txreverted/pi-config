@@ -12,6 +12,7 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
     "./extensions/web.ts",
     "./extensions/ask.ts",
     "./extensions/subagents.ts",
+    "./extensions/concise.ts",
     "./extensions/ponytail.ts",
   ]);
   assert.deepEqual(packageJson.pi.skills, ["./skills"]);
