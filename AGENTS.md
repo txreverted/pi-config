@@ -1,21 +1,24 @@
-# Pi Config — Agent Rules
+# Agent Rules
 
-Read [`README.md`](README.md) first. Then inspect code and tests. Code wins.
+Use [`README.md`](README.md) as the repo map. Then read code and tests. Code wins.
 
 ## Work
 
-- Keep change small. Keep extension focused.
-- Preserve dirty user changes. Never reset or overwrite them.
-- Read installed Pi docs and examples before changing extensions, prompts, themes, or TUI.
-- Do not touch `node_modules/`.
-- Never commit auth, keys, env files, settings, sessions, or transcripts.
-- Run `npm run check` after code or prompt changes.
-- Test UI changes in an interactive TTY.
+- Keep the diff small.
+- Keep dirty user changes.
+- Never reset the checkout.
+- Never edit `node_modules/`.
+- Never commit secrets, auth, settings, sessions, or transcripts.
+- Before Pi extension, prompt, skill, theme, or TUI changes, read the installed Pi docs and examples.
+- After code or prompt changes, run `npm run check`.
+- Test TUI changes in an interactive terminal.
 
-## Docs
+## Markdown
 
-- `README.md` is the one human guide.
-- Do not add another guide unless one file becomes unsafe or hard to use.
-- Write present facts only. No roadmap. No planned behavior. No stale history.
-- Link to source and tests. Do not copy large code details.
-- `prompts/*.md` and `subagents/prompts/*.md` are runtime code. Keep one file per command or role. Change manifest, registry, and tests together when needed.
+- `README.md` is the only human guide.
+- `AGENTS.md` holds agent rules.
+- `prompts/*.md`, `subagents/prompts/*.md`, and `skills/*/SKILL.md` are runtime code.
+- Keep one file per command, role, or skill.
+- Write present facts. No roadmap. No history.
+- Use short sentences and exact paths.
+- Link to source and tests. Do not copy implementation detail.

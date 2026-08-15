@@ -1,44 +1,28 @@
 ---
-description: Audit the codebase and rank concrete improvements
+description: Audit the repo and rank concrete improvements
 ---
-Analyze the whole repo in depth. Understand the system before judging it.
+Read the whole repo. Read code, config, tests, and runtime Markdown. Code wins.
 
-Code is source of truth. Do not trust docs blindly.
+Do not edit.
 
-Review:
+Find concrete problems in:
 
-* architecture
-* code quality
-* simplicity
-* maintainability
-* tests
-* reliability
-* security
-* performance
-* DX
+- architecture
+- simplicity
+- maintenance
+- tests
+- reliability
+- security
+- performance
+- developer use
 
-Find:
+Name exact files and code. Skip generic advice. Call out dead code, duplication, bad abstractions, and removable complexity.
 
-* what is good
-* what is bad
-* dead / duplicate code
-* bad abstractions
-* useless complexity
-* things to remove
-* things to merge
-* things to simplify
-* things to rethink
+Return:
 
-Be critical. No generic advice. Point to exact files / code.
-
-Rate the codebase `/10` and explain why.
-
-Finish with:
-
-1. What is good
-2. What is bad
-3. What should change
-4. What should be removed
-5. Top 5 highest-impact improvements
-
-Do not change code yet.
+1. What works
+2. What fails
+3. What to change
+4. What to delete
+5. Top five changes
+6. Score out of 10, with reasons
