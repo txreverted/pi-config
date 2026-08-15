@@ -38,6 +38,23 @@ Web content is always marked and prompted as untrusted. Instructions embedded in
 
 The tool uses Pi's native selection and editor dialogs in TUI and RPC clients. It is removed from the active tool set in non-interactive print and JSON modes.
 
+## Internal subagents and workflows
+
+`subagents.ts` adds a small, auditable foreground runtime with no third-party orchestration dependency:
+
+- `subagent` runs one fixed-role child Pi process or a bounded parallel read-only batch.
+- `workflow` runs one of three static workflows: `review`, `implement-review`, or `research`.
+
+Children are ephemeral separate processes with strict role-specific tools, ambient extensions and trusted project config resources disabled, bounded output/time/concurrency, process-group cancellation, and aggregate usage reporting. Coding roles still receive normal repository context files such as `AGENTS.md`. The only writer is `worker`; project agent discovery, dynamic scripts, nesting, background jobs, external runners, MCP imports, and session sharing are intentionally unsupported.
+
+Use `/review`, `/implement-review`, or `/research` for the corresponding native prompt templates. See [`docs/subagents.md`](docs/subagents.md) for roles, workflow graphs, security boundaries, and testing.
+
+## Compaction-safe directives
+
+`directives.ts` augments Pi's native Enter/Alt+Enter steering and follow-up queues. It records queued text in hidden session entries, observes the actual delivered message after template expansion, and reintroduces an active directive only when compaction-aware model context no longer contains it. Directives remain active through retries, compaction, and queued continuations, then retire at `agent_settled`.
+
+The extension does not replace or replay Pi's native queue. `/directives` shows its active ledger; `/directives-clear` stops reinforcement without removing native undelivered messages. See [`docs/directives.md`](docs/directives.md).
+
 ## Install
 
 Install the pinned HTML extraction dependencies, then load this repository as a local user-scoped pi package:
@@ -58,8 +75,20 @@ Set `quietStartup` to `true` and `theme` to `neutral` in `~/.pi/agent/settings.j
 - `extensions/web-core.ts` — keyless providers, extraction, limits, and SSRF protections
 - `extensions/ask.ts` — interactive `ask_user_question` tool
 - `extensions/ask-core.ts` — questionnaire validation and answer formatting
+- `extensions/subagents.ts` — `subagent` and static `workflow` tools
+- `extensions/subagents-core.ts` — isolated child runner, protocol parsing, limits, and usage
+- `extensions/workflows-core.ts` — deterministic workflow validation and execution
+- `extensions/directives.ts` — compaction-safe steering/follow-up lifecycle hooks
+- `extensions/directives-core.ts` — directive ledger, matching, and bounded reinjection
+- `subagents/` — fixed role registry and internal prompts
+- `prompts/` — native `/review`, `/implement-review`, and `/research` templates
+- `docs/subagents.md` — architecture, trust boundaries, and usage
+- `docs/directives.md` — queue augmentation behavior and limitations
 - `test/web-core.test.mjs` — parser, extraction, and URL-safety tests
 - `test/ask-core.test.mjs` — questionnaire validation and formatting tests
+- `test/subagents-*.test.mjs` — child runner and security tests
+- `test/workflows-core.test.mjs` — workflow validation and execution tests
+- `test/directives-core.test.mjs` — ledger, compaction, and reinjection tests
 - `themes/neutral.json` — monochrome UI theme with a gray-to-white thinking-level ramp
 - `AGENTS.md` — project instructions loaded by pi
 - `package.json` — pi package manifest
