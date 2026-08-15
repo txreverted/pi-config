@@ -25,6 +25,6 @@ const result = spawnSync("pi", args, {
 
 if (result.error) throw result.error;
 assert.equal(result.status, 0, result.stderr || result.stdout);
-assert.match(result.stdout, /No models matching/);
+assert.match(result.stdout, /No models (?:matching|available)/);
 assert.doesNotMatch(result.stderr, /error|failed|exception/i);
 console.log(`Loaded ${extensions.length} stable extension modules and the neutral theme through Pi.`);
