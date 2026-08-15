@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "subagents.ts", "subagent-tools.ts"];
+const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "orchestration.ts", "subagent-tools.ts"];
 const args = [
   "--no-extensions",
   "--no-skills",
@@ -27,4 +27,19 @@ if (result.error) throw result.error;
 assert.equal(result.status, 0, result.stderr || result.stdout);
 assert.match(result.stdout, /No models (?:matching|available)/);
 assert.doesNotMatch(result.stderr, /error|failed|exception/i);
-console.log(`Loaded ${extensions.length} stable extension modules and the neutral theme through Pi.`);
+const packageResult = spawnSync("pi", [
+  "-e", root,
+  "--no-skills",
+  "--list-models", "__pi_config_package_smoke_no_such_model__",
+], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, PI_OFFLINE: "1" },
+  timeout: 30_000,
+});
+if (packageResult.error) throw packageResult.error;
+assert.equal(packageResult.status, 0, packageResult.stderr || packageResult.stdout);
+assert.match(packageResult.stdout, /No models (?:matching|available)/);
+assert.doesNotMatch(packageResult.stderr, /error|failed|exception/i);
+
+console.log(`Loaded ${extensions.length} stable modules directly and loaded the complete package manifest through Pi.`);

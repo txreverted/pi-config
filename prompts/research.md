@@ -1,9 +1,9 @@
 ---
-description: Run two independent public-web research passes and synthesize sources
+description: Start two background public-web research passes and synthesize sources
 argument-hint: "<research question>"
 ---
 Run the `research` workflow for this question:
 
 $ARGUMENTS
 
-Preserve useful source URLs, distinguish evidence from inference, reconcile contradictory findings, and state unresolved uncertainty.
+Let the workflow run in the background. Preserve useful source URLs, distinguish evidence from inference, reconcile contradictory findings, and state unresolved uncertainty.
