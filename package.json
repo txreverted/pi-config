@@ -8,7 +8,11 @@
   ],
   "pi": {
     "extensions": [
+      "./extensions/ui.ts",
       "./extensions/tools.ts"
+    ],
+    "themes": [
+      "./themes/neutral.json"
     ]
   },
   "peerDependencies": {
