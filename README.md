@@ -8,7 +8,7 @@ Agents: follow [`AGENTS.md`](AGENTS.md). Package resources live in [`package.jso
 
 | Feature | Source | Proof |
 |---|---|---|
-| Minimal TUI | [`extensions/ui.ts`](extensions/ui.ts), [`extensions/ui-core.ts`](extensions/ui-core.ts), [`themes/neutral.json`](themes/neutral.json) | [`test/ui-core.test.mjs`](test/ui-core.test.mjs), [`test/ui-extension.test.mjs`](test/ui-extension.test.mjs) |
+| Minimal TUI and themes | [`extensions/ui.ts`](extensions/ui.ts), [`extensions/ui-core.ts`](extensions/ui-core.ts), [`themes/`](themes/) | [`test/ui-core.test.mjs`](test/ui-core.test.mjs), [`test/ui-extension.test.mjs`](test/ui-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs) |
 | `jq`, `find`, `rg` | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-core.test.mjs`](test/tools-core.test.mjs), [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs) |
 | Web search and fetch | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-core.test.mjs`](test/web-core.test.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts) | [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs) |
@@ -66,7 +66,7 @@ npm ci --ignore-scripts --omit=dev --legacy-peer-deps
 pi install "$PWD"
 ```
 
-Set Pi user settings outside this repo:
+Choose `neutral` in `/settings`. Set Pi user settings outside this repo:
 
 ```json
 {
