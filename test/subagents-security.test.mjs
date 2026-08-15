@@ -33,6 +33,13 @@ test("agent registry is fixed, minimal, and non-recursive", () => {
     }
   }
 
+  const reviewer = agents.get("reviewer");
+  assert.equal(reviewer.maxToolCalls, 96);
+  assert.equal(reviewer.maxReportedTokens, 2_000_000);
+  assert.equal(reviewer.maxCostUsd, 2);
+  assert.match(reviewer.prompt, /tool budget is finite/i);
+  assert.doesNotMatch(reviewer.prompt, /No quota/i);
+
   const researcher = agents.get("researcher");
   assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
   assert.equal(researcher.contextFiles, false);

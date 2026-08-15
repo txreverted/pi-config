@@ -27,7 +27,8 @@ const PROGRESS_THROTTLE_MS = 200;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
-export type AgentName = "scout" | "reviewer" | "worker" | "researcher" | "synthesizer";
+export const AGENT_NAMES = ["scout", "reviewer", "worker", "researcher", "synthesizer"] as const;
+export type AgentName = typeof AGENT_NAMES[number];
 export type ChildStatus = "completed" | "failed" | "aborted" | "timed_out";
 export type ChildFailureKind =
   | "preflight"
@@ -60,7 +61,6 @@ export interface UsageSummary {
 
 export interface AgentDefinition {
   name: AgentName;
-  description: string;
   tools: readonly string[];
   prompt: string;
   thinking: ThinkingLevel;
@@ -102,7 +102,6 @@ export interface ChildRunProgress extends RunTiming {
   thinking?: ThinkingLevel;
   lifecycle: RunLifecycle;
   health: RunHealth;
-  healthReason?: string;
   attempt: number;
   maxAttempts: number;
   pid?: number;
@@ -910,7 +909,6 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     progress.currentTool = undefined;
     progress.currentToolStartedAt = undefined;
     progress.eventType = undefined;
-    progress.healthReason = undefined;
     progress.pid = undefined;
     progress.turns = 0;
     progress.toolCalls = 0;
@@ -927,7 +925,6 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     if (finalResult.status === "completed" || !finalResult.retryable || attempt >= maxAttempts || options.signal?.aborted) break;
     if (finalResult.error) attemptErrors.push(finalResult.error);
     progress.lifecycle = "retrying";
-    progress.healthReason = finalResult.error;
     progress.usage = totalUsage;
     progress.text = `Retrying read-only child after verified startup/transient failure (${attempt + 1}/${maxAttempts})`;
     safeUpdate(options, progress);

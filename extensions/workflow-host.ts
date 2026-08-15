@@ -10,7 +10,7 @@ import {
   resultToPersistedState,
   type PersistedWorkflowRun,
 } from "./orchestration-state.ts";
-import { healthForRun, type RunHealth } from "./orchestration-core.ts";
+import { healthForRun, isTerminalLifecycle, type RunHealth } from "./orchestration-core.ts";
 import {
   MAX_SUBAGENT_CONCURRENCY,
   agentDefinitionForTask,
@@ -18,7 +18,6 @@ import {
   runChildAgent,
 } from "./subagents-core.ts";
 import {
-  compileDeclarativeWorkflowSpec,
   executeWorkflow,
   type WorkflowDefinition,
   type WorkflowProgressSnapshot,
@@ -26,19 +25,22 @@ import {
 import { createAgentRegistry } from "../subagents/registry.ts";
 import { createWorkflowRegistry } from "../subagents/workflows-registry.ts";
 
-const STATE_WRITE_THROTTLE_MS = 250;
+const STATE_WRITE_THROTTLE_MS = 1_000;
 const MAX_WORKFLOW_RUNTIME_MS = 60 * 60_000;
 
-class ThrottledStateWriter {
+export class ThrottledStateWriter {
   private readonly path: string;
+  private readonly onError: (error: unknown) => void;
   private current: PersistedWorkflowRun;
   private chain: Promise<void> = Promise.resolve();
   private timer: NodeJS.Timeout | undefined;
   private dirty = false;
+  private writeError: unknown;
 
-  constructor(path: string, initial: PersistedWorkflowRun) {
+  constructor(path: string, initial: PersistedWorkflowRun, onError: (error: unknown) => void = () => {}) {
     this.path = path;
     this.current = initial;
+    this.onError = onError;
   }
 
   update(transform: (state: PersistedWorkflowRun) => PersistedWorkflowRun, immediate = false): void {
@@ -60,10 +62,19 @@ class ThrottledStateWriter {
   }
 
   private enqueue(): void {
-    if (!this.dirty) return;
+    if (!this.dirty || this.writeError !== undefined) return;
     this.dirty = false;
     const snapshot = structuredClone(this.current);
-    this.chain = this.chain.then(() => atomicWriteJson(this.path, snapshot));
+    this.chain = this.chain.then(async () => {
+      try {
+        await atomicWriteJson(this.path, snapshot);
+      } catch (error) {
+        if (this.writeError === undefined) {
+          this.writeError = error;
+          this.onError(error);
+        }
+      }
+    });
   }
 
   async flush(): Promise<void> {
@@ -71,6 +82,7 @@ class ThrottledStateWriter {
     this.timer = undefined;
     this.enqueue();
     await this.chain;
+    if (this.writeError !== undefined) throw this.writeError;
   }
 
   value(): PersistedWorkflowRun {
@@ -106,13 +118,9 @@ function progressState(current: PersistedWorkflowRun, snapshot: WorkflowProgress
 }
 
 function resolveDefinition(config: Awaited<ReturnType<typeof readWorkflowHostConfig>>): WorkflowDefinition {
-  const agents = createAgentRegistry();
-  if (config.builtinName) {
-    const definition = createWorkflowRegistry().get(config.builtinName);
-    if (!definition) throw new Error(`Unknown built-in workflow '${config.builtinName}'`);
-    return definition;
-  }
-  return compileDeclarativeWorkflowSpec(config.spec, (agent) => agents.get(agent)?.writer === true);
+  const definition = createWorkflowRegistry().get(config.builtinName);
+  if (!definition) throw new Error(`Unknown built-in workflow '${config.builtinName}'`);
+  return definition;
 }
 
 function failedState(current: PersistedWorkflowRun, error: unknown): PersistedWorkflowRun {
@@ -121,7 +129,6 @@ function failedState(current: PersistedWorkflowRun, error: unknown): PersistedWo
     ...current,
     status: "failed",
     health: "dead",
-    healthReason: "Workflow host failed",
     error: error instanceof Error ? error.message : String(error),
     endedAt,
     updatedAt: endedAt,
@@ -140,8 +147,8 @@ export async function executeWorkflowHost(configPath: string): Promise<void> {
   }
   const initial = await readPersistedWorkflowRun(config.statePath);
   if (initial.runId !== config.runId) throw new Error("Workflow state and config run ids differ");
-  const writer = new ThrottledStateWriter(config.statePath, initial);
   const controller = new AbortController();
+  const writer = new ThrottledStateWriter(config.statePath, initial, () => controller.abort());
   let hostTimedOut = false;
   const onSignal = () => controller.abort();
   process.once("SIGTERM", onSignal);
@@ -167,7 +174,9 @@ export async function executeWorkflowHost(configPath: string): Promise<void> {
   try {
     const definition = resolveDefinition(config);
     const agents = createAgentRegistry();
-    const gitStatusBefore = config.hasWriter ? await captureGitStatus(config.cwd) : undefined;
+    const hasWriter = definition.steps.some((step) => agents.get(step.agent)?.writer === true);
+    if (hasWriter !== config.hasWriter) throw new Error("Workflow host writer metadata does not match its built-in graph");
+    const gitStatusBefore = hasWriter ? await captureGitStatus(config.cwd) : undefined;
     const inputHashSalt = createHash("sha256").update(JSON.stringify({
       model: config.model ?? null,
       modelReasoning: config.modelReasoning ?? null,
@@ -201,7 +210,7 @@ export async function executeWorkflowHost(configPath: string): Promise<void> {
       ...(resumeState ? { resumeOutcomes: resumeState.steps } : {}),
       inputHashSalt,
     });
-    const gitStatusAfter = config.hasWriter ? await captureGitStatus(config.cwd) : undefined;
+    const gitStatusAfter = hasWriter ? await captureGitStatus(config.cwd) : undefined;
     const finalResult = hostTimedOut && result.status === "aborted"
       ? { ...result, status: "failed" as const, error: `Workflow exceeded the ${MAX_WORKFLOW_RUNTIME_MS}ms host limit` }
       : result;
@@ -230,7 +239,7 @@ if (entry === resolve(fileURLToPath(import.meta.url))) {
       try {
         const config = await readWorkflowHostConfig(resolve(configPath));
         const state = await readPersistedWorkflowRun(config.statePath);
-        const terminal = state.status === "completed" || state.status === "completed_with_warnings" || state.status === "failed" || state.status === "aborted" || state.status === "timed_out";
+        const terminal = isTerminalLifecycle(state.status);
         const duplicateLease = (error as NodeJS.ErrnoException).code === "EEXIST";
         if (!terminal && !duplicateLease) await atomicWriteJson(config.statePath, failedState(state, error));
       } catch {

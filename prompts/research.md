@@ -2,7 +2,7 @@
 description: Start two public-web research passes and synthesis
 argument-hint: "<research question>"
 ---
-Call `workflow` with `name: "research"`, `background: true`, and this question as the objective:
+Call `workflow` with `name: "research"` and this question as the objective:
 
 $ARGUMENTS
 

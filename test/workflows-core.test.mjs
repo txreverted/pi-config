@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  compileDeclarativeWorkflowSpec,
   executeWorkflow,
   formatWorkflowEvidence,
   validateWorkflowDefinition,
@@ -37,13 +36,11 @@ function result(step, status = "completed", output = `${step.id} output`) {
 test("workflow validation rejects missing dependencies, cycles, and multiple writers", () => {
   assert.throws(() => validateWorkflowDefinition({
     name: "review",
-    description: "missing",
     steps: [{ id: "a", agent: "scout", needs: ["missing"], onFailure: "stop", buildTask: () => "a" }],
   }, isWriter), /missing step/);
 
   assert.throws(() => validateWorkflowDefinition({
     name: "review",
-    description: "cycle",
     steps: [
       { id: "a", agent: "scout", needs: ["b"], onFailure: "stop", buildTask: () => "a" },
       { id: "b", agent: "reviewer", needs: ["a"], onFailure: "stop", buildTask: () => "b" },
@@ -52,13 +49,11 @@ test("workflow validation rejects missing dependencies, cycles, and multiple wri
 
   assert.throws(() => validateWorkflowDefinition({
     name: "review",
-    description: "thinking",
     steps: [{ id: "a", agent: "reviewer", thinking: "ultra", onFailure: "stop", buildTask: () => "a" }],
   }, isWriter), /invalid thinking level/);
 
   assert.throws(() => validateWorkflowDefinition({
     name: "implement-review",
-    description: "writers",
     steps: [
       { id: "a", agent: "worker", onFailure: "stop", buildTask: () => "a" },
       { id: "b", agent: "worker", needs: ["a"], onFailure: "stop", buildTask: () => "b" },
@@ -72,7 +67,6 @@ test("workflow runs ready readers concurrently, tolerates continue failures, the
   const started = [];
   const definition = {
     name: "review",
-    description: "test",
     steps: [
       { id: "a", agent: "reviewer", onFailure: "continue", buildTask: () => "a" },
       { id: "b", agent: "reviewer", onFailure: "continue", buildTask: () => "b" },
@@ -108,10 +102,36 @@ test("workflow runs ready readers concurrently, tolerates continue failures, the
   assert.ok(started.indexOf("synthesis:saw failed and completed") > started.findIndex((entry) => entry.startsWith("b:")));
 });
 
+test("workflow fails before synthesis when every dependency fails", async () => {
+  const started = [];
+  const definition = {
+    name: "review",
+    outputStep: "synthesis",
+    steps: [
+      { id: "a", agent: "reviewer", onFailure: "continue", buildTask: () => "a" },
+      { id: "b", agent: "reviewer", onFailure: "continue", buildTask: () => "b" },
+      { id: "synthesis", agent: "synthesizer", needs: ["a", "b"], onFailure: "stop", buildTask: () => "synthesis" },
+    ],
+  };
+  const execution = await executeWorkflow({
+    definition,
+    input,
+    isWriter,
+    runStep: async (step) => {
+      started.push(step.id);
+      return result(step, "failed", "");
+    },
+  });
+
+  assert.deepEqual(started.sort(), ["a", "b"]);
+  assert.equal(execution.status, "failed");
+  assert.deepEqual(execution.steps.map((step) => step.status), ["failed", "failed", "failed"]);
+  assert.match(execution.error, /no successful dependency/);
+});
+
 test("a stopping failure skips dependent work", async () => {
   const definition = {
     name: "review",
-    description: "stop",
     steps: [
       { id: "scout", agent: "scout", onFailure: "stop", buildTask: () => "scout" },
       { id: "review", agent: "reviewer", needs: ["scout"], onFailure: "stop", buildTask: () => "review" },
@@ -131,7 +151,6 @@ test("a stopping failure skips dependent work", async () => {
 test("a stopping synthesis failure does not reuse an earlier step as workflow output", async () => {
   const definition = {
     name: "review",
-    description: "failed synthesis",
     steps: [
       { id: "review", agent: "reviewer", onFailure: "continue", buildTask: () => "review" },
       { id: "synthesis", agent: "synthesizer", needs: ["review"], onFailure: "stop", buildTask: () => "synthesis" },
@@ -152,7 +171,6 @@ test("a ready writer runs alone before independent readers", async () => {
   const order = [];
   const definition = {
     name: "implement-review",
-    description: "writer gate",
     steps: [
       { id: "reader", agent: "reviewer", onFailure: "continue", buildTask: () => "reader" },
       { id: "writer", agent: "worker", onFailure: "stop", buildTask: () => "writer" },
@@ -170,53 +188,9 @@ test("a ready writer runs alone before independent readers", async () => {
   assert.deepEqual(order, ["writer", "reader"]);
 });
 
-test("declarative workflows reject code-like escape surfaces and unsafe graphs", () => {
-  const valid = compileDeclarativeWorkflowSpec({
-    version: 1,
-    name: "bounded-review",
-    outputStep: "synthesis",
-    steps: [
-      { id: "scan", agent: "scout", task: "Map the code" },
-      { id: "synthesis", agent: "synthesizer", task: "Synthesize", needs: ["scan"], include: ["scan"] },
-    ],
-  }, isWriter);
-  assert.equal(valid.outputStep, "synthesis");
-  assert.match(valid.steps[1].buildTask(input, new Map([["scan", {
-    id: "scan", agent: "scout", status: "completed", health: "healthy", output: "evidence", usage: emptyUsage(),
-    durationMs: 1, attempt: 1, maxAttempts: 1, turns: 1, toolCalls: 0, recentEvents: [], queuedAt: 1,
-  }]])), /UNTRUSTED SUBAGENT OUTPUT/);
-
-  assert.throws(() => compileDeclarativeWorkflowSpec({
-    version: 1,
-    name: "escape",
-    outputStep: "a",
-    import: "node:fs",
-    steps: [{ id: "a", agent: "scout", task: "a" }],
-  }, isWriter), /unsupported field/);
-  assert.throws(() => compileDeclarativeWorkflowSpec({
-    version: 1,
-    name: "bad-include",
-    outputStep: "b",
-    steps: [
-      { id: "a", agent: "scout", task: "a" },
-      { id: "b", agent: "synthesizer", task: "b", include: ["a"] },
-    ],
-  }, isWriter), /add 'a' to needs/);
-  assert.throws(() => compileDeclarativeWorkflowSpec({
-    version: 1,
-    name: "writers",
-    outputStep: "b",
-    steps: [
-      { id: "a", agent: "worker", task: "a" },
-      { id: "b", agent: "worker", task: "b", needs: ["a"] },
-    ],
-  }, isWriter), /at most one writer/);
-});
-
 test("workflow retry replays only the unchanged successful prefix", async () => {
   const definition = {
     name: "review",
-    description: "resume",
     outputStep: "synthesis",
     steps: [
       { id: "scan", agent: "scout", onFailure: "stop", buildTask: () => "scan" },
@@ -268,7 +242,6 @@ test("workflow progress includes queued and running steps with live timing", asy
   const snapshots = [];
   const definition = {
     name: "review",
-    description: "progress",
     outputStep: "a",
     steps: [{ id: "a", agent: "scout", onFailure: "stop", buildTask: () => "a" }],
   };
