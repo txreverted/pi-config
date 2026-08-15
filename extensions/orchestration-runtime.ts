@@ -8,7 +8,7 @@ import type {
   ExtensionContext,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { Key, Text, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Key, Text, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   RUN_UI_TICK_MS,
@@ -246,20 +246,6 @@ function formatRunLine(run: RunView, now = Date.now()): string {
   return `${statusIcon(run.status)} ${run.name} · ${formatRunDuration(duration)} · ${run.status}${run.health !== "healthy" ? ` · ${healthLabel(run.health)}` : ""}`;
 }
 
-export function formatCompactRunLine(
-  run: { name: string; status: RunLifecycle; health: RunHealth; queuedAt: number; startedAt?: number },
-  width: number,
-  now = Date.now(),
-): string {
-  const duration = formatRunDuration(Math.max(0, now - (run.startedAt ?? run.queuedAt)));
-  const health = run.health === "healthy" ? "" : ` · ${healthLabel(run.health)}`;
-  const tail = ` · ${duration}${health}`;
-  const prefix = `${statusIcon(run.status)} `;
-  const nameWidth = Math.max(1, width - visibleWidth(prefix) - visibleWidth(tail));
-  const name = truncateToWidth(run.name, nameWidth, "…");
-  return truncateToWidth(`${prefix}${name}${tail}`, Math.max(1, width), "…");
-}
-
 function formatChildLine(child: ChildRunProgress | WorkflowStepOutcome, now = Date.now()): string {
   const status = "lifecycle" in child ? child.lifecycle : child.status;
   const timing = child;
@@ -333,7 +319,6 @@ export class OrchestrationRuntime {
   private persisted = new Map<string, PersistedWorkflowRun>();
   private foreground = new Map<string, ForegroundRunRecord>();
   private ticker: NodeJS.Timeout | undefined;
-  private requestRender: (() => void) | undefined;
   private scanning = false;
   private delivering = new Set<string>();
   private notifiedHealth = new Map<string, RunHealth>();
@@ -355,7 +340,6 @@ export class OrchestrationRuntime {
     this.pi.on("session_shutdown", () => {
       if (this.ticker) clearInterval(this.ticker);
       this.ticker = undefined;
-      this.requestRender = undefined;
       this.ctx = undefined;
     });
 
@@ -401,31 +385,10 @@ export class OrchestrationRuntime {
   }
 
   bind(ctx: ExtensionContext): void {
-    const alreadyBound = this.ctx === ctx;
     this.ctx = ctx;
-    if (!alreadyBound && ctx.mode === "tui") {
-      ctx.ui.setWidget("orchestration-runs", (tui, theme) => {
-        const requestRender = () => tui.requestRender();
-        this.requestRender = requestRender;
-        return {
-          invalidate() {},
-          dispose: () => {
-            if (this.requestRender === requestRender) this.requestRender = undefined;
-          },
-          render: (width: number) => {
-            const now = Date.now();
-            const active = this.runViews(now).filter((run) => !terminalStatus(run.status));
-            if (active.length === 0) return [];
-            const headline = theme.fg("muted", `${active.length} active run${active.length === 1 ? "" : "s"} · /runs`);
-            const lines = [headline, ...active.slice(0, 3).map((run) => {
-              const color = run.health === "healthy" ? "accent" : run.health === "quiet" ? "muted" : "warning";
-              return theme.fg(color, formatCompactRunLine(run, width, now));
-            })];
-            return lines.map((line) => truncateToWidth(line, Math.max(1, width), "…"));
-          },
-        };
-      }, { placement: "belowEditor" });
-    }
+    // Run details remain available in tool cards and /runs. Keep the area below
+    // the input completely empty, including after hot-reloading an older version.
+    if (ctx.mode === "tui") ctx.ui.setWidget("orchestration-runs", undefined);
     this.ensureTicker();
   }
 
@@ -438,7 +401,6 @@ export class OrchestrationRuntime {
       this.foreground.delete(oldest);
     }
     this.ensureTicker();
-    this.requestRender?.();
   }
 
   getForeground(runId: string): ForegroundRunRecord | undefined {
@@ -555,7 +517,6 @@ export class OrchestrationRuntime {
   private ensureTicker(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
-      this.requestRender?.();
       void this.scan();
     }, RUN_UI_TICK_MS);
     this.ticker.unref?.();
@@ -618,7 +579,6 @@ export class OrchestrationRuntime {
         this.lastCleanupAt = now;
       }
       this.lastScanError = undefined;
-      this.requestRender?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message !== this.lastScanError) this.ctx?.ui.notify(`Orchestration state check failed: ${message}`, "warning");
@@ -786,7 +746,14 @@ export class OrchestrationRuntime {
     await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
       let offset = 0;
       let maxOffset = 0;
+      const refreshTimer = typeof body === "function"
+        ? setInterval(() => tui.requestRender(), RUN_UI_TICK_MS)
+        : undefined;
+      refreshTimer?.unref?.();
       return {
+        dispose() {
+          if (refreshTimer) clearInterval(refreshTimer);
+        },
         invalidate() {},
         handleInput(data: string) {
           if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data.toLowerCase() === "q") done();
