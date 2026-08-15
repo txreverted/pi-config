@@ -77,6 +77,10 @@ test("default and booleans resolve from environment before the preserved config"
   assert.equal(readPonytailQuietStartup(), false);
   assert.equal(readPonytailHideStatus(), false);
 
+  process.env.PONYTAIL_HIDE_STATUS = "flase";
+  assert.throws(() => readPonytailHideStatus(), /must be one of/);
+  process.env.PONYTAIL_HIDE_STATUS = "0";
+
   assert.equal(writePonytailDefaultMode("full"), "full");
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), {
     defaultMode: "full",
@@ -91,9 +95,13 @@ test("saving a default refuses to destroy malformed configuration", () => withCo
   mkdirSync(dirname(path), { recursive: true });
   for (const contents of ["{broken", "[]"]) {
     writeFileSync(path, contents);
+    assert.throws(() => readPonytailDefaultMode(), /Could not read Ponytail config/);
     assert.throws(() => writePonytailDefaultMode("lite"));
     assert.equal(readFileSync(path, "utf8"), contents);
   }
+
+  writeFileSync(path, JSON.stringify({ defaultMode: "fast" }));
+  assert.throws(() => readPonytailDefaultMode(), /defaultMode must be one of/);
 }));
 
 test("mode filtering keeps shared rules and only the selected intensity example", () => {
@@ -104,6 +112,7 @@ test("mode filtering keeps shared rules and only the selected intensity example"
   assert.match(filtered, /full example/);
   assert.match(filtered, /Full: ordinary unquoted rule/);
   assert.match(buildPonytailInstructions(body, "full"), /^PONYTAIL MODE ACTIVE — level: full/);
+  assert.equal(buildPonytailInstructions(body, "off"), "");
 });
 
 test("real instructions preserve coding scope and distinct intensity semantics", () => {

@@ -49,10 +49,14 @@ function parseConfig(contents: string): PonytailConfig | undefined {
 }
 
 function readConfig(): PonytailConfig {
+  const path = ponytailConfigPath();
   try {
-    return parseConfig(readFileSync(ponytailConfigPath(), "utf8")) ?? {};
-  } catch {
-    return {};
+    const config = parseConfig(readFileSync(path, "utf8"));
+    if (!config) throw new Error("config must contain a JSON object");
+    return config;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`Could not read Ponytail config ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -70,21 +74,39 @@ function readConfigForWrite(path: string): PonytailConfig {
 function environmentBoolean(name: string): boolean | undefined {
   const raw = process.env[name];
   if (raw === undefined) return undefined;
-  return !["", "0", "false", "no"].includes(raw.trim().toLowerCase());
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes"].includes(normalized)) return true;
+  if (["0", "false", "no"].includes(normalized)) return false;
+  throw new Error(`${name} must be one of: 1, true, yes, 0, false, no`);
+}
+
+function configBoolean(config: PonytailConfig, key: "quietStartup" | "hideStatus"): boolean {
+  const value = config[key];
+  if (value === undefined) return false;
+  if (typeof value === "boolean") return value;
+  throw new Error(`Ponytail config ${key} must be a boolean`);
 }
 
 export function readPonytailDefaultMode(): PonytailMode {
-  return normalizePonytailMode(process.env.PONYTAIL_DEFAULT_MODE)
-    ?? normalizePonytailMode(readConfig().defaultMode)
-    ?? DEFAULT_PONYTAIL_MODE;
+  const environment = process.env.PONYTAIL_DEFAULT_MODE;
+  if (environment !== undefined) {
+    const mode = normalizePonytailMode(environment);
+    if (!mode) throw new Error(`PONYTAIL_DEFAULT_MODE must be one of: ${PONYTAIL_RUNTIME_MODES.join(", ")}`);
+    return mode;
+  }
+  const configured = readConfig().defaultMode;
+  if (configured === undefined) return DEFAULT_PONYTAIL_MODE;
+  const mode = normalizePonytailMode(configured);
+  if (!mode) throw new Error(`Ponytail config defaultMode must be one of: ${PONYTAIL_RUNTIME_MODES.join(", ")}`);
+  return mode;
 }
 
 export function readPonytailQuietStartup(): boolean {
-  return environmentBoolean("PONYTAIL_QUIET_STARTUP") ?? readConfig().quietStartup === true;
+  return environmentBoolean("PONYTAIL_QUIET_STARTUP") ?? configBoolean(readConfig(), "quietStartup");
 }
 
 export function readPonytailHideStatus(): boolean {
-  return environmentBoolean("PONYTAIL_HIDE_STATUS") ?? readConfig().hideStatus === true;
+  return environmentBoolean("PONYTAIL_HIDE_STATUS") ?? configBoolean(readConfig(), "hideStatus");
 }
 
 export function writePonytailDefaultMode(value: unknown): PonytailMode | undefined {
@@ -153,6 +175,7 @@ export function filterPonytailSkillForMode(body: string, mode: PonytailMode): st
 }
 
 export function buildPonytailInstructions(skillBody: string, mode: PonytailSessionMode): string {
+  if (mode === "off") return "";
   if (mode === "review") return "PONYTAIL MODE ACTIVE — level: review. Follow the ponytail-review skill.";
   const scopeRule = mode === "lite"
     ? "LITE SCOPE: Build all explicitly requested behavior. Use the ladder only to choose the implementation, then name a lazier alternative in one sentence; do not omit or narrow requirements."

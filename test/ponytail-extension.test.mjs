@@ -91,9 +91,11 @@ test("standalone normal mode disables injection without matching ordinary prose"
   const harness = createHarness();
   const { context } = createContext();
   await harness.events.get("session_start")({}, context);
-  await harness.events.get("input")({ source: "interactive", text: "add a normal mode toggle" }, context);
+  const ordinary = await harness.events.get("input")({ source: "interactive", text: "add a normal mode toggle" }, context);
+  assert.equal(ordinary, undefined);
   assert.ok(await harness.events.get("before_agent_start")({ systemPrompt: "BASE" }, context));
-  await harness.events.get("input")({ source: "interactive", text: "normal mode." }, context);
+  const deactivated = await harness.events.get("input")({ source: "interactive", text: "normal mode." }, context);
+  assert.deepEqual(deactivated, { action: "handled" });
   assert.equal(await harness.events.get("before_agent_start")({ systemPrompt: "BASE" }, context), undefined);
 }));
 
