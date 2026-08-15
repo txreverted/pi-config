@@ -5,12 +5,11 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   formatCwd,
   formatElapsed,
   formatTokens,
-  pickStatusCandidate,
+  wrapStatusLine,
 } from "./ui-core.ts";
 
 function usageCost(entry: SessionEntry): number {
@@ -111,24 +110,19 @@ export default function uiExtension(pi: ExtensionAPI) {
               `${logo} ${segments.filter(Boolean).join(separator)}`;
             const version = dim(`v${VERSION}`);
             const fullModel = dim(`${model} (${currentThinking})`);
-            const shortModel = dim(model);
             const place = dim(location);
             const price = dim(`$${cost.toFixed(3)}${subscription}`);
             const time = elapsed ? theme.fg("muted", elapsed) : undefined;
-            const compactTail = [price, time].filter((value): value is string => Boolean(value));
+            const line = renderCandidate([
+              version,
+              place,
+              fullModel,
+              context,
+              price,
+              ...(time ? [time] : []),
+            ]);
 
-            const candidates = [
-              renderCandidate([version, place, fullModel, context, ...compactTail]),
-              renderCandidate([place, fullModel, context, ...compactTail]),
-              renderCandidate([fullModel, context, ...compactTail]),
-              renderCandidate([shortModel, context, ...compactTail]),
-              renderCandidate([shortModel, ...compactTail]),
-              renderCandidate(compactTail),
-              renderCandidate(time ? [time] : [price]),
-            ];
-            const line = pickStatusCandidate(candidates, width, visibleWidth);
-
-            return [truncateToWidth(line, width, "…")];
+            return wrapStatusLine(line, width);
           },
         };
       },
