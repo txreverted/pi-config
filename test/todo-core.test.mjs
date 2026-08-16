@@ -1,0 +1,62 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  applyTodoAction,
+  emptyTodoSnapshot,
+  TODO_LIMITS,
+  validateTodoSnapshot,
+} from "../extensions/todo-core.ts";
+
+const apply = (snapshot, action) => applyTodoAction(snapshot, action).snapshot;
+
+test("todo lifecycle is deterministic and snapshots are independent", () => {
+  const empty = emptyTodoSnapshot();
+  const created = applyTodoAction(empty, { action: "create", subject: " First\n\u001b[31m task " });
+  assert.deepEqual(created.task, { id: 1, subject: "First [31m task", description: undefined, activeForm: undefined, status: "pending", blockedBy: [] });
+  assert.deepEqual(empty, { tasks: [], nextId: 1 });
+
+  const updated = applyTodoAction(created.snapshot, { action: "update", id: 1, status: "in_progress", activeForm: "Working" });
+  assert.equal(updated.task.status, "in_progress");
+  assert.equal(applyTodoAction(updated.snapshot, { action: "get", id: 1 }).task.subject, "First [31m task");
+
+  const removed = applyTodoAction(updated.snapshot, { action: "delete", id: 1 });
+  assert.equal(removed.deleted.id, 1);
+  assert.deepEqual(applyTodoAction(removed.snapshot, { action: "clear" }).snapshot, emptyTodoSnapshot());
+});
+
+test("dependencies must exist, differ from the task, and remain acyclic", () => {
+  let snapshot = apply(emptyTodoSnapshot(), { action: "create", subject: "A" });
+  snapshot = apply(snapshot, { action: "create", subject: "B", blockedBy: [1] });
+
+  assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [99] }), /dangling blocker/);
+  assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [1] }), /block itself/);
+  assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [2] }), /cycle/);
+  assert.throws(() => apply(snapshot, { action: "delete", id: 1 }), /dangling blocker/);
+});
+
+test("only one task may be active and completion waits for blockers", () => {
+  let snapshot = apply(emptyTodoSnapshot(), { action: "create", subject: "Blocker", status: "in_progress" });
+  snapshot = apply(snapshot, { action: "create", subject: "Dependent", blockedBy: [1] });
+  assert.throws(() => apply(snapshot, { action: "update", id: 2, status: "in_progress" }), /Only one/);
+  assert.throws(() => apply(snapshot, { action: "update", id: 2, status: "completed" }), /until blocker/);
+
+  snapshot = apply(snapshot, { action: "update", id: 1, status: "completed" });
+  snapshot = apply(snapshot, { action: "update", id: 2, status: "completed" });
+  assert.equal(snapshot.tasks.every((task) => task.status === "completed"), true);
+});
+
+test("all declared bounds are enforced at the core boundary", () => {
+  assert.throws(() => apply(emptyTodoSnapshot(), { action: "create", subject: "x".repeat(TODO_LIMITS.subject + 1) }), /subject/);
+  assert.throws(() => apply(emptyTodoSnapshot(), { action: "create", subject: "x", description: "d".repeat(TODO_LIMITS.description + 1) }), /description/);
+  assert.throws(() => apply(emptyTodoSnapshot(), { action: "create", subject: "x", activeForm: "a".repeat(TODO_LIMITS.activeForm + 1) }), /activeForm/);
+  assert.throws(() => apply(emptyTodoSnapshot(), { action: "create", subject: "x", blockedBy: Array.from({ length: 11 }, (_, index) => index + 1) }), /at most 10/);
+
+  let snapshot = emptyTodoSnapshot();
+  for (let index = 0; index < TODO_LIMITS.tasks; index++) snapshot = apply(snapshot, { action: "create", subject: `Task ${index}` });
+  assert.throws(() => apply(snapshot, { action: "create", subject: "Overflow" }), /limited to 25/);
+});
+
+test("snapshot validation rejects malformed persisted state", () => {
+  assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "unknown", blockedBy: [] }], nextId: 2 }), /status/);
+  assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "pending", blockedBy: [] }], nextId: 1 }), /nextId/);
+});
