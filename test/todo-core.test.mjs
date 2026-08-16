@@ -34,12 +34,14 @@ test("dependencies must exist, differ from the task, and remain acyclic", () => 
   assert.throws(() => apply(snapshot, { action: "delete", id: 1 }), /dangling blocker/);
 });
 
-test("only one task may be active and completion waits for blockers", () => {
-  let snapshot = apply(emptyTodoSnapshot(), { action: "create", subject: "Blocker", status: "in_progress" });
-  snapshot = apply(snapshot, { action: "create", subject: "Dependent", blockedBy: [1] });
-  assert.throws(() => apply(snapshot, { action: "update", id: 2, status: "in_progress" }), /Only one/);
-  assert.throws(() => apply(snapshot, { action: "update", id: 2, status: "completed" }), /until blocker/);
+test("only one task may be active and work waits for blockers", () => {
+  let pending = apply(emptyTodoSnapshot(), { action: "create", subject: "Blocker" });
+  pending = apply(pending, { action: "create", subject: "Dependent", blockedBy: [1] });
+  assert.throws(() => apply(pending, { action: "update", id: 2, status: "in_progress" }), /until blocker/);
+  assert.throws(() => apply(pending, { action: "update", id: 2, status: "completed" }), /until blocker/);
 
+  let snapshot = apply(pending, { action: "update", id: 1, status: "in_progress" });
+  assert.throws(() => apply(snapshot, { action: "update", id: 2, status: "in_progress" }), /Only one/);
   snapshot = apply(snapshot, { action: "update", id: 1, status: "completed" });
   snapshot = apply(snapshot, { action: "update", id: 2, status: "completed" });
   assert.equal(snapshot.tasks.every((task) => task.status === "completed"), true);
