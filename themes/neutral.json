@@ -41,7 +41,7 @@
     "customMessageBg": "customBg",
     "customMessageText": "text",
     "customMessageLabel": "bright",
-    "toolPendingBg": "mantle",
+    "toolPendingBg": "toolSuccessBg",
     "toolSuccessBg": "toolSuccessBg",
     "toolErrorBg": "toolErrorBg",
     "toolTitle": "bright",
