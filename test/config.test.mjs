@@ -134,6 +134,7 @@ test("CI checks pushes and the human guide keeps operational safety facts", () =
     /No config widget or footer renders below the editor/,
     /Pi-native transcript layout, dialogs, loaders, warnings/,
     /`outputPad: 1` and `editorPaddingX: 0`/,
+    /`tuiMode: "fullscreen"`/,
     /PI_LIVE_SUBAGENT_WORKER=1/,
     /PI_LIVE_WEB=1/,
   ]) assert.match(readme, pattern);

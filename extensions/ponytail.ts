@@ -37,7 +37,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   let currentMode: PonytailSessionMode = configuredDefault;
   let active = false;
   let quietStartup = false;
-  let hideStatus = false;
+  let hideStatus = true;
 
   const syncStatus = (_context?: ExtensionContext) => {
     if (hideStatus || currentMode === "off") {

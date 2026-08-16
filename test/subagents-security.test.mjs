@@ -52,10 +52,23 @@ test("expanded subagent output strips terminal control sequences", () => {
       { name: "Research API" },
     ] },
   }).render(120).join("\n");
-  assert.match(collapsed, / ├─ Review  Inspect current diff · 0 tool uses · 0 token · 0s/);
+  assert.match(collapsed, / ├─ Review  Inspect current diff · 0 tool uses · 0 tokens · 0s/);
   assert.match(collapsed, / │   └ starting…/);
   assert.match(collapsed, / └─ 1 queued/);
   assert.doesNotMatch(collapsed, /reviewer\/high|task-1|\u001b|\u0007|SGFja2Vk|\nfake/);
+
+  const worker = tool.renderResult({
+    content: [{ type: "text", text: "unused" }],
+    details: { progress: [{
+      id: "worker", agent: "worker", thinking: "high", status: "running",
+      startedAt: Date.now(), turns: 1, toolCalls: 1, text: "", usage: { totalTokens: 1 },
+      activity: "editing 2 files",
+    }] },
+  }, { expanded: false }, plainTheme, {
+    args: { tasks: [{ name: "Refactor auth module" }] },
+  }).render(120).join("\n");
+  assert.match(worker, / └─ Agent  Refactor auth module · 1 tool use · 1 token · 0s/);
+  assert.match(worker, /     └ editing 2 files…/);
 
   const now = Date.now();
   const live = tool.renderResult({
@@ -81,9 +94,9 @@ test("expanded subagent output strips terminal control sequences", () => {
       { name: "Queued three" },
     ] },
   }).render(160).join("\n");
-  assert.match(live, / ├─ Review  Review subagents · 49 tool uses · 1\.5M token · 6m00s/);
+  assert.match(live, / ├─ Review  Review subagents · 49 tool uses · 1\.5M tokens · 6m00s/);
   assert.match(live, / │   └ done/);
-  assert.match(live, / ├─ Research  Inspect repository · 2 tool uses · 13\.1k token · 1m2[12]s/);
+  assert.match(live, / ├─ Explore  Inspect repository · 2 tool uses · 13\.1k tokens · 1m2[12]s/);
   assert.match(live, / │   └ searching…/);
   assert.match(live, / └─ 3 queued/);
 
@@ -299,7 +312,7 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
     const widget = panelUpdates.at(-1).data.render(160, plainTheme)
       .map((line) => line.trimEnd()).join("\n");
-    assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
+    assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 tokens · 0s/);
 
     await waitFor(() => messages.length > 0);
     await sleep(150);

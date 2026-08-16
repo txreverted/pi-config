@@ -89,7 +89,7 @@ function environmentBoolean(name: string): boolean | undefined {
 
 function configBoolean(config: PonytailConfig, key: "quietStartup" | "hideStatus"): boolean {
   const value = config[key];
-  if (value === undefined) return false;
+  if (value === undefined) return key === "hideStatus";
   if (typeof value === "boolean") return value;
   throw new Error(`Ponytail config ${key} must be a boolean`);
 }
@@ -125,7 +125,7 @@ export function loadPonytailSettings(): PonytailSettings {
       return environmentBoolean(environmentName) ?? configBoolean(config, key);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
-      return false;
+      return key === "hideStatus";
     }
   };
 

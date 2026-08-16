@@ -73,8 +73,7 @@ test("extension registers the complete local Ponytail command set", () => withEn
   ]);
 }));
 
-test("hideStatus suppresses Ponytail status publication", () => withEnvironment(async () => {
-  process.env.PONYTAIL_HIDE_STATUS = "1";
+test("Ponytail status is hidden by default", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
@@ -82,6 +81,7 @@ test("hideStatus suppresses Ponytail status publication", () => withEnvironment(
 }));
 
 test("session mode persists, injects filtered instructions, and updates internal status activity", () => withEnvironment(async () => {
+  process.env.PONYTAIL_HIDE_STATUS = "0";
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
