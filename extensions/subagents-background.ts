@@ -8,7 +8,7 @@ import {
 } from "./subagents-core.ts";
 
 export interface BackgroundRunView {
-  task: string;
+  name: string;
   progress: ChildRunProgress;
 }
 
@@ -31,11 +31,11 @@ function cloneProgress(progress: ChildRunProgress): ChildRunProgress {
   return { ...progress, usage: { ...progress.usage, cost: { ...progress.usage.cost } } };
 }
 
-function failedResult(record: BackgroundRecord, error: unknown, status: "failed" | "aborted" = "failed"): ChildRunResult {
+function errorResult(record: BackgroundRecord, error: unknown): ChildRunResult {
   const endedAt = Date.now();
   return {
     ...record.progress,
-    status,
+    status: "error",
     task: record.task.task,
     cwd: record.task.cwd,
     output: "",
@@ -118,7 +118,7 @@ export class BackgroundRunManager {
   active(): BackgroundRunView[] {
     return [...this.records.values()]
       .filter((record) => !record.result)
-      .map((record) => ({ task: record.task.task, progress: cloneProgress(record.progress) }));
+      .map((record) => ({ name: record.task.name, progress: cloneProgress(record.progress) }));
   }
 
   progress(id: string): ChildRunProgress | undefined {
@@ -161,7 +161,7 @@ export class BackgroundRunManager {
     if (record.progress.status === "queued") {
       const index = this.queue.indexOf(id);
       if (index >= 0) this.queue.splice(index, 1);
-      this.finish(record, failedResult(record, "Background subagent was cancelled before launch", "aborted"));
+      this.finish(record, errorResult(record, "Background subagent was cancelled before launch"));
       return true;
     }
     record.controller.abort();
@@ -208,7 +208,7 @@ export class BackgroundRunManager {
       try {
         result = await record.run(record.controller.signal, (progress) => this.update(record.task.id, progress));
       } catch (error) {
-        result = failedResult(record, error);
+        result = errorResult(record, error);
       }
       this.running--;
       this.finish(record, result);

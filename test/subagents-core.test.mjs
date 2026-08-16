@@ -13,6 +13,7 @@ import {
   resolvePiInvocation,
   resolveWorkspaceCwd,
   runChildAgent,
+  SUBAGENT_STALE_TIMEOUT_MS,
   truncateText,
 } from "../extensions/subagents-core.ts";
 
@@ -22,20 +23,20 @@ const definition = {
   tools: ["read", "grep"],
   prompt: "Test role",
   thinking: "low",
-  timeoutMs: 1_000,
   contextFiles: true,
   mutatesWorkspace: false,
-  maxTurns: 8,
-  maxToolCalls: 8,
-  maxReportedTokens: 100_000,
-  maxCostUsd: 1,
 };
+
+function childTask(id, task, cwd) {
+  return { id, name: "Fixture task", agent: "reviewer", task, cwd };
+}
 
 function state() {
   return { output: "", usage: emptyUsage(), turns: 0, toolCalls: 0 };
 }
 
 test("child thinking follows the fixed role and model capability", () => {
+  assert.equal(SUBAGENT_STALE_TIMEOUT_MS, 150_000);
   assert.equal(agentDefinitionForTask(definition, true).thinking, "low");
   assert.equal(agentDefinitionForTask(definition, false).thinking, "off");
 });
@@ -140,19 +141,19 @@ test("child runner parses chunked Pi JSON and reports tool progress", async () =
   try {
     const result = await runChildAgent({
       definition,
-      task: { id: "fixture", agent: "reviewer", task: "Inspect the fixture", cwd },
+      task: childTask("fixture", "Inspect the fixture", cwd),
       model: "fixture/test-model",
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "tool", FAKE_PI_DELAY_MS: "10" },
       onUpdate: (update) => updates.push(update),
     });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "done");
     assert.equal(result.output, "fixture completed");
     assert.equal(result.model, "fixture/test-model");
     assert.equal(result.usage.totalTokens, 17);
     assert.ok(updates.some((update) => update.currentTool === "read"));
     assert.ok(updates.some((update) => update.activity === "reading files"));
-    assert.equal(updates.at(-1).status, "completed");
+    assert.equal(updates.at(-1).status, "done");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -167,7 +168,7 @@ test("child runner emits one-second progress heartbeats during silent tools", as
   try {
     running = runChildAgent({
       definition,
-      task: { id: "heartbeat", agent: "reviewer", task: "Wait inside a tool", cwd },
+      task: childTask("heartbeat", "Wait inside a tool", cwd),
       signal: controller.signal,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "tool-hang" },
@@ -186,7 +187,7 @@ test("child runner emits one-second progress heartbeats during silent tools", as
     assert.equal(updates.at(-1).currentTool, "read");
 
     controller.abort();
-    assert.equal((await running).status, "aborted");
+    assert.equal((await running).status, "error");
     const afterAbort = updates.length;
     t.mock.timers.tick(1_000);
     assert.equal(updates.length, afterAbort);
@@ -203,14 +204,42 @@ test("child progress summarizes edited file count", async () => {
   try {
     const result = await runChildAgent({
       definition,
-      task: { id: "activity", agent: "reviewer", task: "Edit fixtures", cwd },
+      task: childTask("activity", "Edit fixtures", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "edit-files", FAKE_PI_DELAY_MS: "10" },
       onUpdate: (update) => updates.push(update),
     });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "done");
     assert.ok(updates.some((update) => update.activity === "editing 1 file"));
     assert.ok(updates.some((update) => update.activity === "editing 2 files"));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("child progress reports distinct tool activities", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-activities-"));
+  const updates = [];
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("activities", "Report activities", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "activities" },
+      onUpdate: (update) => updates.push(update),
+    });
+    assert.equal(result.status, "done");
+    const activities = new Set(updates.map((update) => update.activity));
+    for (const activity of [
+      "searching",
+      "reading source",
+      "running checks",
+      "inspecting changes",
+      "analyzing data",
+      "browsing files",
+      "running command",
+      "reading files",
+    ]) assert.ok(activities.has(activity), activity);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -222,12 +251,12 @@ test("child output remains capped in results and progress", async () => {
   try {
     const result = await runChildAgent({
       definition,
-      task: { id: "large", agent: "reviewer", task: "Return lots", cwd },
+      task: childTask("large", "Return lots", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "large" },
       onUpdate: (update) => updates.push(update),
     });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "done");
     assert.ok(Buffer.byteLength(result.output, "utf8") <= 16_000);
     assert.ok(Buffer.byteLength(result.text, "utf8") <= 16_000);
     assert.ok(updates.every((update) => Buffer.byteLength(update.text, "utf8") <= 16_000));
@@ -250,77 +279,82 @@ test("child runner accepts Pi-sized JSON events and rejects larger lines", async
   try {
     const accepted = await runChildAgent({
       definition,
-      task: { id: "large-event", agent: "reviewer", task: "Read a large image", cwd },
+      task: childTask("large-event", "Read a large image", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: {
         FAKE_PI_MODE: "large-json-event",
         FAKE_PI_JSON_EVENT_CHARS: String(4.5 * 1024 * 1024),
       },
-      timeoutMs: 5_000,
+      staleTimeoutMs: 5_000,
     });
-    assert.equal(accepted.status, "completed");
+    assert.equal(accepted.status, "done");
     assert.equal(accepted.output, "fixture completed");
 
     const rejected = await runChildAgent({
       definition,
-      task: { id: "oversized-event", agent: "reviewer", task: "Reject an oversized event", cwd },
+      task: childTask("oversized-event", "Reject an oversized event", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: {
         FAKE_PI_MODE: "large-json-event",
         FAKE_PI_JSON_EVENT_CHARS: String(8 * 1024 * 1024),
       },
-      timeoutMs: 5_000,
+      staleTimeoutMs: 5_000,
     });
-    assert.equal(rejected.status, "failed");
+    assert.equal(rejected.status, "bugged");
     assert.match(rejected.error, /Child JSON event exceeded 8388608 characters/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });
 
-test("startup and tool budgets stop bounded children", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-bounds-"));
+test("startup faults are bugged while tool and cost usage never stop children", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-stops-"));
   try {
     const startup = await runChildAgent({
       definition,
-      task: { id: "startup", agent: "reviewer", task: "Never starts", cwd },
+      task: childTask("startup", "Never starts", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "startup-hang" },
       startupTimeoutMs: 25,
-      timeoutMs: 500,
+      staleTimeoutMs: 500,
     });
-    assert.equal(startup.status, "failed");
+    assert.equal(startup.status, "bugged");
     assert.match(startup.error, /no Pi protocol event/i);
 
-    const budget = await runChildAgent({
-      definition: { ...definition, maxToolCalls: 2 },
-      task: { id: "budget", agent: "reviewer", task: "Loop", cwd },
+    const manyTools = await runChildAgent({
+      definition,
+      task: childTask("many-tools", "Use many tools", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "tool-loop" },
     });
-    assert.equal(budget.status, "failed");
-    assert.match(budget.error, /tool-call budget/);
+    assert.equal(manyTools.status, "done");
+    assert.equal(manyTools.toolCalls, 10);
 
-    const cost = await runChildAgent({
-      definition: { ...definition, maxCostUsd: 0.01 },
-      task: { id: "cost", agent: "reviewer", task: "Cost", cwd },
+    const highCost = await runChildAgent({
+      definition,
+      task: childTask("high-cost", "Spend reported cost", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_MODE: "success" },
+      env: { FAKE_PI_MODE: "high-stream-cost", FAKE_PI_DELAY_MS: "10" },
     });
-    assert.equal(cost.status, "failed");
-    assert.equal(cost.output, "fixture completed");
-    assert.match(cost.error, /cost budget/);
+    assert.equal(highCost.status, "done");
+    assert.equal(highCost.output, "fixture completed");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
 
-    const streamingCost = await runChildAgent({
-      definition: { ...definition, maxCostUsd: 1 },
-      task: { id: "stream-cost", agent: "reviewer", task: "Stream cost", cwd },
+test("observable protocol and stderr activity reset staleness", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-stale-reset-"));
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("active", "Stay active", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_MODE: "stream-budget" },
+      env: { FAKE_PI_MODE: "activity-heartbeats", FAKE_PI_DELAY_MS: "30" },
+      staleTimeoutMs: 50,
     });
-    assert.equal(streamingCost.status, "failed");
-    assert.equal(streamingCost.output, "streaming");
-    assert.equal(streamingCost.usage.cost.total, 2);
-    assert.match(streamingCost.error, /cost budget/);
+    assert.equal(result.status, "done");
+    assert.match(result.stderr, /still working/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -328,56 +362,56 @@ test("startup and tool budgets stop bounded children", async () => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test("child runner handles malformed output, timeout, and cancellation", async () => {
+test("child runner classifies malformed output, staleness, errors, and cancellation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-failure-"));
   try {
     const malformed = await runChildAgent({
       definition,
-      task: { id: "bad", agent: "reviewer", task: "Malformed", cwd },
+      task: childTask("bad", "Malformed", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "malformed" },
     });
-    assert.equal(malformed.status, "failed");
+    assert.equal(malformed.status, "bugged");
     assert.match(malformed.error, /malformed JSON/);
 
     const malformedHang = await runChildAgent({
       definition,
-      task: { id: "bad-hang", agent: "reviewer", task: "Malformed then hang", cwd },
-      timeoutMs: 500,
+      task: childTask("bad-hang", "Malformed then hang", cwd),
+      staleTimeoutMs: 500,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "malformed-hang" },
     });
-    assert.equal(malformedHang.status, "failed");
+    assert.equal(malformedHang.status, "bugged");
     assert.match(malformedHang.error, /malformed JSON/);
 
     const stderrFailure = await runChildAgent({
       definition,
-      task: { id: "stderr", agent: "reviewer", task: "Fail on stderr", cwd },
+      task: childTask("stderr", "Fail on stderr", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "stderr-failure" },
     });
-    assert.equal(stderrFailure.status, "failed");
+    assert.equal(stderrFailure.status, "error");
     assert.equal(stderrFailure.stderr, "provider authentication failed");
 
-    const timedOut = await runChildAgent({
+    const stale = await runChildAgent({
       definition,
-      task: { id: "slow", agent: "reviewer", task: "Wait", cwd },
-      timeoutMs: 40,
+      task: childTask("slow", "Wait", cwd),
+      staleTimeoutMs: 40,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "quiet" },
     });
-    assert.equal(timedOut.status, "timed_out");
+    assert.equal(stale.status, "stale");
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 30);
     const aborted = await runChildAgent({
       definition,
-      task: { id: "cancel", agent: "reviewer", task: "Wait", cwd },
+      task: childTask("cancel", "Wait", cwd),
       signal: controller.signal,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "hang" },
     });
-    assert.equal(aborted.status, "aborted");
+    assert.equal(aborted.status, "error");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -392,7 +426,7 @@ test("cancellation kills descendants that ignore graceful termination", { skip: 
   try {
     running = runChildAgent({
       definition,
-      task: { id: "descendant", agent: "reviewer", task: "Spawn descendant", cwd },
+      task: childTask("descendant", "Spawn descendant", cwd),
       signal: controller.signal,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "stubborn-descendant", FAKE_PI_PID_FILE: pidFile },
@@ -408,7 +442,7 @@ test("cancellation kills descendants that ignore graceful termination", { skip: 
     }
     assert.ok(descendantPid);
     controller.abort();
-    assert.equal((await running).status, "aborted");
+    assert.equal((await running).status, "error");
 
     const exitDeadline = Date.now() + 1_000;
     let alive = true;

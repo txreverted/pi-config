@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   AGENT_NAMES,
-  DEFAULT_SUBAGENT_TIMEOUT_MS,
   type AgentDefinition,
   type AgentName,
 } from "../extensions/subagents-core.ts";
@@ -24,13 +23,8 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       extensions: [gitExtension],
       prompt: prompt("reviewer"),
       thinking: "high",
-      timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: true,
       mutatesWorkspace: false,
-      maxTurns: 24,
-      maxToolCalls: 96,
-      maxReportedTokens: 2_000_000,
-      maxCostUsd: 2,
     },
     {
       name: "researcher",
@@ -38,13 +32,8 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       extensions: [webExtension],
       prompt: prompt("researcher"),
       thinking: "low",
-      timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: false,
       mutatesWorkspace: false,
-      maxTurns: 16,
-      maxToolCalls: 32,
-      maxReportedTokens: 750_000,
-      maxCostUsd: 1,
     },
     {
       name: "worker",
@@ -52,13 +41,8 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       extensions: [toolsExtension, webExtension],
       prompt: prompt("worker"),
       thinking: "medium",
-      timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: true,
       mutatesWorkspace: true,
-      maxTurns: 32,
-      maxToolCalls: 128,
-      maxReportedTokens: 2_000_000,
-      maxCostUsd: 3,
     },
   ];
   return new Map(agents.map((agent) => [agent.name, agent]));

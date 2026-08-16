@@ -8,8 +8,7 @@ import { StringDecoder } from "node:string_decoder";
 
 export const MAX_SUBAGENT_TASKS = 3;
 export const MAX_SUBAGENT_CONCURRENCY = 3;
-export const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60_000;
-export const MAX_SUBAGENT_TIMEOUT_MS = 30 * 60_000;
+export const SUBAGENT_STALE_TIMEOUT_MS = 2 * 60_000 + 30_000;
 export const MAX_RESULT_BYTES = 16_000;
 const TRUNCATION_NOTICE_BYTES = 160;
 const STARTUP_TIMEOUT_MS = 20_000;
@@ -22,7 +21,7 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
 export const AGENT_NAMES = ["reviewer", "researcher", "worker"] as const;
 export type AgentName = typeof AGENT_NAMES[number];
-export type ChildStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "timed_out";
+export type ChildStatus = "queued" | "starting" | "running" | "done" | "stale" | "bugged" | "error";
 
 export type UsageSummary = Usage;
 
@@ -31,18 +30,14 @@ export interface AgentDefinition {
   tools: readonly string[];
   prompt: string;
   thinking: ThinkingLevel;
-  timeoutMs: number;
   contextFiles: boolean;
   extensions?: readonly string[];
   mutatesWorkspace: boolean;
-  maxTurns: number;
-  maxToolCalls: number;
-  maxReportedTokens: number;
-  maxCostUsd: number;
 }
 
 export interface ChildTask {
   id: string;
+  name: string;
   agent: AgentName;
   task: string;
   cwd: string;
@@ -87,7 +82,7 @@ export interface RunChildOptions {
   task: ChildTask;
   model?: string;
   signal?: AbortSignal;
-  timeoutMs?: number;
+  staleTimeoutMs?: number;
   invocation?: PiInvocation;
   env?: NodeJS.ProcessEnv;
   startupTimeoutMs?: number;
@@ -379,16 +374,18 @@ function summarizeActivity(activeTools: Iterable<ActiveTool>, editedFiles: Reado
   if (names.some((name) => name === "edit" || name === "write")) {
     return editedFiles.size > 0 ? `editing ${editedFiles.size} ${editedFiles.size === 1 ? "file" : "files"}` : "editing files";
   }
-  if (tools.some((tool) => tool.name.toLowerCase() === "bash" &&
-    typeof tool.args?.command === "string" && /\b(?:test|check|typecheck|lint|build)\b/i.test(tool.args.command))) {
-    return "running checks";
-  }
+  const bashCommands = tools
+    .filter((tool) => tool.name.toLowerCase() === "bash" && typeof tool.args?.command === "string")
+    .map((tool) => tool.args!.command as string);
+  if (bashCommands.some((command) => /\b(?:test|check|typecheck|lint|build)\b/i.test(command))) return "running checks";
   if (names.some((name) => name === "web_search" || name === "find" || name === "grep" || name === "rg")) return "searching";
   if (names.includes("web_fetch")) return "reading source";
   if (names.includes("read")) return "reading files";
-  if (names.some((name) => name === "git_status" || name === "git_diff")) return "inspecting changes";
-  if (names.includes("bash")) return "running command";
+  if (names.some((name) => name === "git_status" || name === "git_diff") ||
+    bashCommands.some((command) => /\bgit\s+(?:status|diff)\b/i.test(command))) return "inspecting changes";
   if (names.includes("jq")) return "analyzing data";
+  if (names.includes("ls")) return "browsing files";
+  if (names.includes("bash")) return "running command";
   return tools.at(-1)?.name;
 }
 
@@ -405,21 +402,21 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     text: "",
     usage: emptyUsage(),
   };
-  const finishEarly = (status: ChildStatus, error: string): ChildRunResult => {
+  const finishEarly = (status: "bugged" | "error", error: string): ChildRunResult => {
     const endedAt = Date.now();
     return {
       ...base, status, task: options.task.task, cwd: options.task.cwd, output: "", error,
       exitCode: null, endedAt, durationMs: endedAt - startedAt, truncated: false,
     };
   };
-  if (options.signal?.aborted) return finishEarly("aborted", "Subagent was aborted before launch");
+  if (options.signal?.aborted) return finishEarly("error", "Subagent was cancelled before launch");
 
   let files: Awaited<ReturnType<typeof createRunFiles>>;
   try {
     await validatePreflight(definition, options.task);
     files = await createRunFiles(definition, options.task);
   } catch (error) {
-    return finishEarly("failed", `Subagent preflight failed: ${error instanceof Error ? error.message : String(error)}`);
+    return finishEarly("error", `Subagent preflight failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const args = buildPiArgs({ definition, promptPath: files.promptPath, taskPath: files.taskPath, model: options.model });
@@ -433,7 +430,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   let protocolSeen = false;
   let protocolError: string | undefined;
   let spawnError: string | undefined;
-  let stop: "aborted" | "timed_out" | "startup" | "protocol" | "budget" | undefined;
+  let stop: "aborted" | "stale" | "startup" | "protocol" | undefined;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | undefined;
   const activeTools = new Map<string, ActiveTool>();
@@ -441,7 +438,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   let killTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
   let progressTimer: NodeJS.Timeout | undefined;
-  let timeoutTimer: NodeJS.Timeout | undefined;
+  let staleTimer: NodeJS.Timeout | undefined;
 
   const emit = () => {
     progress = {
@@ -468,16 +465,22 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       stdio: ["ignore", "pipe", "pipe"],
     });
     const decoder = new StringDecoder("utf8");
-    const requestStop = (reason: typeof stop) => {
+    const requestStop = (reason: NonNullable<typeof stop>) => {
       if (stop) return;
       stop = reason;
       terminate(child.pid, "SIGTERM");
       killTimer = setTimeout(() => terminate(child.pid, "SIGKILL"), KILL_GRACE_MS);
       killTimer.unref?.();
     };
+    const recordActivity = () => {
+      if (staleTimer) clearTimeout(staleTimer);
+      staleTimer = setTimeout(() => requestStop("stale"), options.staleTimeoutMs ?? SUBAGENT_STALE_TIMEOUT_MS);
+      staleTimer.unref?.();
+    };
     child.once("spawn", () => {
       startupTimer = setTimeout(() => requestStop("startup"), options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
       startupTimer.unref?.();
+      recordActivity();
       emit();
       if (options.onUpdate) {
         progressTimer = setInterval(emit, SUBAGENT_PROGRESS_INTERVAL_MS);
@@ -502,6 +505,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
         }
         return;
       }
+      recordActivity();
       if (!protocolSeen) {
         protocolSeen = true;
         if (startupTimer) clearTimeout(startupTimer);
@@ -522,19 +526,6 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       }
       progress.currentTool = [...activeTools.values()].at(-1)?.name;
       progress.activity = summarizeActivity(activeTools.values(), editedFiles);
-      const budgetError = state.turns > definition.maxTurns
-        ? `Subagent exceeded its ${definition.maxTurns}-turn budget`
-        : state.toolCalls > definition.maxToolCalls
-          ? `Subagent exceeded its ${definition.maxToolCalls}-tool-call budget`
-          : reportedUsage(state).totalTokens > definition.maxReportedTokens
-            ? `Subagent exceeded its ${definition.maxReportedTokens}-reported-token budget`
-            : reportedUsage(state).cost.total > definition.maxCostUsd
-              ? `Subagent exceeded its $${definition.maxCostUsd.toFixed(2)} cost budget`
-              : undefined;
-      if (budgetError) {
-        protocolError = budgetError;
-        requestStop("budget");
-      }
       emit();
     };
 
@@ -551,14 +542,11 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr = appendTail(stderr, chunk.toString("utf8"), MAX_STDERR_CHARS);
+      recordActivity();
     });
     const onAbort = () => requestStop("aborted");
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener("abort", onAbort, { once: true });
-    const timeoutMs = Math.min(Math.max(1, options.timeoutMs ?? definition.timeoutMs), MAX_SUBAGENT_TIMEOUT_MS);
-    timeoutTimer = setTimeout(() => requestStop("timed_out"), timeoutMs);
-    timeoutTimer.unref?.();
-
     await new Promise<void>((resolveClose) => child.once("close", (code, signal) => {
       exitCode = code;
       exitSignal = signal ?? undefined;
@@ -571,37 +559,37 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   } catch (error) {
     spawnError = error instanceof Error ? error.message : String(error);
   } finally {
-    for (const timer of [killTimer, startupTimer, timeoutTimer]) if (timer) clearTimeout(timer);
+    for (const timer of [killTimer, startupTimer, staleTimer]) if (timer) clearTimeout(timer);
     if (progressTimer) clearInterval(progressTimer);
     await rm(files.dir, { recursive: true, force: true }).catch(() => {});
   }
 
   const bounded = truncateText(state.output || state.partialText || "");
-  let status: ChildStatus = "completed";
+  let status: ChildStatus = "done";
   let error: string | undefined;
   if (stop === "aborted") {
-    status = "aborted";
-    error = "Subagent was aborted";
-  } else if (stop === "timed_out") {
-    status = "timed_out";
-    error = "Subagent timed out";
+    status = "error";
+    error = "Subagent was cancelled";
+  } else if (stop === "stale") {
+    status = "stale";
+    error = "Subagent became stale after no observable activity";
   } else if (stop === "startup") {
-    status = "failed";
+    status = "bugged";
     error = "Subagent emitted no Pi protocol event before the startup deadline";
-  } else if (stop === "protocol" || stop === "budget" || protocolError) {
-    status = "failed";
+  } else if (stop === "protocol" || protocolError) {
+    status = "bugged";
     error = protocolError ?? "Subagent protocol failed";
   } else if (spawnError) {
-    status = "failed";
+    status = "error";
     error = `Failed to start subagent: ${spawnError}`;
   } else if (exitCode !== 0) {
-    status = "failed";
+    status = "error";
     error = `Subagent exited with code ${exitCode ?? "unknown"}`;
   } else if (state.assistantError || state.stopReason === "error" || state.stopReason === "aborted" || state.stopReason === "length") {
-    status = "failed";
+    status = "error";
     error = state.assistantError ?? `Subagent stopped with reason ${state.stopReason}`;
   } else if (!state.output.trim()) {
-    status = "failed";
+    status = "bugged";
     error = "Subagent produced no final text response";
   }
 
