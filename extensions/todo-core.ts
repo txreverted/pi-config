@@ -89,8 +89,8 @@ function validateTasks(tasks: TodoTask[]): void {
     if (task.blockedBy.includes(task.id)) throw new Error(`Task #${task.id} cannot block itself`);
     for (const id of task.blockedBy) {
       if (!byId.has(id)) throw new Error(`Task #${task.id} has dangling blocker #${id}`);
-      if (task.status === "completed" && byId.get(id)?.status !== "completed") {
-        throw new Error(`Task #${task.id} cannot be completed until blocker #${id} is completed`);
+      if (task.status !== "pending" && byId.get(id)?.status !== "completed") {
+        throw new Error(`Task #${task.id} cannot be ${task.status} until blocker #${id} is completed`);
       }
     }
   }

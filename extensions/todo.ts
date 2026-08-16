@@ -35,7 +35,7 @@ const Parameters = Type.Object({
 });
 
 function taskLine(task: TodoTask): string {
-  const mark = task.status === "completed" ? "✓" : task.status === "in_progress" ? "●" : "○";
+  const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
   const activity = task.status === "in_progress" && task.activeForm ? ` — ${task.activeForm}` : "";
   const blockers = task.blockedBy.length ? ` blocked by ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
   return `${mark} #${task.id} ${task.subject}${activity}${blockers}`;
@@ -54,6 +54,23 @@ export function formatTodoOutput(action: TodoAction["action"], snapshot: TodoSna
   return `Cleared ${count ?? 0} todo(s).`;
 }
 
+function migrateLegacyBlockedActiveSnapshot(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const input = value as { tasks?: unknown };
+  if (!Array.isArray(input.tasks)) return value;
+  const active = input.tasks.filter((task) => task && typeof task === "object" && (task as { status?: unknown }).status === "in_progress");
+  if (active.length !== 1) return value;
+  const task = active[0] as { id?: unknown; status: "in_progress"; blockedBy?: unknown };
+  if (!Array.isArray(task.blockedBy)) return value;
+  const completed = new Set(input.tasks.flatMap((candidate) =>
+    candidate && typeof candidate === "object" && (candidate as { status?: unknown }).status === "completed"
+      ? [(candidate as { id?: unknown }).id]
+      : [],
+  ));
+  if (task.blockedBy.every((id) => completed.has(id))) return value;
+  return { ...value, tasks: input.tasks.map((candidate) => candidate === task ? { ...task, status: "pending" } : candidate) };
+}
+
 export function restoreTodoSnapshot(ctx: ExtensionContext): TodoSnapshot {
   let restored = emptyTodoSnapshot();
   for (const entry of ctx.sessionManager.getBranch()) {
@@ -62,7 +79,11 @@ export function restoreTodoSnapshot(ctx: ExtensionContext): TodoSnapshot {
     try {
       restored = validateTodoSnapshot(value);
     } catch {
-      // Ignore malformed or legacy tool results and retain the latest validated snapshot.
+      try {
+        restored = validateTodoSnapshot(migrateLegacyBlockedActiveSnapshot(value));
+      } catch {
+        // Ignore malformed tool results and retain the latest validated snapshot.
+      }
     }
   }
   return restored;
@@ -83,11 +104,14 @@ export default function todoExtension(pi: ExtensionAPI): void {
     }
     latestContext.ui.setWidget(WIDGET_NAME, (_tui, theme) => ({
       render(width: number) {
-        const summary = `Todos · ${snapshot.tasks.filter((task) => task.status === "completed").length}/${snapshot.tasks.length} completed`;
+        const summary = ` Todos · ${snapshot.tasks.filter((task) => task.status === "completed").length}/${snapshot.tasks.length} completed`;
         if (collapsed) return [truncateToWidth(theme.fg("muted", `${summary} (collapsed)`), width)];
         const shown = snapshot.tasks.slice(0, WIDGET_TASK_LINES);
-        const lines = [theme.fg("accent", summary), ...shown.map((task) => taskLine(task))];
-        if (snapshot.tasks.length > shown.length) lines.push(theme.fg("dim", `… ${snapshot.tasks.length - shown.length} more`));
+        const lines = [
+          theme.fg("accent", summary),
+          ...shown.map((task, index) => `${index === 0 ? " └─ " : "    "}${taskLine(task)}`),
+        ];
+        if (snapshot.tasks.length > shown.length) lines.push(theme.fg("dim", `    … ${snapshot.tasks.length - shown.length} more`));
         return lines.map((line) => truncateToWidth(line, width));
       },
       invalidate() {},

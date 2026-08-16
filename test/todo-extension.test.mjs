@@ -72,11 +72,40 @@ test("session events restore the latest validated current-branch snapshot", asyn
   assert.doesNotMatch(listed.content[0].text, /Old/);
 });
 
+test("restoration keeps legacy blocked work by returning it to pending", async () => {
+  const { tool, events } = setup();
+  const legacy = {
+    tasks: [
+      { id: 1, subject: "Blocker", status: "pending", blockedBy: [] },
+      { id: 2, subject: "Dependent", status: "in_progress", blockedBy: [1] },
+    ],
+    nextId: 3,
+  };
+  const ctx = context([resultEntry({ action: "update", snapshot: legacy })], "print");
+
+  events.get("session_start")({}, ctx.value);
+  const listed = await tool.execute("call", { action: "list" });
+  assert.deepEqual(listed.details.snapshot.tasks.map(({ subject, status }) => ({ subject, status })), [
+    { subject: "Blocker", status: "pending" },
+    { subject: "Dependent", status: "pending" },
+  ]);
+});
+
 test("widget stays above the status and input after all todos complete", async () => {
   const { tool, commands, shortcuts, events, dockEvents } = setup();
   const ctx = context();
   events.get("session_start")({}, ctx.value);
   for (let index = 0; index < 10; index++) await tool.execute("call", { action: "create", subject: `Task ${index}` });
+  await tool.execute("call", { action: "update", id: 1, status: "completed" });
+  await tool.execute("call", { action: "update", id: 2, status: "in_progress", activeForm: "Working" });
+  const mixed = ctx.widgets.at(-1).widget({}, { fg: (_color, text) => text }).render(80);
+  assert.deepEqual(mixed.slice(0, 4), [
+    " Todos · 1/10 completed",
+    " └─ ☒ #1 Task 0",
+    "    ■ #2 Task 1 — Working",
+    "    □ #3 Task 2",
+  ]);
+
   for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
 
   const expandedEntry = ctx.widgets.at(-1);
