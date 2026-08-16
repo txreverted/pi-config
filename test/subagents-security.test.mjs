@@ -57,6 +57,18 @@ test("expanded subagent output strips terminal control sequences", () => {
   assert.match(collapsed, / └─ 1 queued/);
   assert.doesNotMatch(collapsed, /reviewer\/high|task-1|\u001b|\u0007|SGFja2Vk|\nfake/);
 
+  const background = tool.renderResult({
+    content: [{ type: "text", text: "Started background subagents" }],
+    details: { progress: [
+      { id: "one", status: "starting" },
+      { id: "two", status: "starting" },
+    ] },
+  }, { expanded: false }, plainTheme, {
+    args: { background: true, tasks: [{ name: "Map config" }, { name: "Inspect code" }] },
+  }).render(120).join("\n");
+  assert.equal(background.trimEnd(), "2 background agents started");
+  assert.doesNotMatch(background, /Map config|Inspect code|starting/);
+
   const worker = tool.renderResult({
     content: [{ type: "text", text: "unused" }],
     details: { progress: [{

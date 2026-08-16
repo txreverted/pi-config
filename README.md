@@ -41,7 +41,7 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 
 ## UI
 
-The `neutral` theme renders sent user messages on exact black (`#000000`). Pi runs in `fullscreen` mode so the transcript scrolls above a bottom-docked UI. The config owns one composite panel above the editor. It orders Todo, Subagents, then active mode status. Ponytail status is hidden by default; set `hideStatus` to `false` in its config to show it. Empty panels disappear. No config widget or footer renders below the editor.
+The `neutral` theme renders sent user messages on exact black (`#000000`). Pi runs in regular TUI mode and uses terminal-owned scrollback. The config owns one composite panel above the editor. It orders Todo, Subagents, then active mode status. Ponytail status is hidden by default; set `hideStatus` to `false` in its config to show it. Empty panels disappear. No config widget or footer renders below the editor.
 
 The editor utility line has this fixed field order:
 
@@ -64,7 +64,7 @@ npm ci --ignore-scripts --omit=dev --legacy-peer-deps
 pi install "$PWD"
 ```
 
-Use `neutral` with `outputPad: 1` and `editorPaddingX: 0`. Set `tuiMode: "fullscreen"` so the editor stays bottom-docked. Keep Pi settings outside this repo.
+Use `neutral` with `outputPad: 1` and `editorPaddingX: 0`. Set `tuiMode: "regular"` in Pi's global settings. Keep Pi settings outside this repo.
 
 ## Check
 
