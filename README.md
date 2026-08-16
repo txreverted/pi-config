@@ -41,7 +41,7 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 
 ## UI
 
-The `neutral` theme renders sent user messages on exact black (`#000000`). The config owns one composite panel above the editor. It orders Todo, Subagents, then the combined Goal and Ponytail mode line. Empty panels disappear. No config widget or footer renders below the editor.
+The `neutral` theme renders sent user messages on exact black (`#000000`). Pi runs in `fullscreen` mode so the transcript scrolls above a bottom-docked UI. The config owns one composite panel above the editor. It orders Todo, Subagents, then active mode status. Ponytail status is hidden by default; set `hideStatus` to `false` in its config to show it. Empty panels disappear. No config widget or footer renders below the editor.
 
 The editor utility line has this fixed field order:
 
@@ -49,7 +49,7 @@ The editor utility line has this fixed field order:
  π v0.84.2 〉~/Documents/pi-config(branch) 〉gpt-5.6-sol (xhigh) 〉0.0%/272k (auto) 〉$0.000 (sub) 〉1m30
 ```
 
-The path, branch, model, thinking level, active-branch cost, authentication type, and current-response time are live. Unknown context is `?%`. OAuth subscriptions show `(sub)`; every other authentication path shows `(api)`. Idle time is `0s`. Narrow terminals wrap at field separators without reordering fields.
+The path, branch, model, thinking level, active-branch cost, authentication type, and current-response time are live. Unknown context is `?%`. OAuth subscriptions show `(sub)`; every other authentication path shows `(api)`. Idle time is `0s`. Narrow terminals wrap at field separators without reordering fields. The utility line sits directly above Pi's complete top-border, input, bottom-border editor frame.
 
 Config-owned lines use one outer space gutter. Config blocks contain at most one consecutive blank row. Tool renderers keep zero internal padding because Pi's tool shell supplies the outer gutter. Display normalization never changes model context, persisted session data, prompts, retained output files, or Markdown semantics.
 
@@ -64,7 +64,7 @@ npm ci --ignore-scripts --omit=dev --legacy-peer-deps
 pi install "$PWD"
 ```
 
-Use `neutral` with `outputPad: 1` and `editorPaddingX: 0` in Pi's global settings. Keep Pi settings outside this repo.
+Use `neutral` with `outputPad: 1` and `editorPaddingX: 0`. Set `tuiMode: "fullscreen"` so the editor stays bottom-docked. Keep Pi settings outside this repo.
 
 ## Check
 

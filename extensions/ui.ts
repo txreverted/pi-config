@@ -69,7 +69,7 @@ export class UtilityEditor extends CustomEditor {
     const safeWidth = Math.max(1, Math.floor(width));
     const editorWidth = Math.max(1, safeWidth - 1);
     const editorLines = super.render(editorWidth);
-    const inputLines = applyUiGutter(editorLines.length > 0 ? editorLines.slice(1) : [], safeWidth);
+    const inputLines = applyUiGutter(editorLines, safeWidth);
     return [...this.renderUtilityLine(safeWidth), ...inputLines];
   }
 }

@@ -96,8 +96,8 @@ function cleanTaskName(value: string): string {
 
 function roleLabel(agent: AgentName): string {
   if (agent === "reviewer") return "Review";
-  if (agent === "researcher") return "Research";
-  return "Work";
+  if (agent === "researcher") return "Explore";
+  return "Agent";
 }
 
 function tokenCount(value: number): string {
@@ -138,7 +138,8 @@ function agentTreeLines(entries: readonly AgentDisplayEntry[], theme: Theme, inc
       ? (progress as ChildRunResult).endedAt - progress.startedAt
       : Date.now() - progress.startedAt;
     const toolUses = `${progress.toolCalls} tool use${progress.toolCalls === 1 ? "" : "s"}`;
-    const stats = `${toolUses} · ${tokenCount(progress.usage.totalTokens)} token · ${duration(elapsed)}`;
+    const tokens = Math.round(progress.usage.totalTokens);
+    const stats = `${toolUses} · ${tokenCount(tokens)} token${tokens === 1 ? "" : "s"} · ${duration(elapsed)}`;
     lines.push(
       `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", shortStatusText(name || progress.id))} ${theme.fg("dim", `· ${stats}`)}`,
       `${continuation} ${theme.fg("dim", progressActivity(progress))}`,

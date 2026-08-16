@@ -103,6 +103,19 @@ test("default and booleans resolve from environment before the preserved config"
   });
 }));
 
+test("Ponytail hides its persistent status unless explicitly enabled", () => withConfigEnvironment(() => {
+  assert.equal(readPonytailHideStatus(), true);
+  assert.deepEqual(loadPonytailSettings(), {
+    defaultMode: "full",
+    quietStartup: false,
+    hideStatus: true,
+    errors: [],
+  });
+
+  process.env.PONYTAIL_HIDE_STATUS = "0";
+  assert.equal(readPonytailHideStatus(), false);
+}));
+
 test("saving a default refuses to destroy malformed configuration", () => withConfigEnvironment(() => {
   const path = ponytailConfigPath();
   mkdirSync(dirname(path), { recursive: true });

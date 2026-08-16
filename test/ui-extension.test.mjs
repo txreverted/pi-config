@@ -230,6 +230,8 @@ test("custom editor delegates input, history, paste, shortcuts, IME cursor, and 
   const multiline = editor.render(40);
   assert.ok(multiline.every((line) => line.startsWith(" ")));
   assert.ok(multiline.every((line) => visibleWidth(line) <= 40));
+  assert.equal(multiline[0], " utility");
+  assert.match(multiline[1], /─/);
   assert.match(multiline.join("\n"), new RegExp(CURSOR_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(multiline.at(-1), /─/);
 
