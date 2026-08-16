@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Usage } from "@earendil-works/pi-ai";
+import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { access, chmod, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -9,7 +10,8 @@ export const MAX_SUBAGENT_TASKS = 3;
 export const MAX_SUBAGENT_CONCURRENCY = 3;
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 15 * 60_000;
 export const MAX_SUBAGENT_TIMEOUT_MS = 30 * 60_000;
-export const MAX_RESULT_CHARS = 16_000;
+export const MAX_RESULT_BYTES = 16_000;
+const TRUNCATION_NOTICE_BYTES = 160;
 const STARTUP_TIMEOUT_MS = 20_000;
 const MAX_JSON_LINE_CHARS = 2 * 1024 * 1024;
 const MAX_STDERR_CHARS = 64 * 1024;
@@ -17,7 +19,7 @@ const KILL_GRACE_MS = 2_000;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
-export const AGENT_NAMES = ["reviewer", "researcher"] as const;
+export const AGENT_NAMES = ["reviewer", "researcher", "worker"] as const;
 export type AgentName = typeof AGENT_NAMES[number];
 export type ChildStatus = "queued" | "starting" | "running" | "completed" | "failed" | "aborted" | "timed_out";
 
@@ -31,6 +33,7 @@ export interface AgentDefinition {
   timeoutMs: number;
   contextFiles: boolean;
   extensions?: readonly string[];
+  mutatesWorkspace: boolean;
   maxTurns: number;
   maxToolCalls: number;
   maxReportedTokens: number;
@@ -51,6 +54,7 @@ export interface ChildRunProgress {
   status: ChildStatus;
   startedAt: number;
   currentTool?: string;
+  activity?: string;
   turns: number;
   toolCalls: number;
   text: string;
@@ -105,6 +109,7 @@ interface ProtocolEventSummary {
   type: string;
   toolName?: string;
   toolCallId?: string;
+  args?: Record<string, unknown>;
 }
 
 export function agentDefinitionForTask(definition: AgentDefinition, modelReasoning: boolean | undefined): AgentDefinition {
@@ -181,11 +186,24 @@ function reportedUsage(state: ProtocolState): UsageSummary {
   return state.streamingUsage ? addUsage(state.usage, state.streamingUsage) : state.usage;
 }
 
-export function truncateText(value: string, maxChars = MAX_RESULT_CHARS): { text: string; truncated: boolean } {
-  if (value.length <= maxChars) return { text: value, truncated: false };
-  const notice = `\n\n[Subagent output truncated; ${value.length - maxChars} or more characters omitted.]`;
+function utf8Prefix(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+export function truncateText(value: string, maxBytes = MAX_RESULT_BYTES): { text: string; truncated: boolean } {
+  const contentLimit = Math.max(1, maxBytes - TRUNCATION_NOTICE_BYTES);
+  const bounded = truncateHead(value, { maxBytes: contentLimit, maxLines: DEFAULT_MAX_LINES });
+  if (!bounded.truncated) return { text: value, truncated: false };
+
+  const content = bounded.firstLineExceedsLimit ? utf8Prefix(value, contentLimit) : bounded.content;
+  const omittedBytes = Math.max(0, bounded.totalBytes - Buffer.byteLength(content, "utf8"));
+  const notice = `\n\n[Subagent output truncated; ${omittedBytes} or more bytes omitted.]`;
   return {
-    text: `${value.slice(0, Math.max(0, maxChars - notice.length)).trimEnd()}${notice}`.slice(0, maxChars),
+    text: utf8Prefix(`${content.trimEnd()}${notice}`, maxBytes),
     truncated: true,
   };
 }
@@ -218,13 +236,16 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
     if (event.assistantMessageEvent && typeof event.assistantMessageEvent === "object") {
       const update = event.assistantMessageEvent as Record<string, unknown>;
       if (update.type === "text_delta" && typeof update.delta === "string") {
-        state.partialText = `${state.partialText ?? ""}${update.delta}`.slice(-MAX_RESULT_CHARS);
+        state.partialText = `${state.partialText ?? ""}${update.delta}`.slice(-MAX_RESULT_BYTES);
       }
     }
   }
   if (event.type.startsWith("tool_execution_")) {
     if (typeof event.toolName === "string") summary.toolName = event.toolName;
     if (typeof event.toolCallId === "string") summary.toolCallId = event.toolCallId;
+    if (event.args && typeof event.args === "object" && !Array.isArray(event.args)) {
+      summary.args = event.args as Record<string, unknown>;
+    }
   }
   if (event.type !== "message_end" || !event.message || typeof event.message !== "object") return summary;
 
@@ -315,8 +336,21 @@ async function createRunFiles(definition: AgentDefinition, task: ChildTask) {
 
 function terminate(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.on("error", () => {});
+      killer.unref();
+    } catch {
+      // The process may already have exited.
+    }
+    return;
+  }
   try {
-    process.kill(process.platform === "win32" ? pid : -pid, signal);
+    process.kill(-pid, signal);
   } catch {
     // The process may already have exited.
   }
@@ -325,6 +359,36 @@ function terminate(pid: number | undefined, signal: NodeJS.Signals): void {
 function appendTail(current: string, chunk: string, limit: number): string {
   const next = current + chunk;
   return next.length <= limit ? next : next.slice(-limit);
+}
+
+interface ActiveTool {
+  name: string;
+  args?: Record<string, unknown>;
+}
+
+function editedPath(args: Record<string, unknown> | undefined): string | undefined {
+  const value = args?.path ?? args?.file_path;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function summarizeActivity(activeTools: Iterable<ActiveTool>, editedFiles: ReadonlySet<string>): string | undefined {
+  const tools = [...activeTools];
+  if (tools.length === 0) return undefined;
+  const names = tools.map((tool) => tool.name.toLowerCase());
+  if (names.some((name) => name === "edit" || name === "write")) {
+    return editedFiles.size > 0 ? `editing ${editedFiles.size} ${editedFiles.size === 1 ? "file" : "files"}` : "editing files";
+  }
+  if (tools.some((tool) => tool.name.toLowerCase() === "bash" &&
+    typeof tool.args?.command === "string" && /\b(?:test|check|typecheck|lint|build)\b/i.test(tool.args.command))) {
+    return "running checks";
+  }
+  if (names.some((name) => name === "web_search" || name === "find" || name === "grep" || name === "rg")) return "searching";
+  if (names.includes("web_fetch")) return "reading source";
+  if (names.includes("read")) return "reading files";
+  if (names.some((name) => name === "git_status" || name === "git_diff")) return "inspecting changes";
+  if (names.includes("bash")) return "running command";
+  if (names.includes("jq")) return "analyzing data";
+  return tools.at(-1)?.name;
 }
 
 export async function runChildAgent(options: RunChildOptions): Promise<ChildRunResult> {
@@ -371,7 +435,8 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   let stop: "aborted" | "timed_out" | "startup" | "protocol" | "budget" | undefined;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | undefined;
-  let activeToolCallId: string | undefined;
+  const activeTools = new Map<string, ActiveTool>();
+  const editedFiles = new Set<string>();
   let killTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
   let timeoutTimer: NodeJS.Timeout | undefined;
@@ -425,7 +490,10 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       }
       const summary = consumeProtocolEvent(line, state);
       if (!summary) {
-        if (line.trim()) protocolError = "Child emitted malformed JSON output";
+        if (line.trim()) {
+          protocolError = "Child emitted malformed JSON output";
+          requestStop("protocol");
+        }
         return;
       }
       if (!protocolSeen) {
@@ -435,12 +503,19 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       progress.status = "running";
       if (summary.type === "tool_execution_start") {
         state.toolCalls++;
-        activeToolCallId = summary.toolCallId;
-        progress.currentTool = summary.toolName ?? "tool";
-      } else if (summary.type === "tool_execution_end" && (!activeToolCallId || summary.toolCallId === activeToolCallId)) {
-        activeToolCallId = undefined;
-        progress.currentTool = undefined;
+        const id = summary.toolCallId ?? `tool-${state.toolCalls}`;
+        const name = summary.toolName ?? "tool";
+        activeTools.set(id, { name, args: summary.args });
+        if (name === "edit" || name === "write") {
+          const path = editedPath(summary.args);
+          if (path) editedFiles.add(path);
+        }
+      } else if (summary.type === "tool_execution_end") {
+        if (summary.toolCallId) activeTools.delete(summary.toolCallId);
+        else activeTools.clear();
       }
+      progress.currentTool = [...activeTools.values()].at(-1)?.name;
+      progress.activity = summarizeActivity(activeTools.values(), editedFiles);
       const budgetError = state.turns > definition.maxTurns
         ? `Subagent exceeded its ${definition.maxTurns}-turn budget`
         : state.toolCalls > definition.maxToolCalls
@@ -483,6 +558,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       exitSignal = signal ?? undefined;
       resolveClose();
     }));
+    if (stop) terminate(child.pid, "SIGKILL");
     options.signal?.removeEventListener("abort", onAbort);
     protocolBuffer += decoder.end();
     if (protocolBuffer.trim() && !stop) processLine(protocolBuffer);
@@ -493,7 +569,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     await rm(files.dir, { recursive: true, force: true }).catch(() => {});
   }
 
-  const bounded = truncateText(state.output);
+  const bounded = truncateText(state.output || state.partialText || "");
   let status: ChildStatus = "completed";
   let error: string | undefined;
   if (stop === "aborted") {
