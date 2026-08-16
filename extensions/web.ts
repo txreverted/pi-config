@@ -1,7 +1,9 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+import { normalizeDisplayText } from "./ui-core.ts";
 import { fetchWebPage, searchWeb, type ReaderMode } from "./web-core.ts";
 
 const MAX_TOOL_CONTENT_BYTES = 40 * 1024;
@@ -118,7 +120,7 @@ export default function webExtension(pi: ExtensionAPI) {
       if (!query) throw new Error("Search query cannot be empty");
       const limit = params.limit ?? 5;
 
-      onUpdate?.({ content: [{ type: "text", text: `Searching the web for: ${query}` }], details: {} });
+      onUpdate?.({ content: [{ type: "text", text: normalizeDisplayText(`Searching the web for: ${query}`) }], details: {} });
       const response = await searchWeb(query, limit, signal);
       return {
         content: [{ type: "text", text: formatSearchResults(query, response) }],
@@ -128,6 +130,10 @@ export default function webExtension(pi: ExtensionAPI) {
           resultCount: response.results.length,
         } satisfies SearchDetails,
       };
+    },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 
@@ -160,7 +166,7 @@ export default function webExtension(pi: ExtensionAPI) {
         throw new Error("web_fetch is disabled while an HTTP proxy is configured because proxy-side DNS resolution would weaken its pinned-DNS SSRF protection. Unset the proxy for this Pi process or use web_search.");
       }
 
-      onUpdate?.({ content: [{ type: "text", text: `Fetching: ${safeDisplayLine(url)}` }], details: {} });
+      onUpdate?.({ content: [{ type: "text", text: normalizeDisplayText(`Fetching: ${safeDisplayLine(url)}`) }], details: {} });
       const page = await fetchWebPage(url, {
         signal,
         readerMode: (params.reader ?? "auto") as ReaderMode,
@@ -197,6 +203,10 @@ export default function webExtension(pi: ExtensionAPI) {
           truncated,
         } satisfies FetchDetails,
       };
+    },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 }

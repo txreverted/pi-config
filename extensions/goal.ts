@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   automaticStopReason,
@@ -10,6 +11,7 @@ import {
   validateGoalSnapshot,
   type GoalSnapshot,
 } from "./goal-core.ts";
+import { normalizeDisplayText, UI_MODE_STATUS_EVENT } from "./ui-core.ts";
 
 const ENTRY = "goal-snapshot";
 const TOOL_NAMES = ["goal_complete", "goal_blocked", "goal_wait"] as const;
@@ -89,12 +91,14 @@ export default function goalExtension(pi: ExtensionAPI): void {
   };
   const syncStatus = (ctx?: ExtensionContext) => {
     latestContext = ctx ?? latestContext;
-    if (!latestContext) return;
     if (!goal) {
-      latestContext.ui.setStatus("goal", undefined);
+      pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
       return;
     }
-    latestContext.ui.setStatus("goal", `goal: ${goal.status} · ${goal.automaticResponses} auto`.slice(0, 200));
+    pi.events.emit(UI_MODE_STATUS_EVENT, {
+      id: "goal",
+      text: `goal: ${goal.status} · ${goal.automaticResponses} auto`.slice(0, 200),
+    });
   };
   const armWaiting = () => {
     clearTimer();
@@ -121,7 +125,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
       setToolsVisible(true);
       persist();
       syncStatus();
-      latestContext?.ui.notify("Goal wait elapsed; continuing when Pi is idle.", "info");
+      latestContext?.ui.notify(normalizeDisplayText("Goal wait elapsed; continuing when Pi is idle."), "info");
       if (latestContext?.isIdle() && !latestContext.hasPendingMessages()) kickoff("automatic");
     }, Math.min(remaining, MAX_WAIT_MS));
   };
@@ -191,6 +195,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
       finish("completed", completionNote(summary, evidence));
       return { ...textResult("Goal completed.", goal!), terminate: true };
     },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
+    },
   });
 
   pi.registerTool({
@@ -230,6 +238,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
       finish("blocked", `${reason} Evidence: ${evidence}`);
       return { ...textResult("Goal marked blocked.", goal!), terminate: true };
     },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
+    },
   });
 
   pi.registerTool({
@@ -264,6 +276,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
       armWaiting();
       return { ...textResult("Goal waiting.", goal), terminate: true };
     },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
+    },
   });
 
   pi.registerCommand("goal", {
@@ -272,11 +288,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
       latestContext = ctx;
       const command = parseGoalCommand(args);
       if (command.type === "invalid") {
-        ctx.ui.notify(command.error.slice(0, 500), "error");
+        ctx.ui.notify(normalizeDisplayText(command.error.slice(0, 500)), "error");
         return;
       }
       if (command.type === "status") {
-        ctx.ui.notify(goal ? `${goal.status}: ${goal.objective}${goal.note ? `\n${goal.note}` : ""}`.slice(0, 4500) : "No goal.", "info");
+        ctx.ui.notify(normalizeDisplayText(goal ? `${goal.status}: ${goal.objective}${goal.note ? `\n${goal.note}` : ""}`.slice(0, 4500) : "No goal."), "info");
         return;
       }
       if (command.type === "clear") {
@@ -288,16 +304,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
         setToolsVisible(false);
         syncStatus(ctx);
         ctx.abort();
-        ctx.ui.notify("Goal cleared.", "info");
+        ctx.ui.notify(normalizeDisplayText("Goal cleared."), "info");
         return;
       }
       if (command.type === "create") {
         if (!ctx.isIdle()) {
-          ctx.ui.notify("Wait for Pi to become idle before starting a goal.", "error");
+          ctx.ui.notify(normalizeDisplayText("Wait for Pi to become idle before starting a goal."), "error");
           return;
         }
         if (goal) {
-          ctx.ui.notify("A goal already exists. Use /goal edit or /goal clear first.", "error");
+          ctx.ui.notify(normalizeDisplayText("A goal already exists. Use /goal edit or /goal clear first."), "error");
           return;
         }
         goal = {
@@ -315,7 +331,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
         return;
       }
       if (!goal) {
-        ctx.ui.notify("No goal.", "error");
+        ctx.ui.notify(normalizeDisplayText("No goal."), "error");
         return;
       }
       if (command.type === "edit") {
@@ -331,7 +347,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
       }
       if (command.type === "pause") {
         if (goal.status === "completed" || goal.status === "blocked") {
-          ctx.ui.notify(`Goal is already ${goal.status}.`, "warning");
+          ctx.ui.notify(normalizeDisplayText(`Goal is already ${goal.status}.`), "warning");
           return;
         }
         clearTimer();
@@ -345,11 +361,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
         return;
       }
       if (goal.status === "completed") {
-        ctx.ui.notify("Cannot resume a completed goal.", "error");
+        ctx.ui.notify(normalizeDisplayText("Cannot resume a completed goal."), "error");
         return;
       }
       if (!ctx.isIdle()) {
-        ctx.ui.notify("Wait for Pi to become idle before resuming the goal.", "error");
+        ctx.ui.notify(normalizeDisplayText("Wait for Pi to become idle before resuming the goal."), "error");
         return;
       }
       clearTimer();
@@ -484,10 +500,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
     if (!continuationPending || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
     kickoff("automatic");
   });
-  pi.on("session_shutdown", (_event, ctx) => {
+  pi.on("session_shutdown", () => {
     clearTimer();
     resetRun();
     latestContext = undefined;
-    ctx.ui.setStatus("goal", undefined);
+    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
   });
 }

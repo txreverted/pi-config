@@ -20,7 +20,7 @@ import {
   type ChildTask,
   type UsageSummary,
 } from "./subagents-core.ts";
-import { STATUS_WIDGET_DOCK_EVENT } from "./ui-core.ts";
+import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 
 const SUBAGENT_WIDGET_INTERVAL_MS = 1_000;
@@ -125,11 +125,11 @@ interface AgentDisplayEntry {
   name?: string;
 }
 
-function renderAgentTree(entries: readonly AgentDisplayEntry[], theme: Theme, includeHeader = false): Text {
+function agentTreeLines(entries: readonly AgentDisplayEntry[], theme: Theme, includeHeader = false): string[] {
   const active = entries.filter((entry) => entry.progress.status !== "queued");
   const queued = entries.length - active.length;
   const indent = includeHeader ? " " : "";
-  const lines: string[] = includeHeader ? [theme.bold(" Agents")] : [];
+  const lines: string[] = includeHeader ? [theme.bold("Agents")] : [];
   active.forEach(({ progress, name }, index) => {
     const last = index === active.length - 1 && queued === 0;
     const branch = theme.fg("dim", `${indent}${last ? " └─" : " ├─"}`);
@@ -145,7 +145,11 @@ function renderAgentTree(entries: readonly AgentDisplayEntry[], theme: Theme, in
     );
   });
   if (queued > 0) lines.push(`${theme.fg("dim", `${indent} └─`)} ${theme.fg("dim", `${queued} queued`)}`);
-  return new Text(lines.join("\n"), 0, 0);
+  return lines;
+}
+
+function renderAgentTree(entries: readonly AgentDisplayEntry[], theme: Theme, includeHeader = false): Text {
+  return new Text(normalizeDisplayText(agentTreeLines(entries, theme, includeHeader).join("\n")), 0, 0);
 }
 
 export function untrustedOutput(results: readonly ChildRunResult[]): string {
@@ -183,10 +187,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     const ctx = widgetContext;
     if (!ctx || ctx.mode !== "tui") return;
     const active = background.active();
-    ctx.ui.setWidget("subagents", active.length > 0
-      ? (_tui, theme) => renderAgentTree(active.map((entry) => ({ progress: entry.progress, name: entry.name })), theme, true)
-      : undefined, { placement: "aboveEditor" });
-    pi.events.emit(STATUS_WIDGET_DOCK_EVENT, undefined);
+    const render: UiPanelRenderer | undefined = active.length > 0
+      ? (_width, theme) => agentTreeLines(active.map((entry) => ({ progress: entry.progress, name: entry.name })), theme, true)
+      : undefined;
+    pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render });
     if (active.length > 0 && !widgetTimer) {
       widgetTimer = setInterval(refreshWidget, SUBAGENT_WIDGET_INTERVAL_MS);
       widgetTimer.unref?.();
@@ -366,7 +370,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     renderResult(result, { expanded }, theme, context) {
       const details = result.details as SubagentToolDetails | undefined;
       const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
-      if (!details || expanded) return new Text(safeSubagentDisplay(content), 0, 0);
+      if (!details || expanded) return new Text(normalizeDisplayText(content), 0, 0);
 
       return renderAgentTree(details.progress.map((progress, index) => ({
         progress,
@@ -415,7 +419,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     },
     renderResult(result) {
       const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
-      return new Text(safeSubagentDisplay(content), 0, 0);
+      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 
@@ -440,6 +444,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         details: { id: params.id, cancelled },
       };
     },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
+    },
   });
 
   pi.on("session_shutdown", async () => {
@@ -450,7 +458,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     if (completionTimer) clearTimeout(completionTimer);
     completionTimer = undefined;
     pendingCompletions.clear();
-    if (ctx?.mode === "tui") ctx.ui.setWidget("subagents", undefined);
+    if (ctx?.mode === "tui") pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
     await background.shutdown();
   });
 }

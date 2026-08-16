@@ -1,36 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import todoExtension from "../extensions/todo.ts";
-import { STATUS_WIDGET_DOCK_EVENT } from "../extensions/ui-core.ts";
+import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
 function setup() {
   const tools = new Map();
   const commands = new Map();
   const shortcuts = new Map();
   const events = new Map();
-  const dockEvents = [];
+  const panelUpdates = [];
   const pi = {
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     registerShortcut(key, shortcut) { shortcuts.set(key, shortcut); },
     on(name, handler) { events.set(name, handler); },
-    events: { emit(name) { dockEvents.push(name); } },
+    events: { emit(name, data) { panelUpdates.push({ name, data }); } },
   };
   todoExtension(pi);
-  return { tool: tools.get("todo"), commands, shortcuts, events, dockEvents };
+  return { tool: tools.get("todo"), commands, shortcuts, events, panelUpdates };
 }
 
 function context(branch = [], mode = "tui") {
-  const widgets = [];
   const notices = [];
   return {
-    widgets,
     notices,
     value: {
       mode,
       sessionManager: { getBranch: () => branch },
       ui: {
-        setWidget: (name, widget, options) => widgets.push({ name, widget, options }),
         notify: (message, level) => notices.push({ message, level }),
       },
     },
@@ -91,16 +88,18 @@ test("restoration keeps legacy blocked work by returning it to pending", async (
   ]);
 });
 
-test("widget stays above the status and input after all todos complete", async () => {
-  const { tool, commands, shortcuts, events, dockEvents } = setup();
+test("todo publishes bounded logical panel content to the composite UI", async () => {
+  const { tool, commands, shortcuts, events, panelUpdates } = setup();
   const ctx = context();
   events.get("session_start")({}, ctx.value);
   for (let index = 0; index < 10; index++) await tool.execute("call", { action: "create", subject: `Task ${index}` });
   await tool.execute("call", { action: "update", id: 1, status: "completed" });
   await tool.execute("call", { action: "update", id: 2, status: "in_progress", activeForm: "Working" });
-  const mixed = ctx.widgets.at(-1).widget({}, { fg: (_color, text) => text }).render(80);
+  const mixedUpdate = panelUpdates.at(-1);
+  assert.equal(mixedUpdate.name, UI_PANEL_EVENT);
+  const mixed = mixedUpdate.data.render(80, { fg: (_color, text) => text });
   assert.deepEqual(mixed.slice(0, 4), [
-    " Todos · 1/10 completed",
+    "Todos · 1/10 completed",
     " └─ ☒ #1 Task 0",
     "    ■ #2 Task 1 — Working",
     "    □ #3 Task 2",
@@ -108,22 +107,20 @@ test("widget stays above the status and input after all todos complete", async (
 
   for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
 
-  const expandedEntry = ctx.widgets.at(-1);
-  const expanded = expandedEntry.widget({}, { fg: (_color, text) => text });
-  assert.ok(expanded.render(80).length <= 8);
-  assert.match(expanded.render(80)[0], /Todos · 10\/10 completed/);
-  assert.deepEqual(expandedEntry.options, { placement: "aboveEditor" });
-  assert.ok(dockEvents.length > 0);
-  assert.ok(dockEvents.every((name) => name === STATUS_WIDGET_DOCK_EVENT));
+  const expanded = panelUpdates.at(-1).data.render;
+  assert.ok(expanded(80, { fg: (_color, text) => text }).length <= 8);
+  assert.match(expanded(80, { fg: (_color, text) => text })[0], /Todos · 10\/10 completed/);
+  assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
   await shortcuts.get("ctrl+shift+t").handler(ctx.value);
-  const collapsed = ctx.widgets.at(-1).widget({}, { fg: (_color, text) => text });
-  assert.equal(collapsed.render(80).length, 1);
+  const collapsed = panelUpdates.at(-1).data.render;
+  assert.equal(collapsed(80, { fg: (_color, text) => text }).length, 1);
   await commands.get("todos").handler("", ctx.value);
   assert.match(ctx.notices.at(-1).message, /Todos \(10\)/);
   assert.match(ctx.notices.at(-1).message, /#10 Task 9/);
-  assert.ok(ctx.widgets.filter((entry) => entry.widget).every((entry) => entry.options?.placement === "aboveEditor"));
+  assert.equal(panelUpdates.at(-1).data.id, "todo");
 
   const headless = context([], "print");
+  const beforeHeadless = panelUpdates.length;
   events.get("session_start")({}, headless.value);
-  assert.equal(headless.widgets.length, 0);
+  assert.equal(panelUpdates.length, beforeHeadless);
 });

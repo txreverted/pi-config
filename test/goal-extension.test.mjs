@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import goalExtension from "../extensions/goal.ts";
+import { UI_MODE_STATUS_EVENT } from "../extensions/ui-core.ts";
 
 function harness(branch = []) {
   const tools = new Map();
@@ -22,6 +23,11 @@ function harness(branch = []) {
     getActiveTools() { return [...active]; },
     setActiveTools(names) { active = [...names]; },
     sendUserMessage(text) { messages.push(text); },
+    events: {
+      emit(name, data) {
+        if (name === UI_MODE_STATUS_EVENT) statuses.push({ name: data.id, value: data.text });
+      },
+    },
   };
   goalExtension(pi);
   const context = {
@@ -31,7 +37,6 @@ function harness(branch = []) {
     abort: () => { aborts++; },
     sessionManager: { getBranch: () => branch },
     ui: {
-      setStatus: (name, value) => statuses.push({ name, value }),
       notify: (message, level) => notices.push({ message, level }),
     },
   };
@@ -83,6 +88,15 @@ test("goal activation waits for an idle boundary", async () => {
   assert.equal(h.messages.length, 0);
   assert.equal(h.entries.length, 0);
   assert.match(h.notices.at(-1).message, /idle/);
+});
+
+test("goal notifications collapse repeated display-only blank rows", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("First line\n\n\nSecond line", h.context);
+  await h.commands.get("goal").handler("status", h.context);
+  assert.match(h.notices.at(-1).message, /First line Second line/);
+  assert.doesNotMatch(h.notices.at(-1).message, /\n\s*\n\s*\n/);
 });
 
 test("goal completion requires separate verification evidence", async () => {

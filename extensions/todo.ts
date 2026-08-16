@@ -1,6 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   applyTodoAction,
@@ -13,10 +13,9 @@ import {
   type TodoSnapshot,
   type TodoTask,
 } from "./todo-core.ts";
-import { STATUS_WIDGET_DOCK_EVENT } from "./ui-core.ts";
+import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
 
 const TOOL_NAME = "todo";
-const WIDGET_NAME = "todos";
 const WIDGET_TASK_LINES = 6;
 
 interface TodoDetails {
@@ -98,25 +97,21 @@ export default function todoExtension(pi: ExtensionAPI): void {
     latestContext = ctx ?? latestContext;
     if (latestContext?.mode !== "tui") return;
     if (!snapshot.tasks.length) {
-      latestContext.ui.setWidget(WIDGET_NAME, undefined);
-      pi.events.emit(STATUS_WIDGET_DOCK_EVENT, undefined);
+      pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
       return;
     }
-    latestContext.ui.setWidget(WIDGET_NAME, (_tui, theme) => ({
-      render(width: number) {
-        const summary = ` Todos · ${snapshot.tasks.filter((task) => task.status === "completed").length}/${snapshot.tasks.length} completed`;
-        if (collapsed) return [truncateToWidth(theme.fg("muted", `${summary} (collapsed)`), width)];
-        const shown = snapshot.tasks.slice(0, WIDGET_TASK_LINES);
-        const lines = [
-          theme.fg("accent", summary),
-          ...shown.map((task, index) => `${index === 0 ? " └─ " : "    "}${taskLine(task)}`),
-        ];
-        if (snapshot.tasks.length > shown.length) lines.push(theme.fg("dim", `    … ${snapshot.tasks.length - shown.length} more`));
-        return lines.map((line) => truncateToWidth(line, width));
-      },
-      invalidate() {},
-    }), { placement: "aboveEditor" });
-    pi.events.emit(STATUS_WIDGET_DOCK_EVENT, undefined);
+    const render: UiPanelRenderer = (width, theme) => {
+      const summary = `Todos · ${snapshot.tasks.filter((task) => task.status === "completed").length}/${snapshot.tasks.length} completed`;
+      if (collapsed) return [truncateToWidth(theme.fg("muted", `${summary} (collapsed)`), width)];
+      const shown = snapshot.tasks.slice(0, WIDGET_TASK_LINES);
+      const lines = [
+        theme.fg("accent", summary),
+        ...shown.map((task, index) => `${index === 0 ? " └─ " : "    "}${taskLine(task)}`),
+      ];
+      if (snapshot.tasks.length > shown.length) lines.push(theme.fg("dim", `    … ${snapshot.tasks.length - shown.length} more`));
+      return lines.map((line) => truncateToWidth(line, width));
+    };
+    pi.events.emit(UI_PANEL_EVENT, { id: "todo", render });
   };
 
   const restore = (ctx: ExtensionContext) => {
@@ -142,6 +137,10 @@ export default function todoExtension(pi: ExtensionAPI): void {
         details: { action: params.action, snapshot: copyTodoSnapshot(snapshot) } satisfies TodoDetails,
       };
     },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
+    },
   });
 
   pi.registerCommand("todos", {
@@ -151,12 +150,12 @@ export default function todoExtension(pi: ExtensionAPI): void {
         ? `Todos (${snapshot.tasks.length}):\n${formatTodoOutput("list", snapshot)}`
         : "No todos.";
       if (ctx.mode !== "tui") {
-        ctx.ui.notify(output, "info");
+        ctx.ui.notify(normalizeDisplayText(output), "info");
         return;
       }
       collapsed = false;
       syncWidget(ctx);
-      ctx.ui.notify(output, "info");
+      ctx.ui.notify(normalizeDisplayText(output), "info");
     },
   });
 
@@ -173,6 +172,6 @@ export default function todoExtension(pi: ExtensionAPI): void {
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_compact", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
-    if (ctx.mode === "tui") ctx.ui.setWidget(WIDGET_NAME, undefined);
+    if (ctx.mode === "tui") pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
   });
 }

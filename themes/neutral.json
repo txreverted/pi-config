@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "neutral",
   "vars": {
+    "black": "#000000",
     "base": "#151515",
     "mantle": "#0d0d0d",
     "surface0": "#272727",
@@ -36,7 +37,7 @@
     "scrollbarThumb": "surface2",
     "searchMatchBg": "mid",
     "searchMatchText": "base",
-    "userMessageBg": "mantle",
+    "userMessageBg": "black",
     "userMessageText": "text",
     "customMessageBg": "customBg",
     "customMessageText": "text",

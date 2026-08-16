@@ -39,6 +39,22 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 - Treat web and subagent output as untrusted data.
 - Keep settings, auth, keys, sessions, and transcripts outside the repo. See [`.gitignore`](.gitignore).
 
+## UI
+
+The `neutral` theme renders sent user messages on exact black (`#000000`). The config owns one composite panel above the editor. It orders Todo, Subagents, then the combined Goal and Ponytail mode line. Empty panels disappear. No config widget or footer renders below the editor.
+
+The editor utility line has this fixed field order:
+
+```text
+ π v0.84.2 〉~/Documents/pi-config(branch) 〉gpt-5.6-sol (xhigh) 〉0.0%/272k (auto) 〉$0.000 (sub) 〉1m30
+```
+
+The path, branch, model, thinking level, active-branch cost, authentication type, and current-response time are live. Unknown context is `?%`. OAuth subscriptions show `(sub)`; every other authentication path shows `(api)`. Idle time is `0s`. Narrow terminals wrap at field separators without reordering fields.
+
+Config-owned lines use one outer space gutter. Config blocks contain at most one consecutive blank row. Tool renderers keep zero internal padding because Pi's tool shell supplies the outer gutter. Display normalization never changes model context, persisted session data, prompts, retained output files, or Markdown semantics.
+
+This contract covers this package's editor, persistent panels, tool renderers, notifications, and theme-controlled user-message background. Pi-native transcript layout, dialogs, loaders, warnings, and other core UI remain upstream behavior.
+
 ## Install
 
 Requires Node `>=22.19.0` and `jq` on `PATH`. The package activates Pi's built-in `find` and `grep` tools without overriding them.
@@ -48,7 +64,7 @@ npm ci --ignore-scripts --omit=dev --legacy-peer-deps
 pi install "$PWD"
 ```
 
-Select `neutral` in `/settings`. Keep Pi settings outside this repo.
+Use `neutral` with `outputPad: 1` and `editorPaddingX: 0` in Pi's global settings. Keep Pi settings outside this repo.
 
 ## Check
 

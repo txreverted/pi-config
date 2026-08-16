@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentRegistry } from "../subagents/registry.ts";
 import subagentsExtension, { safeSubagentDisplay, untrustedOutput } from "../extensions/subagents.ts";
 import { MAX_SUBAGENT_TASKS } from "../extensions/subagents-core.ts";
+import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
 const allowedTools = new Set([
   "read", "bash", "edit", "write", "grep", "find", "ls", "jq",
@@ -264,13 +265,12 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     const tools = new Map();
     const events = new Map();
     const messages = [];
-    const widgetFactories = [];
-    const dockEvents = [];
+    const panelUpdates = [];
     subagentsExtension({
       registerTool(value) { tools.set(value.name, value); },
       on(event, handler) { events.set(event, handler); },
       sendMessage(message, options) { messages.push({ message, options }); },
-      events: { emit(name) { dockEvents.push(name); } },
+      events: { emit(name, data) { panelUpdates.push({ name, data }); } },
     });
     shutdown = () => events.get("session_shutdown")?.();
 
@@ -279,11 +279,7 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       mode: "tui",
       model: { provider: "fixture", id: "test-model", reasoning: true },
       isProjectTrusted: () => true,
-      ui: {
-        setWidget(_name, factory, options) {
-          if (factory) widgetFactories.push({ factory, options });
-        },
-      },
+      ui: {},
     };
     events.get("session_start")({}, context);
 
@@ -297,14 +293,13 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     const ids = started.details.progress.map((entry) => entry.id);
     assert.equal(ids.length, 2);
     assert.ok(ids.every(Boolean));
-    assert.ok(widgetFactories.length > 0);
+    assert.ok(panelUpdates.length > 0);
 
     const plainTheme = { fg: (_color, value) => value, bold: (value) => value };
-    assert.deepEqual(widgetFactories.at(-1).options, { placement: "aboveEditor" });
-    assert.ok(dockEvents.length > 0);
-    const widget = widgetFactories.at(-1).factory({}, plainTheme).render(160)
+    assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
+    const widget = panelUpdates.at(-1).data.render(160, plainTheme)
       .map((line) => line.trimEnd()).join("\n");
-    assert.match(widget, /^ Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
+    assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
 
     await waitFor(() => messages.length > 0);
     await sleep(150);
