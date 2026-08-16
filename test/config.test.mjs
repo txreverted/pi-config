@@ -30,7 +30,7 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
   assert.deepEqual(packageJson.pi.skills, ["./skills"]);
   assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
   assert.deepEqual(packageJson.pi.themes, themeNames.map((name) => `./themes/${name}.json`));
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
+  assert.deepEqual(packageJson.files, ["assets", "extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), [
     "implement-review.md",
     "list-improvements.md",
@@ -67,6 +67,7 @@ test("package contents include runtime resources and exclude repository-only sta
     for (const path of [
       "package.json",
       "README.md",
+      "assets/pi-config.png",
       ...packageJson.pi.extensions.map((path) => path.replace(/^\.\//, "")),
       ...packageJson.pi.themes.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",

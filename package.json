@@ -7,6 +7,7 @@
     "pi-package"
   ],
   "files": [
+    "assets",
     "extensions",
     "prompts",
     "skills",
