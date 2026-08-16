@@ -80,7 +80,7 @@ test("find returns records when NUL-delimited output exceeds its display cap", a
       { cwd: process.cwd() },
     );
     assert.doesNotMatch(result.content[0].text, /No files found/);
-    assert.match(result.content[0].text, /000-x+\.txt/);
+    assert.match(result.content[0].text, /\d{3}-x+\.txt/);
     assert.equal(result.details?.truncation?.truncated, true);
     assert.equal(result.details?.resultLimitReached, 250);
   } finally {

@@ -4,6 +4,8 @@ import { access, readFile, readdir } from "node:fs/promises";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
+const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
 const themeNames = ["neutral"];
 const themes = await Promise.all(themeNames.map(async (name) =>
   JSON.parse(await readFile(new URL(`../themes/${name}.json`, import.meta.url), "utf8"))
@@ -67,6 +69,19 @@ test("theme stays neutral except for added and removed diff lines", () => {
     assert.equal(red, green, token);
     assert.equal(green, blue, token);
   }
+});
+
+test("CI checks pushes and the human guide keeps operational safety facts", () => {
+  assert.match(workflow, /^on:\n  push:\n  pull_request:/m);
+  for (const pattern of [
+    /worker.*local user's privileges/i,
+    /Goal mode can use every active tool and provider quota/,
+    /token budget can overshoot by one response and is not a dollar-cost limit/i,
+    /Never send secrets or private code through `web_search`/,
+    /Never pass signed URLs or private query tokens to `web_fetch`/,
+    /installs `fd` and `rg` on first use unless `PI_OFFLINE=1`/,
+    /PI_LIVE_SUBAGENT_WORKER=1/,
+  ]) assert.match(readme, pattern);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {
