@@ -1,197 +1,52 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import todoExtension from "../extensions/todo.ts";
-import uiExtension from "../extensions/ui.ts";
-import ponytailExtension from "../extensions/ponytail.ts";
-import { STATUS_WIDGET_DOCK_EVENT } from "../extensions/ui-core.ts";
+import {
+  CURSOR_MARKER,
+  KeybindingsManager,
+  stripTerminalSequences,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
+import uiExtension, { UtilityEditor } from "../extensions/ui.ts";
+import {
+  UI_MODE_STATUS_EVENT,
+  UI_PANEL_EVENT,
+  UI_WIDGET_NAME,
+  isVisuallyBlank,
+} from "../extensions/ui-core.ts";
 
-function theme() {
-  return {
-    fg: (color, value) => `<${color}>${value}</${color}>`,
-    bold: (value) => value,
-  };
-}
+const plainTheme = {
+  fg: (_color, value) => value,
+  bold: (value) => value,
+};
 
-test("status widget renders unknown context honestly and caches unchanged session cost", () => {
-  const handlers = new Map();
-  const busHandlers = new Map();
+const editorTheme = {
+  borderColor: (value) => value,
+  selectList: {
+    selectedPrefix: (value) => value,
+    selectedText: (value) => value,
+    description: (value) => value,
+    scrollInfo: (value) => value,
+    noMatch: (value) => value,
+  },
+};
+
+function createHarness() {
+  const lifecycle = new Map();
+  const bus = new Map();
   const widgetCalls = [];
-  let widgetFactory;
-  let contextUsage;
-  let branchReads = 0;
-  const extensionStatuses = new Map();
-  const entries = [{
-    type: "message",
-    message: { role: "assistant", usage: { cost: { total: 1.25 } } },
-  }];
-  let activeEntries = entries;
-  const pi = {
-    on(event, handler) { handlers.set(event, handler); },
-    events: { on(event, handler) { busHandlers.set(event, handler); } },
-  };
-  uiExtension(pi);
-  const ctx = {
-    mode: "tui",
-    cwd: "/tmp/project\u202e",
-    model: { id: "model\u001b]0;unsafe\u0007", provider: "fixture", contextWindow: 128_000 },
-    thinkingLevel: "high",
-    modelRegistry: {
-      getProvider: () => undefined,
-      isUsingOAuth: () => false,
-    },
-    sessionManager: {
-      getSessionName: () => undefined,
-      getBranch() { branchReads++; return activeEntries; },
-    },
-    getContextUsage: () => contextUsage,
-    ui: {
-      setFooter(factory) {
-        factory({}, theme(), {
-          getGitBranch: () => "main\u001b[31m\u001b[0m",
-          getExtensionStatuses: () => extensionStatuses,
-          onBranchChange: () => () => {},
-        });
-      },
-      setHeader() {},
-      setWidget(name, factory, options) {
-        widgetFactory = factory;
-        widgetCalls.push({ name, factory, options });
-      },
-    },
-  };
+  const widgets = new Map();
+  let editorFactory;
+  let header;
+  let footer;
+  let branch = "branch";
+  let branchListener = () => {};
+  let contextUsage = { percent: 0, contextWindow: 272_000 };
+  let subscription = true;
+  let activeEntries = [];
+  let renders = 0;
 
-  handlers.get("session_start")({}, ctx);
-  assert.deepEqual(widgetCalls.at(-1).options, { placement: "aboveEditor" });
-  busHandlers.get(STATUS_WIDGET_DOCK_EVENT)();
-  assert.equal(widgetCalls.length, 2);
-  assert.equal(widgetCalls.at(-1).name, "minimal-status");
-  assert.deepEqual(widgetCalls.at(-1).options, { placement: "aboveEditor" });
-  const widget = widgetFactory({ requestRender() {} }, theme());
-  const first = widget.render(200).join("\n");
-  const second = widget.render(200).join("\n");
-  assert.ok(first.startsWith("\n<accent>π</accent>"));
-  assert.match(first, /<muted>\?%\/128k \(auto\)<\/muted>/);
-  assert.equal(first.split("〉").length - 1, 4);
-  assert.match(first, /<accent>\/tmp\/project\(main\)<\/accent>/);
-  assert.match(first, /<syntaxType>model \(high\)<\/syntaxType>/);
-  assert.match(first, /<syntaxNumber>\$1\.250<\/syntaxNumber>/);
-  assert.equal(second, first);
-  assert.equal(branchReads, 2);
-
-  for (const [percent, color] of [[70, "success"], [70.1, "warning"], [90, "warning"], [90.1, "error"]]) {
-    contextUsage = { percent, contextWindow: 128_000 };
-    assert.ok(widget.render(200).join("\n").includes(`<${color}>${percent.toFixed(1)}%/128k (auto)</${color}>`));
-  }
-
-  entries.push({ type: "message", message: { role: "assistant", usage: { cost: { total: 0.75 } } } });
-  assert.match(widget.render(200).join("\n"), /\$2\.000/);
-  extensionStatuses.set("goal", "goal: paused · 4/25 auto");
-  extensionStatuses.set("ponytail", "\u001b]52;c;SGFja2Vk\u0007○ 🐴 ponytail: ⚡ FULL\u202e");
-  assert.match(widget.render(200).join("\n"), /<customMessageLabel>goal: paused · 4\/25 auto<\/customMessageLabel>/);
-  assert.match(widget.render(200).join("\n"), /<customMessageLabel>○ 🐴 ponytail: ⚡ FULL<\/customMessageLabel>/);
-  assert.doesNotMatch(widget.render(200).join("\n"), /[\u001b\u0007\u202e]/);
-
-  entries[0].message.usage.cost.total = 2.25;
-  handlers.get("message_end")({}, ctx);
-  assert.match(widget.render(200).join("\n"), /\$3\.000/);
-
-  entries[0].message.usage.cost.total = 3.25;
-  handlers.get("session_compact")({}, ctx);
-  assert.match(widget.render(200).join("\n"), /\$4\.000/);
-
-  activeEntries = [{ type: "message", message: { role: "assistant", usage: { cost: { total: 0.25 } } } }];
-  handlers.get("session_tree")({}, ctx);
-  assert.match(widget.render(200).join("\n"), /\$0\.250/);
-  assert.doesNotMatch(widget.render(200).join("\n"), /\$3\.000/);
-
-  handlers.get("agent_start")({}, ctx);
-  assert.match(widget.render(200).join("\n"), /<customMessageLabel>0s<\/customMessageLabel>/);
-  handlers.get("agent_settled")();
-  widget.dispose();
-  handlers.get("session_shutdown")();
-});
-
-test("todo updates stay above the status line and never below the input", async () => {
-  const lifecycle = new Map();
-  const bus = new Map();
-  const tools = new Map();
-  const widgetsAbove = new Map();
-  const widgetsBelow = new Map();
-  const pi = {
-    on(event, handler) {
-      const handlers = lifecycle.get(event) ?? [];
-      handlers.push(handler);
-      lifecycle.set(event, handlers);
-    },
-    events: {
-      on(event, handler) { bus.set(event, handler); },
-      emit(event, data) { bus.get(event)?.(data); },
-    },
-    registerTool(tool) { tools.set(tool.name, tool); },
-    registerCommand() {},
-    registerShortcut() {},
-  };
-  uiExtension(pi);
-  todoExtension(pi);
-
-  const ctx = {
-    mode: "tui",
-    cwd: "/tmp/project",
-    model: { id: "model", provider: "fixture", contextWindow: 128_000 },
-    thinkingLevel: "high",
-    modelRegistry: { getProvider: () => undefined, isUsingOAuth: () => false },
-    sessionManager: {
-      getBranch: () => [],
-      getEntries: () => [],
-      getSessionName: () => undefined,
-    },
-    getContextUsage: () => undefined,
-    ui: {
-      setFooter(factory) {
-        factory({}, theme(), {
-          getGitBranch: () => "main",
-          getExtensionStatuses: () => new Map(),
-          onBranchChange: () => () => {},
-        });
-      },
-      setHeader() {},
-      setWidget(name, content, options) {
-        widgetsAbove.delete(name);
-        widgetsBelow.delete(name);
-        if (content !== undefined) {
-          (options?.placement === "belowEditor" ? widgetsBelow : widgetsAbove).set(name, content);
-        }
-      },
-      notify() {},
-    },
-  };
-
-  for (const handler of lifecycle.get("session_start")) await handler({}, ctx);
-  await tools.get("todo").execute("create", { action: "create", subject: "Sticky task" });
-  assert.deepEqual([...widgetsAbove.keys()], ["todos", "minimal-status"]);
-  assert.deepEqual([...widgetsBelow.keys()], []);
-
-  for (const handler of lifecycle.get("session_shutdown")) await handler({}, ctx);
-});
-
-test("custom UI and Ponytail compose in the complete extension order", async () => {
-  const configRoot = mkdtempSync(join(tmpdir(), "pi-ui-ponytail-"));
-  const previous = process.env.XDG_CONFIG_HOME;
-  const previousHideStatus = process.env.PONYTAIL_HIDE_STATUS;
-  const previousDefaultMode = process.env.PONYTAIL_DEFAULT_MODE;
-  const previousQuietStartup = process.env.PONYTAIL_QUIET_STARTUP;
-  process.env.XDG_CONFIG_HOME = configRoot;
-  delete process.env.PONYTAIL_HIDE_STATUS;
-  delete process.env.PONYTAIL_DEFAULT_MODE;
-  delete process.env.PONYTAIL_QUIET_STARTUP;
-  const lifecycle = new Map();
-  const bus = new Map();
-  const commands = new Map();
-  const statuses = new Map();
-  let statusWidget;
   const pi = {
     on(name, handler) {
       const handlers = lifecycle.get(name) ?? [];
@@ -199,68 +54,213 @@ test("custom UI and Ponytail compose in the complete extension order", async () 
       lifecycle.set(name, handlers);
     },
     events: {
-      on(name, handler) { bus.set(name, handler); },
-      emit(name, value) { bus.get(name)?.(value); },
+      on(name, handler) {
+        const handlers = bus.get(name) ?? [];
+        handlers.push(handler);
+        bus.set(name, handlers);
+      },
+      emit(name, data) {
+        for (const handler of bus.get(name) ?? []) handler(data);
+      },
     },
-    registerCommand(name, command) { commands.set(name, command); },
-    appendEntry() {},
-    sendUserMessage() {},
   };
-  uiExtension(pi);
-  ponytailExtension(pi);
   const ctx = {
     mode: "tui",
-    cwd: "/tmp/project",
-    model: { id: "model", provider: "fixture", contextWindow: 128_000 },
-    thinkingLevel: "high",
-    isIdle: () => true,
-    getContextUsage: () => undefined,
-    modelRegistry: { getProvider: () => undefined, isUsingOAuth: () => false },
-    sessionManager: { getBranch: () => [], getSessionName: () => undefined },
+    cwd: join(homedir(), "Documents", "pi-config"),
+    model: { id: "gpt-5.6-sol", provider: "fixture", contextWindow: 272_000 },
+    thinkingLevel: "xhigh",
+    modelRegistry: {
+      getProvider: () => ({ auth: { oauth: { isSubscription: subscription } } }),
+      isUsingOAuth: () => subscription,
+    },
+    sessionManager: {
+      getBranch: () => activeEntries,
+    },
+    getContextUsage: () => contextUsage,
     ui: {
+      theme: plainTheme,
       setFooter(factory) {
-        factory({}, theme(), {
-          getGitBranch: () => "main",
-          getExtensionStatuses: () => statuses,
-          onBranchChange: () => () => {},
+        footer = factory({}, plainTheme, {
+          getGitBranch: () => branch,
+          getExtensionStatuses: () => new Map(),
+          onBranchChange(callback) {
+            branchListener = callback;
+            return () => { branchListener = () => {}; };
+          },
         });
       },
-      setHeader() {},
-      setWidget(name, factory) { if (name === "minimal-status") statusWidget = factory?.({ requestRender() {} }, theme()); },
-      setStatus(name, value) { if (value === undefined) statuses.delete(name); else statuses.set(name, value); },
-      notify() {},
+      setHeader(factory) { header = factory({}, plainTheme); },
+      setEditorComponent(factory) { editorFactory = factory; },
+      setWidget(name, factory, options) {
+        widgetCalls.push({ name, factory, options });
+        if (factory === undefined) widgets.delete(name);
+        else widgets.set(name, { factory, options });
+      },
     },
   };
+  const tui = {
+    terminal: { rows: 24, columns: 220 },
+    requestRender() { renders++; },
+  };
 
+  return {
+    pi,
+    ctx,
+    tui,
+    lifecycle,
+    widgetCalls,
+    widgets,
+    start() {
+      for (const handler of lifecycle.get("session_start") ?? []) handler({}, ctx);
+    },
+    emit(name, event = {}) {
+      for (const handler of lifecycle.get(name) ?? []) handler(event, ctx);
+    },
+    editor() {
+      return editorFactory(tui, editorTheme, new KeybindingsManager({}));
+    },
+    header: () => header,
+    footer: () => footer,
+    setBranch(value) { branch = value; branchListener(); },
+    setContextUsage(value) { contextUsage = value; },
+    setSubscription(value) { subscription = value; },
+    setEntries(value) { activeEntries = value; },
+    renders: () => renders,
+  };
+}
+
+test("editor utility follows the fixed schema, active branch, auth, context, and response timer", () => {
+  const h = createHarness();
+  uiExtension(h.pi);
+  h.start();
+  const editor = h.editor();
+
+  assert.deepEqual(h.header().render(), []);
+  assert.deepEqual(h.footer().render(), []);
+  assert.equal(
+    stripTerminalSequences(editor.render(220)[0]).trimEnd(),
+    " π v0.84.2 〉~/Documents/pi-config(branch) 〉gpt-5.6-sol (xhigh) 〉0.0%/272k (auto) 〉$0.000 (sub) 〉0s",
+  );
+
+  h.setEntries([{ type: "message", message: { role: "assistant", usage: { cost: { total: 1.25 } } } }]);
+  h.emit("message_end");
+  assert.match(stripTerminalSequences(editor.render(220)[0]), /\$1\.250 \(sub\)/);
+  h.setEntries([{ type: "message", message: { role: "assistant", usage: { cost: { total: 0.25 } } } }]);
+  h.emit("session_tree");
+  assert.match(stripTerminalSequences(editor.render(220)[0]), /\$0\.250 \(sub\)/);
+  assert.doesNotMatch(stripTerminalSequences(editor.render(220)[0]), /\$1\.250/);
+
+  h.setBranch("feature\u001b]52;c;bad\u0007\u202e");
+  assert.match(stripTerminalSequences(editor.render(220)[0]), /pi-config\(feature\)/);
+  assert.doesNotMatch(editor.render(220)[0], /bad|\u202e/);
+  h.setContextUsage(undefined);
+  h.setSubscription(false);
+  const api = stripTerminalSequences(editor.render(220).join("\n"));
+  assert.match(api, /\?%\/272k \(auto\)/);
+  assert.match(api, /\$0\.250 \(api\)/);
+
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
   try {
-    for (const handler of lifecycle.get("session_start")) await handler({}, ctx);
-    assert.match(statusWidget.render(200).join("\n"), /○ 🐴 ponytail: ⚡ FULL/);
-    for (const handler of lifecycle.get("agent_start")) await handler({}, ctx);
-    assert.match(statusWidget.render(200).join("\n"), /● 🐴 ponytail: ⚡ FULL/);
-    statuses.set("unsafe", "safe\u001b]52;c;SGFja2Vk\u0007 status\u202e");
-    const sanitized = statusWidget.render(200).join("\n");
-    assert.match(sanitized, /safe status/);
-    assert.doesNotMatch(sanitized, /[\u001b\u0007\u202e]|SGFja2Vk/);
-    statuses.delete("unsafe");
-    await commands.get("ponytail").handler("off", ctx);
-    assert.doesNotMatch(statusWidget.render(200).join("\n"), /ponytail/);
-    for (const handler of lifecycle.get("session_shutdown")) await handler({}, ctx);
-    assert.equal(statuses.size, 0);
-
-    process.env.PONYTAIL_HIDE_STATUS = "true";
-    for (const handler of lifecycle.get("session_start")) await handler({}, ctx);
-    assert.doesNotMatch(statusWidget.render(200).join("\n"), /ponytail/);
-    for (const handler of lifecycle.get("session_shutdown")) await handler({}, ctx);
-    assert.equal(statuses.size, 0);
+    h.emit("agent_start");
+    now += 90_000;
+    assert.match(stripTerminalSequences(editor.render(220).join("\n")), /1m30/);
+    h.emit("agent_settled");
+    assert.match(stripTerminalSequences(editor.render(220).join("\n")), /0s/);
   } finally {
-    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
-    else process.env.XDG_CONFIG_HOME = previous;
-    if (previousHideStatus === undefined) delete process.env.PONYTAIL_HIDE_STATUS;
-    else process.env.PONYTAIL_HIDE_STATUS = previousHideStatus;
-    if (previousDefaultMode === undefined) delete process.env.PONYTAIL_DEFAULT_MODE;
-    else process.env.PONYTAIL_DEFAULT_MODE = previousDefaultMode;
-    if (previousQuietStartup === undefined) delete process.env.PONYTAIL_QUIET_STARTUP;
-    else process.env.PONYTAIL_QUIET_STARTUP = previousQuietStartup;
-    rmSync(configRoot, { recursive: true, force: true });
+    Date.now = realNow;
+    h.emit("session_shutdown");
   }
+  assert.ok(h.renders() > 0);
+});
+
+test("one composite above-editor widget orders panels and modes with one blank row", () => {
+  const h = createHarness();
+  uiExtension(h.pi);
+  h.start();
+
+  h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: "○ ponytail\u001b]52;c;bad\u0007" });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render: () => ["Agents", "  └─ Review"] });
+  h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal", text: "goal: active · 3 auto" });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "todo", render: () => ["Todos", "", "", " └─ Task"] });
+
+  assert.deepEqual([...h.widgets.keys()], [UI_WIDGET_NAME]);
+  assert.ok(h.widgetCalls.filter((call) => call.factory).every((call) => call.name === UI_WIDGET_NAME));
+  assert.ok(h.widgetCalls.filter((call) => call.factory).every((call) => call.options?.placement === "aboveEditor"));
+  assert.equal(h.widgetCalls.some((call) => call.options?.placement === "belowEditor"), false);
+
+  const widget = h.widgets.get(UI_WIDGET_NAME);
+  const lines = widget.factory(h.tui, plainTheme).render(100);
+  assert.deepEqual(lines, [
+    " Todos",
+    " ",
+    "  └─ Task",
+    " ",
+    " Agents",
+    "   └─ Review",
+    " ",
+    " goal: active · 3 auto · ○ ponytail",
+    " ",
+  ]);
+  assert.ok(lines.every((line) => line.startsWith(" ")));
+  assert.ok(lines.every((line) => visibleWidth(line) <= 100));
+  for (let index = 1; index < lines.length; index++) {
+    assert.equal(isVisuallyBlank(lines[index - 1]) && isVisuallyBlank(lines[index]), false);
+  }
+
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
+  h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
+  h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
+  assert.equal(h.widgets.size, 0);
+  h.emit("session_shutdown");
+});
+
+test("custom editor delegates input, history, paste, shortcuts, IME cursor, and autocomplete", async () => {
+  const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} };
+  const editor = new UtilityEditor(
+    tui,
+    editorTheme,
+    { matches: (data, action) => action === "app.interrupt" && data === "\u001b" },
+    () => [" utility"],
+  );
+  editor.focused = true;
+  editor.setText("first\nsecond");
+  const multiline = editor.render(40);
+  assert.ok(multiline.every((line) => line.startsWith(" ")));
+  assert.ok(multiline.every((line) => visibleWidth(line) <= 40));
+  assert.match(multiline.join("\n"), new RegExp(CURSOR_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(multiline.at(-1), /─/);
+
+  let submitted;
+  editor.onSubmit = (value) => { submitted = value; };
+  editor.setText("ship");
+  editor.handleInput("\r");
+  assert.equal(submitted, "ship");
+  assert.equal(editor.getText(), "");
+
+  editor.addToHistory("older prompt");
+  editor.handleInput("\u001b[A");
+  assert.equal(editor.getText(), "older prompt");
+  editor.setText("");
+  editor.handleInput("\u001b[200~hello\nthere\u001b[201~");
+  assert.equal(editor.getExpandedText(), "hello\nthere");
+
+  let interrupted = false;
+  editor.onAction("app.interrupt", () => { interrupted = true; });
+  editor.handleInput("\u001b");
+  assert.equal(interrupted, true);
+
+  editor.setText("");
+  editor.setAutocompleteProvider({
+    async getSuggestions() {
+      return { prefix: "/", items: [{ value: "/fixture", label: "/fixture", description: "test" }] };
+    },
+    applyCompletion() {},
+    shouldTriggerFileCompletion() { return true; },
+  });
+  editor.handleInput("/");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(editor.render(40).join("\n"), /\/fixture/);
 });

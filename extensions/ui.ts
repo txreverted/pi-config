@@ -1,18 +1,34 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
+  CustomEditor,
   VERSION,
   type ExtensionAPI,
   type ExtensionContext,
+  type KeybindingsManager,
   type SessionEntry,
+  type Theme,
 } from "@earendil-works/pi-coding-agent";
+import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import {
+  UI_MODE_STATUS_EVENT,
+  UI_PANEL_EVENT,
+  UI_WIDGET_NAME,
+  applyUiGutter,
+  composeUiBlocks,
   formatCwd,
-  formatElapsed,
-  formatTokens,
-  STATUS_WIDGET_DOCK_EVENT,
-  wrapStatusLine,
+  utilityBarSegments,
+  wrapUtilityBar,
+  type UiModeStatusId,
+  type UiModeStatusUpdate,
+  type UiPanelId,
+  type UiPanelRenderer,
+  type UiPanelUpdate,
+  type UtilityBarValues,
 } from "./ui-core.ts";
 import { safeDisplayLine } from "./text-safety.ts";
+
+const PANEL_ORDER: readonly UiPanelId[] = ["todo", "subagents"];
+const MODE_ORDER: readonly UiModeStatusId[] = ["goal", "ponytail"];
 
 function usageCost(entry: SessionEntry): number {
   let usage: unknown;
@@ -36,16 +52,62 @@ function isSubscription(ctx: ExtensionContext, model: Model<any> | undefined): b
   return ctx.modelRegistry.isUsingOAuth(model) && provider?.auth.oauth?.isSubscription === true;
 }
 
+export class UtilityEditor extends CustomEditor {
+  private readonly renderUtilityLine: (width: number) => string[];
+
+  constructor(
+    tui: TUI,
+    theme: EditorTheme,
+    keybindings: KeybindingsManager,
+    renderUtility: (width: number) => string[],
+  ) {
+    super(tui, theme, keybindings, { paddingX: 0 });
+    this.renderUtilityLine = renderUtility;
+  }
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, Math.floor(width));
+    const editorWidth = Math.max(1, safeWidth - 1);
+    const editorLines = super.render(editorWidth);
+    const inputLines = applyUiGutter(editorLines.length > 0 ? editorLines.slice(1) : [], safeWidth);
+    return [...this.renderUtilityLine(safeWidth), ...inputLines];
+  }
+}
+
+function styleUtility(values: UtilityBarValues, theme: Theme, width: number): string[] {
+  const { fields } = utilityBarSegments(values);
+  const contextColor = values.contextPercent === undefined
+    ? "muted"
+    : values.contextPercent > 90 ? "error" : values.contextPercent > 70 ? "warning" : "success";
+  const head = `${theme.bold(theme.fg("accent", "π"))} ${theme.fg("dim", `v${values.version}`)}`;
+  return wrapUtilityBar(head, [
+    theme.fg("accent", fields[0]),
+    theme.fg("syntaxType", fields[1]),
+    theme.fg(contextColor, fields[2]),
+    theme.fg("syntaxNumber", fields[3]),
+    theme.fg("customMessageLabel", fields[4]),
+  ], width);
+}
+
 export default function uiExtension(pi: ExtensionAPI) {
   let currentModel: Model<any> | undefined;
   let currentThinking = "off";
   let responseStartedAt: number | undefined;
   let responseTimer: ReturnType<typeof setInterval> | undefined;
-  let requestStatusRender: (() => void) | undefined;
-  let redockStatusWidget: (() => void) | undefined;
+  let requestEditorRender: (() => void) | undefined;
+  let requestPanelRender: (() => void) | undefined;
+  let latestContext: ExtensionContext | undefined;
+  let getGitBranch = (): string | null => null;
+  let unsubscribeBranch = () => {};
   let cachedEntryCount = -1;
   let cachedCost = 0;
+  const panels = new Map<UiPanelId, UiPanelRenderer>();
+  const modes = new Map<UiModeStatusId, string>();
 
+  const requestRender = () => {
+    requestEditorRender?.();
+    requestPanelRender?.();
+  };
   const branchCost = (ctx: ExtensionContext): number => {
     const entries = ctx.sessionManager.getBranch();
     if (entries.length !== cachedEntryCount) {
@@ -56,136 +118,125 @@ export default function uiExtension(pi: ExtensionAPI) {
   };
   const invalidateSessionCost = () => {
     cachedEntryCount = -1;
-    requestStatusRender?.();
+    requestRender();
   };
-
   const stopResponseTimer = () => {
     if (responseTimer) clearInterval(responseTimer);
     responseTimer = undefined;
     responseStartedAt = undefined;
-    requestStatusRender?.();
+    requestRender();
+  };
+  const utilityValues = (ctx: ExtensionContext): UtilityBarValues => {
+    const usage = ctx.getContextUsage();
+    const contextWindow = usage?.contextWindow ?? currentModel?.contextWindow ?? 0;
+    return {
+      version: VERSION,
+      path: safeDisplayLine(formatCwd(ctx.cwd), 4_096) || "?",
+      branch: safeDisplayLine(getGitBranch(), 500) || "detached",
+      model: safeDisplayLine(currentModel?.id ?? "no-model", 500) || "no-model",
+      thinking: safeDisplayLine(currentThinking, 40) || "off",
+      contextPercent: usage?.percent ?? undefined,
+      contextWindow,
+      cost: branchCost(ctx),
+      auth: isSubscription(ctx, currentModel) ? "sub" : "api",
+      elapsedMs: responseStartedAt === undefined ? 0 : Date.now() - responseStartedAt,
+    };
+  };
+  const syncCompositeWidget = () => {
+    const ctx = latestContext;
+    if (ctx?.mode !== "tui") return;
+    const visible = panels.size > 0 || modes.size > 0;
+    if (!visible) {
+      requestPanelRender = undefined;
+      ctx.ui.setWidget(UI_WIDGET_NAME, undefined);
+      return;
+    }
+    ctx.ui.setWidget(UI_WIDGET_NAME, (tui, theme) => {
+      requestPanelRender = () => tui.requestRender();
+      return {
+        invalidate() {},
+        render(width: number): string[] {
+          const logicalWidth = Math.max(1, Math.floor(width) - 1);
+          const blocks = PANEL_ORDER.flatMap((id) => {
+            const render = panels.get(id);
+            return render ? [render(logicalWidth, theme)] : [];
+          });
+          const modeText = MODE_ORDER.flatMap((id) => {
+            const text = safeDisplayLine(modes.get(id), 200);
+            return text ? [text] : [];
+          }).join(" · ");
+          if (modeText) blocks.push([theme.fg("customMessageLabel", modeText)]);
+          return composeUiBlocks(blocks, width, true);
+        },
+      };
+    }, { placement: "aboveEditor" });
   };
 
-  pi.events.on(STATUS_WIDGET_DOCK_EVENT, () => redockStatusWidget?.());
+  pi.events.on(UI_PANEL_EVENT, (data) => {
+    const update = data as UiPanelUpdate;
+    if (!PANEL_ORDER.includes(update?.id)) return;
+    if (update.render !== undefined && typeof update.render !== "function") return;
+    if (update.render) panels.set(update.id, update.render);
+    else panels.delete(update.id);
+    syncCompositeWidget();
+  });
+  pi.events.on(UI_MODE_STATUS_EVENT, (data) => {
+    const update = data as UiModeStatusUpdate;
+    if (!MODE_ORDER.includes(update?.id)) return;
+    const text = safeDisplayLine(update.text, 200);
+    if (text) modes.set(update.id, text);
+    else modes.delete(update.id);
+    syncCompositeWidget();
+  });
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 
+    latestContext = ctx;
     currentModel = ctx.model;
     currentThinking = ctx.thinkingLevel ?? "off";
     cachedEntryCount = -1;
     cachedCost = 0;
 
-    let getGitBranch = (): string | null => null;
-    let getExtensionStatuses = (): ReadonlyMap<string, string> => new Map();
-    let onBranchChange = (_callback: () => void): (() => void) => () => {};
-
-    // FooterDataProvider owns Pi's reactive git branch and extension status state.
-    // Capture its public accessors, then replace the footer with a zero-line component.
     ctx.ui.setFooter((_tui, _theme, footerData) => {
       getGitBranch = () => footerData.getGitBranch();
-      getExtensionStatuses = () => footerData.getExtensionStatuses();
-      onBranchChange = (callback) => footerData.onBranchChange(callback);
+      unsubscribeBranch();
+      unsubscribeBranch = footerData.onBranchChange(requestRender);
       return { invalidate() {}, render: () => [] };
     });
-
-    // Remove the startup header. The status widget is docked directly above the
-    // editor, so transcript output, working state, and tool calls stay above it.
     ctx.ui.setHeader(() => ({ invalidate() {}, render: () => [] }));
-    redockStatusWidget = () => ctx.ui.setWidget(
-      "minimal-status",
-      (tui, theme) => {
-        requestStatusRender = () => tui.requestRender();
-        const unsubscribeBranch = onBranchChange(requestStatusRender);
-
-        return {
-          dispose() {
-            unsubscribeBranch();
-          },
-          invalidate() {},
-          render(width: number): string[] {
-            const branch = safeDisplayLine(getGitBranch());
-            const sessionName = safeDisplayLine(ctx.sessionManager.getSessionName());
-            const location = [
-              `${safeDisplayLine(formatCwd(ctx.cwd))}${branch ? `(${branch})` : ""}`,
-              sessionName,
-            ].filter(Boolean).join(" · ");
-            const cost = branchCost(ctx);
-            const usage = ctx.getContextUsage();
-            const contextWindow = usage?.contextWindow ?? currentModel?.contextWindow ?? 0;
-            const contextPercentValue = usage?.percent ?? 0;
-            const contextPercent = usage?.percent == null ? "?" : contextPercentValue.toFixed(1);
-            const subscription = isSubscription(ctx, currentModel) ? " (sub)" : "";
-            const elapsed = responseStartedAt === undefined ? undefined : formatElapsed(Date.now() - responseStartedAt);
-            const model = safeDisplayLine(currentModel?.id ?? "no-model", 200);
-            const thinking = safeDisplayLine(currentThinking, 40) || "off";
-
-            const dim = (value: string) => theme.fg("dim", value);
-            const contextColor = usage?.percent == null
-              ? "muted"
-              : contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "success";
-            const context = theme.fg(contextColor, `${contextPercent}%/${formatTokens(contextWindow)} (auto)`);
-            const separator = dim(" 〉");
-            const logo = theme.bold(theme.fg("accent", "π"));
-            const renderCandidate = (segments: readonly string[]) =>
-              `${logo} ${segments.filter(Boolean).join(separator)}`;
-            const version = dim(`v${VERSION}`);
-            const place = theme.fg("accent", location);
-            const fullModel = theme.fg("syntaxType", `${model} (${thinking})`);
-            const price = theme.fg("syntaxNumber", `$${cost.toFixed(3)}${subscription}`);
-            const statuses = [...getExtensionStatuses()]
-              .map(([, value]) => safeDisplayLine(value, 200))
-              .filter(Boolean)
-              .map((value) => theme.fg("customMessageLabel", value));
-            const time = elapsed ? theme.fg("customMessageLabel", elapsed) : undefined;
-            const line = renderCandidate([
-              version,
-              place,
-              fullModel,
-              context,
-              price,
-              ...statuses,
-              ...(time ? [time] : []),
-            ]);
-
-            return ["", ...wrapStatusLine(line, width)];
-          },
-        };
-      },
-      { placement: "aboveEditor" },
-    );
-    redockStatusWidget();
+    ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
+      requestEditorRender = () => tui.requestRender();
+      return new UtilityEditor(
+        tui,
+        editorTheme,
+        keybindings,
+        (width) => styleUtility(utilityValues(ctx), ctx.ui.theme, width),
+      );
+    });
+    syncCompositeWidget();
   });
 
   pi.on("agent_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
-
     responseStartedAt = Date.now();
     if (!responseTimer) {
-      responseTimer = setInterval(() => requestStatusRender?.(), 1_000);
+      responseTimer = setInterval(requestRender, 1_000);
       responseTimer.unref?.();
     }
-    requestStatusRender?.();
+    requestRender();
   });
 
-  pi.on("agent_settled", () => {
-    stopResponseTimer();
-  });
-
+  pi.on("agent_settled", stopResponseTimer);
   pi.on("model_select", (event) => {
     currentModel = event.model;
-    requestStatusRender?.();
+    requestRender();
   });
-
   pi.on("thinking_level_select", (event) => {
     currentThinking = event.level;
-    requestStatusRender?.();
+    requestRender();
   });
-
-  pi.on("session_info_changed", () => {
-    requestStatusRender?.();
-  });
-
+  pi.on("session_info_changed", requestRender);
   pi.on("message_end", invalidateSessionCost);
   pi.on("session_tree", invalidateSessionCost);
   pi.on("session_compact", invalidateSessionCost);
@@ -194,8 +245,16 @@ export default function uiExtension(pi: ExtensionAPI) {
     if (responseTimer) clearInterval(responseTimer);
     responseTimer = undefined;
     responseStartedAt = undefined;
-    requestStatusRender = undefined;
-    redockStatusWidget = undefined;
+    unsubscribeBranch();
+    unsubscribeBranch = () => {};
+    latestContext?.ui.setWidget(UI_WIDGET_NAME, undefined);
+    latestContext?.ui.setEditorComponent(undefined);
+    latestContext = undefined;
+    requestEditorRender = undefined;
+    requestPanelRender = undefined;
+    getGitBranch = () => null;
+    panels.clear();
+    modes.clear();
     cachedEntryCount = -1;
     cachedCost = 0;
   });

@@ -28,6 +28,7 @@ test("concise policy composes before Ponytail and remains when Ponytail is off",
     registerCommand(name, options) { commands.set(name, options); },
     appendEntry() {},
     sendUserMessage() {},
+    events: { emit() {} },
   };
   const compose = async () => {
     let systemPrompt = "BASE";

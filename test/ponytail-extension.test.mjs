@@ -5,25 +5,31 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import ponytailExtension from "../extensions/ponytail.ts";
 import { ponytailConfigPath } from "../extensions/ponytail-core.ts";
+import { UI_MODE_STATUS_EVENT } from "../extensions/ui-core.ts";
 
 function createHarness() {
   const commands = new Map();
   const events = new Map();
   const entries = [];
   const messages = [];
+  const statuses = [];
   const pi = {
     registerCommand(name, options) { commands.set(name, options); },
     on(name, handler) { events.set(name, handler); },
     appendEntry(customType, data) { entries.push({ customType, data }); },
     sendUserMessage(text, options) { messages.push({ text, options }); },
+    events: {
+      emit(name, data) {
+        if (name === UI_MODE_STATUS_EVENT) statuses.push({ name: data.id, value: data.text });
+      },
+    },
   };
   ponytailExtension(pi);
-  return { commands, events, entries, messages };
+  return { commands, events, entries, messages, statuses };
 }
 
-function createContext(branch = []) {
+function createContext(branch = [], statuses = []) {
   const notices = [];
-  const statuses = [];
   return {
     notices,
     statuses,
@@ -33,7 +39,6 @@ function createContext(branch = []) {
       sessionManager: { getBranch: () => branch },
       ui: {
         notify: (message, level) => notices.push({ message, level }),
-        setStatus: (name, value) => statuses.push({ name, value }),
         theme: { fg: (_color, value) => value },
       },
     },
@@ -71,14 +76,14 @@ test("extension registers the complete local Ponytail command set", () => withEn
 test("hideStatus suppresses Ponytail status publication", () => withEnvironment(async () => {
   process.env.PONYTAIL_HIDE_STATUS = "1";
   const harness = createHarness();
-  const { context, statuses } = createContext();
+  const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
-  assert.deepEqual(statuses.at(-1), { name: "ponytail", value: undefined });
+  assert.deepEqual(harness.statuses.at(-1), { name: "ponytail", value: undefined });
 }));
 
 test("session mode persists, injects filtered instructions, and updates internal status activity", () => withEnvironment(async () => {
   const harness = createHarness();
-  const { context, statuses } = createContext();
+  const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
   await harness.commands.get("ponytail").handler("ultra", context);
 
@@ -89,10 +94,10 @@ test("session mode persists, injects filtered instructions, and updates internal
   assert.doesNotMatch(injected.systemPrompt, /Build the request, then mention/i);
 
   await harness.events.get("agent_start")({}, context);
-  assert.match(statuses.at(-1).value, /^●.*ULTRA$/);
+  assert.match(harness.statuses.at(-1).value, /^●.*ULTRA$/);
   assert.equal(harness.events.has("agent_end"), false);
   await harness.events.get("agent_settled")({}, context);
-  assert.match(statuses.at(-1).value, /^○.*ULTRA$/);
+  assert.match(harness.statuses.at(-1).value, /^○.*ULTRA$/);
 }));
 
 test("session tree navigation restores the selected branch mode", () => withEnvironment(async () => {

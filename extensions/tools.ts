@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -8,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+import { normalizeDisplayText } from "./ui-core.ts";
 import {
   removeBoundedOutput,
   runBoundedProcess,
@@ -151,6 +153,10 @@ export default function toolsExtension(pi: ExtensionAPI): void {
           outputLimitReached: result.outputLimitReached,
         } satisfies OutputDetails,
       };
+    },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 
