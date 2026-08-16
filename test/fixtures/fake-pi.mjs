@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 
 const mode = process.env.FAKE_PI_MODE ?? "success";
 const args = process.argv.slice(2);
@@ -15,7 +16,10 @@ function finalEvent() {
     type: "message_end",
     message: {
       role: "assistant",
-      content: [{ type: "text", text: task.includes("Delegated task") ? "fixture completed" : "missing task" }],
+      content: [{
+        type: "text",
+        text: task.includes("Delegated task") ? "fixture completed" : "missing task",
+      }],
       provider: "fixture",
       model: "test-model",
       stopReason: "stop",
@@ -51,12 +55,35 @@ if (mode === "hang" || mode === "startup-hang") {
   setInterval(() => {}, 1_000);
 } else if (mode === "malformed") {
   process.stdout.write("not json\n");
+} else if (mode === "malformed-hang") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  process.stdout.write("not json\n");
+  setInterval(() => {}, 1_000);
+} else if (mode === "stderr-failure") {
+  process.stderr.write("provider authentication failed\n");
+  process.exitCode = 1;
+} else if (mode === "stubborn-descendant") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  await writeFile(process.env.FAKE_PI_PID_FILE, String(descendant.pid));
+  setInterval(() => {}, 1_000);
 } else if (mode === "tool") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({ type: "agent_start" });
   writeEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "fixture" } });
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   writeEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "read", result: {}, isError: false });
+  writeEvent(finalEvent());
+} else if (mode === "edit-files") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "agent_start" });
+  writeEvent({ type: "tool_execution_start", toolCallId: "edit-1", toolName: "edit", args: { path: "one.ts" } });
+  writeEvent({ type: "tool_execution_end", toolCallId: "edit-1", toolName: "edit", result: {}, isError: false });
+  writeEvent({ type: "tool_execution_start", toolCallId: "write-2", toolName: "write", args: { path: "two.ts" } });
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  writeEvent({ type: "tool_execution_end", toolCallId: "write-2", toolName: "write", result: {}, isError: false });
   writeEvent(finalEvent());
 } else if (mode === "large") {
   const event = finalEvent();

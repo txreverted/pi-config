@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,7 @@ import {
   resolvePiInvocation,
   resolveWorkspaceCwd,
   runChildAgent,
+  truncateText,
 } from "../extensions/subagents-core.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
@@ -23,6 +24,7 @@ const definition = {
   thinking: "low",
   timeoutMs: 1_000,
   contextFiles: true,
+  mutatesWorkspace: false,
   maxTurns: 8,
   maxToolCalls: 8,
   maxReportedTokens: 100_000,
@@ -149,7 +151,27 @@ test("child runner parses chunked Pi JSON and reports tool progress", async () =
     assert.equal(result.model, "fixture/test-model");
     assert.equal(result.usage.totalTokens, 17);
     assert.ok(updates.some((update) => update.currentTool === "read"));
+    assert.ok(updates.some((update) => update.activity === "reading files"));
     assert.equal(updates.at(-1).status, "completed");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("child progress summarizes edited file count", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-activity-"));
+  const updates = [];
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: { id: "activity", agent: "reviewer", task: "Edit fixtures", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "edit-files", FAKE_PI_DELAY_MS: "10" },
+      onUpdate: (update) => updates.push(update),
+    });
+    assert.equal(result.status, "completed");
+    assert.ok(updates.some((update) => update.activity === "editing 1 file"));
+    assert.ok(updates.some((update) => update.activity === "editing 2 files"));
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -167,9 +189,18 @@ test("child output remains capped in results and progress", async () => {
       onUpdate: (update) => updates.push(update),
     });
     assert.equal(result.status, "completed");
-    assert.ok(result.output.length <= 16_000);
-    assert.ok(result.text.length <= 16_000);
-    assert.ok(updates.every((update) => update.text.length <= 16_000));
+    assert.ok(Buffer.byteLength(result.output, "utf8") <= 16_000);
+    assert.ok(Buffer.byteLength(result.text, "utf8") <= 16_000);
+    assert.ok(updates.every((update) => Buffer.byteLength(update.text, "utf8") <= 16_000));
+
+    const unicode = truncateText("😀".repeat(20_000));
+    assert.equal(unicode.truncated, true);
+    assert.ok(Buffer.byteLength(unicode.text, "utf8") <= 16_000);
+    assert.doesNotMatch(unicode.text, /�/);
+
+    const lines = truncateText(Array.from({ length: 2_100 }, () => "x").join("\n"));
+    assert.equal(lines.truncated, true);
+    assert.ok(lines.text.split("\n").length <= 2_002);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -215,12 +246,15 @@ test("startup and tool budgets stop bounded children", async () => {
       env: { FAKE_PI_MODE: "stream-budget" },
     });
     assert.equal(streamingCost.status, "failed");
+    assert.equal(streamingCost.output, "streaming");
     assert.equal(streamingCost.usage.cost.total, 2);
     assert.match(streamingCost.error, /cost budget/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("child runner handles malformed output, timeout, and cancellation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-failure-"));
@@ -233,6 +267,25 @@ test("child runner handles malformed output, timeout, and cancellation", async (
     });
     assert.equal(malformed.status, "failed");
     assert.match(malformed.error, /malformed JSON/);
+
+    const malformedHang = await runChildAgent({
+      definition,
+      task: { id: "bad-hang", agent: "reviewer", task: "Malformed then hang", cwd },
+      timeoutMs: 500,
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "malformed-hang" },
+    });
+    assert.equal(malformedHang.status, "failed");
+    assert.match(malformedHang.error, /malformed JSON/);
+
+    const stderrFailure = await runChildAgent({
+      definition,
+      task: { id: "stderr", agent: "reviewer", task: "Fail on stderr", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "stderr-failure" },
+    });
+    assert.equal(stderrFailure.status, "failed");
+    assert.equal(stderrFailure.stderr, "provider authentication failed");
 
     const timedOut = await runChildAgent({
       definition,
@@ -254,6 +307,55 @@ test("child runner handles malformed output, timeout, and cancellation", async (
     });
     assert.equal(aborted.status, "aborted");
   } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("cancellation kills descendants that ignore graceful termination", { skip: process.platform === "win32" }, async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-descendant-"));
+  const pidFile = join(cwd, "descendant.pid");
+  const controller = new AbortController();
+  let descendantPid;
+  let running;
+  try {
+    running = runChildAgent({
+      definition,
+      task: { id: "descendant", agent: "reviewer", task: "Spawn descendant", cwd },
+      signal: controller.signal,
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "stubborn-descendant", FAKE_PI_PID_FILE: pidFile },
+    });
+
+    const pidDeadline = Date.now() + 1_000;
+    while (descendantPid === undefined && Date.now() < pidDeadline) {
+      try {
+        descendantPid = Number(await readFile(pidFile, "utf8"));
+      } catch {
+        await sleep(10);
+      }
+    }
+    assert.ok(descendantPid);
+    controller.abort();
+    assert.equal((await running).status, "aborted");
+
+    const exitDeadline = Date.now() + 1_000;
+    let alive = true;
+    while (alive && Date.now() < exitDeadline) {
+      try {
+        process.kill(descendantPid, 0);
+        await sleep(10);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+        alive = false;
+      }
+    }
+    assert.equal(alive, false, `descendant ${descendantPid} survived cancellation`);
+  } finally {
+    controller.abort();
+    await running?.catch(() => {});
+    if (descendantPid) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch {}
+    }
     await rm(cwd, { recursive: true, force: true });
   }
 });
