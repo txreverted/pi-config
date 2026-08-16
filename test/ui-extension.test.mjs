@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import todoExtension from "../extensions/todo.ts";
 import uiExtension from "../extensions/ui.ts";
 import { STATUS_WIDGET_DOCK_EVENT } from "../extensions/ui-core.ts";
 
@@ -90,4 +91,67 @@ test("status widget renders unknown context honestly and caches unchanged sessio
   handlers.get("agent_settled")();
   widget.dispose();
   handlers.get("session_shutdown")();
+});
+
+test("todo updates stay above the status line and never below the input", async () => {
+  const lifecycle = new Map();
+  const bus = new Map();
+  const tools = new Map();
+  const widgetsAbove = new Map();
+  const widgetsBelow = new Map();
+  const pi = {
+    on(event, handler) {
+      const handlers = lifecycle.get(event) ?? [];
+      handlers.push(handler);
+      lifecycle.set(event, handlers);
+    },
+    events: {
+      on(event, handler) { bus.set(event, handler); },
+      emit(event, data) { bus.get(event)?.(data); },
+    },
+    registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand() {},
+    registerShortcut() {},
+  };
+  uiExtension(pi);
+  todoExtension(pi);
+
+  const ctx = {
+    mode: "tui",
+    cwd: "/tmp/project",
+    model: { id: "model", provider: "fixture", contextWindow: 128_000 },
+    thinkingLevel: "high",
+    modelRegistry: { getProvider: () => undefined, isUsingOAuth: () => false },
+    sessionManager: {
+      getBranch: () => [],
+      getEntries: () => [],
+      getSessionName: () => undefined,
+    },
+    getContextUsage: () => undefined,
+    ui: {
+      setFooter(factory) {
+        factory({}, theme(), {
+          getGitBranch: () => "main",
+          getExtensionStatuses: () => new Map(),
+          onBranchChange: () => () => {},
+        });
+      },
+      setHeader() {},
+      setWidget(name, content, options) {
+        widgetsAbove.delete(name);
+        widgetsBelow.delete(name);
+        if (content !== undefined) {
+          (options?.placement === "belowEditor" ? widgetsBelow : widgetsAbove).set(name, content);
+        }
+      },
+      notify() {},
+    },
+  };
+
+  for (const handler of lifecycle.get("session_start")) await handler({}, ctx);
+  await tools.get("todo").execute("create", { action: "create", subject: "Sticky task" });
+  assert.deepEqual([...widgetsAbove.keys()], ["todos", "minimal-status"]);
+  assert.deepEqual([...widgetsBelow.keys()], []);
+
+  for (const handler of lifecycle.get("session_shutdown")) await handler({}, ctx);
 });
