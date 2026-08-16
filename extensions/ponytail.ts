@@ -13,6 +13,7 @@ import {
   type PonytailSessionMode,
 } from "./ponytail-core.ts";
 import { safeDisplayLine } from "./text-safety.ts";
+import { normalizeDisplayText, UI_MODE_STATUS_EVENT } from "./ui-core.ts";
 
 const FALLBACK_SKILL = `# Ponytail\n\nUse the smallest correct solution: YAGNI, existing code, standard library, native platform features, installed dependencies, then minimum new code. Never remove validation, data-loss protection, security, or accessibility.`;
 const SKILL_BODY = (() => {
@@ -37,23 +38,15 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   let active = false;
   let quietStartup = false;
   let hideStatus = false;
-  let latestContext: ExtensionContext | undefined;
 
-  const syncStatus = (context?: ExtensionContext) => {
-    latestContext = context ?? latestContext;
-    const ctx = latestContext;
-    if (!ctx?.ui?.setStatus) return;
+  const syncStatus = (_context?: ExtensionContext) => {
     if (hideStatus || currentMode === "off") {
-      ctx.ui.setStatus("ponytail", undefined);
+      pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
       return;
     }
-    try {
-      const indicator = active ? "●" : "○";
-      const label = `${ICONS[currentMode]} ${currentMode.toUpperCase()}`;
-      ctx.ui.setStatus("ponytail", `${indicator} 🐴 ponytail: ${label}`);
-    } catch {
-      // Some non-TUI adapters expose status methods before their theme is ready.
-    }
+    const indicator = active ? "●" : "○";
+    const label = `${ICONS[currentMode]} ${currentMode.toUpperCase()}`;
+    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: `${indicator} 🐴 ponytail: ${label}` });
   };
 
   const loadSettings = (ctx: ExtensionContext): boolean => {
@@ -62,7 +55,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     quietStartup = settings.quietStartup;
     hideStatus = settings.hideStatus;
     if (settings.errors.length > 0) {
-      ctx.ui.notify(safeDisplayLine(`Could not load some Ponytail settings; using defaults: ${settings.errors.join("; ")}`, 500), "error");
+      ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Could not load some Ponytail settings; using defaults: ${settings.errors.join("; ")}`, 500)), "error");
     }
     return settings.errors.length === 0;
   };
@@ -77,14 +70,14 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     currentMode = mode;
     pi.appendEntry("ponytail-mode", { mode });
     syncStatus(ctx);
-    ctx?.ui.notify(`Ponytail mode set to ${mode}.`, "info");
+    ctx?.ui.notify(normalizeDisplayText(`Ponytail mode set to ${mode}.`), "info");
   };
 
   const runSkill = (name: string, ctx: ExtensionContext) => {
     const message = `/skill:${name}`;
     if (!ctx.isIdle()) {
       pi.sendUserMessage(message, { deliverAs: "followUp", expandPromptTemplates: true });
-      ctx.ui.notify(`${name} queued as a follow-up.`, "info");
+      ctx.ui.notify(normalizeDisplayText(`${name} queued as a follow-up.`), "info");
       return;
     }
     pi.sendUserMessage(message, { expandPromptTemplates: true });
@@ -95,7 +88,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const command = parsePonytailCommand(args, configuredDefault);
       if (command.type === "status") {
-        ctx.ui.notify(`Ponytail: current ${currentMode} · default ${configuredDefault}`, "info");
+        ctx.ui.notify(normalizeDisplayText(`Ponytail: current ${currentMode} · default ${configuredDefault}`), "info");
         return;
       }
       if (command.type === "set-mode") {
@@ -109,13 +102,13 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
           const message = configuredDefault === saved
             ? `Default Ponytail mode set to ${saved}.`
             : `Saved ${saved}; PONYTAIL_DEFAULT_MODE keeps the effective default at ${configuredDefault}.`;
-          ctx.ui.notify(message, "info");
+          ctx.ui.notify(normalizeDisplayText(message), "info");
         } catch (error) {
-          ctx.ui.notify(safeDisplayLine(`Could not save Ponytail default: ${error instanceof Error ? error.message : String(error)}`, 500), "error");
+          ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Could not save Ponytail default: ${error instanceof Error ? error.message : String(error)}`, 500)), "error");
         }
         return;
       }
-      ctx.ui.notify("Usage: /ponytail [lite|full|ultra|off|status|default <mode>]", "warning");
+      ctx.ui.notify(normalizeDisplayText("Usage: /ponytail [lite|full|ultra|off|status|default <mode>]"), "warning");
     },
   });
 
@@ -129,7 +122,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     const loaded = loadSettings(ctx);
     restoreMode(ctx);
-    if (loaded && !quietStartup) ctx.ui.notify(`Ponytail loaded: ${currentMode}`, "info");
+    if (loaded && !quietStartup) ctx.ui.notify(normalizeDisplayText(`Ponytail loaded: ${currentMode}`), "info");
   });
 
   pi.on("session_tree", (_event, ctx) => restoreMode(ctx));
@@ -177,7 +170,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     return { systemPrompt: event.systemPrompt ? `${event.systemPrompt}\n\n${instructions}` : instructions };
   });
 
-  pi.on("session_shutdown", (_event, ctx) => {
-    ctx.ui.setStatus("ponytail", undefined);
+  pi.on("session_shutdown", () => {
+    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
   });
 }

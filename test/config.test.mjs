@@ -98,6 +98,7 @@ test("theme stays neutral except for added and removed diff lines", () => {
   assert.deepEqual(themes.map(({ name }) => name), themeNames);
   const theme = themes[0];
   const resolved = (token) => theme.vars[theme.colors[token]] ?? theme.colors[token];
+  assert.equal(resolved("userMessageBg"), "#000000");
   assert.equal(new Set(["success", "error", "warning"].map(resolved)).size, 3);
   assert.equal(new Set(["userMessageBg", "customMessageBg", "toolSuccessBg", "toolErrorBg"].map(resolved)).size, 4);
   assert.equal(resolved("toolPendingBg"), resolved("toolSuccessBg"));
@@ -129,6 +130,10 @@ test("CI checks pushes and the human guide keeps operational safety facts", () =
     /Never pass signed URLs or private query tokens to `web_fetch`/,
     /web_fetch` fails closed when an HTTP proxy is configured/,
     /built-in `find` and `grep` tools/,
+    /exact black \(`#000000`\)/,
+    /No config widget or footer renders below the editor/,
+    /Pi-native transcript layout, dialogs, loaders, warnings/,
+    /`outputPad: 1` and `editorPaddingX: 0`/,
     /PI_LIVE_SUBAGENT_WORKER=1/,
     /PI_LIVE_WEB=1/,
   ]) assert.match(readme, pattern);

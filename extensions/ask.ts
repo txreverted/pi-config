@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   CUSTOM_CHOICE,
@@ -9,6 +10,7 @@ import {
   type AskQuestion,
 } from "./ask-core.ts";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+import { normalizeDisplayText } from "./ui-core.ts";
 
 const TOOL_NAME = "ask_user_question";
 
@@ -153,6 +155,10 @@ export default function askExtension(pi: ExtensionAPI) {
         content: [{ type: "text", text: formatAnswers(answers) }],
         details: { context, questions, answers, cancelled: false } satisfies AskDetails,
       };
+    },
+    renderResult(result) {
+      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
+      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 

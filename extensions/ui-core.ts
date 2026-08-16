@@ -1,8 +1,39 @@
 import { homedir } from "node:os";
 import { relative, resolve, sep } from "node:path";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { safeDisplayText } from "./text-safety.ts";
 
-export const STATUS_WIDGET_DOCK_EVENT = "ui:dock-status-widget";
+export const UI_PANEL_EVENT = "ui:panel-update";
+export const UI_MODE_STATUS_EVENT = "ui:mode-status-update";
+export const UI_WIDGET_NAME = "pi-config-panels";
+
+export type UiPanelId = "todo" | "subagents";
+export type UiModeStatusId = "goal" | "ponytail";
+export type UiPanelRenderer = (width: number, theme: Theme) => string[];
+
+export interface UiPanelUpdate {
+  id: UiPanelId;
+  render?: UiPanelRenderer;
+}
+
+export interface UiModeStatusUpdate {
+  id: UiModeStatusId;
+  text?: string;
+}
+
+export interface UtilityBarValues {
+  version: string;
+  path: string;
+  branch: string;
+  model: string;
+  thinking: string;
+  contextPercent?: number;
+  contextWindow: number;
+  cost: number;
+  auth: "sub" | "api";
+  elapsedMs: number;
+}
 
 export function formatCwd(cwd: string): string {
   const home = resolve(homedir());
@@ -37,11 +68,93 @@ export function formatElapsed(durationMs: number): string {
   return `${hours}h${minutes.toString().padStart(2, "0")}m`;
 }
 
-export function wrapStatusLine(line: string, width: number): string[] {
+export function isVisuallyBlank(line: string): boolean {
+  return stripTerminalSequences(line).trim().length === 0;
+}
+
+export function collapseBlankLines(lines: readonly string[]): string[] {
+  const collapsed: string[] = [];
+  let previousBlank = false;
+  for (const line of lines) {
+    const blank = isVisuallyBlank(line);
+    if (blank && previousBlank) continue;
+    collapsed.push(blank ? "" : line);
+    previousBlank = blank;
+  }
+  return collapsed;
+}
+
+export function normalizeDisplayText(value: unknown): string {
+  return collapseBlankLines(safeDisplayText(value).split("\n")).join("\n");
+}
+
+function trimBlankEdges(lines: readonly string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && isVisuallyBlank(lines[start])) start++;
+  while (end > start && isVisuallyBlank(lines[end - 1])) end--;
+  return lines.slice(start, end);
+}
+
+export function applyUiGutter(lines: readonly string[], width: number): string[] {
   const safeWidth = Math.max(1, Math.floor(width));
-  const wrapped = wrapTextWithAnsi(line, safeWidth);
-  const lines = wrapped.length > 0 ? wrapped : [""];
-  return lines.map((value) => visibleWidth(value) <= safeWidth
-    ? value
-    : truncateToWidth(value, safeWidth, ""));
+  const contentWidth = Math.max(0, safeWidth - 1);
+  return lines.map((line) => {
+    if (contentWidth === 0) return " ";
+    const content = isVisuallyBlank(line) ? "" : truncateToWidth(line, contentWidth, "");
+    return ` ${content}`;
+  });
+}
+
+export function composeUiBlocks(blocks: readonly (readonly string[])[], width: number, trailingBlank = false): string[] {
+  const logical: string[] = [];
+  for (const block of blocks) {
+    const normalized = trimBlankEdges(collapseBlankLines(block));
+    if (normalized.length === 0) continue;
+    if (logical.length > 0) logical.push("");
+    logical.push(...normalized);
+  }
+  if (trailingBlank && logical.length > 0) logical.push("");
+  return applyUiGutter(collapseBlankLines(logical), width);
+}
+
+export function utilityBarSegments(values: UtilityBarValues): { head: string; fields: string[] } {
+  const context = values.contextPercent === undefined ? "?" : values.contextPercent.toFixed(1);
+  return {
+    head: `π v${values.version}`,
+    fields: [
+      `${values.path}(${values.branch})`,
+      `${values.model} (${values.thinking})`,
+      `${context}%/${formatTokens(values.contextWindow)} (auto)`,
+      `$${values.cost.toFixed(3)} (${values.auth})`,
+      formatElapsed(values.elapsedMs),
+    ],
+  };
+}
+
+export function utilityBarText(values: UtilityBarValues): string {
+  const { head, fields } = utilityBarSegments(values);
+  return ` ${head}${fields.map((field) => ` 〉${field}`).join("")}`;
+}
+
+/** Wrap a utility bar only between fields. Oversized individual fields are clipped. */
+export function wrapUtilityBar(head: string, fields: readonly string[], width: number): string[] {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const contentWidth = safeWidth - 1;
+  if (contentWidth <= 0) return [" "];
+
+  const lines: string[] = [];
+  let current = truncateToWidth(head, contentWidth, "");
+  for (const field of fields) {
+    const continuation = `〉${field}`;
+    const inline = ` 〉${field}`;
+    if (visibleWidth(current) + visibleWidth(inline) <= contentWidth) {
+      current += inline;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = truncateToWidth(continuation, contentWidth, "");
+  }
+  if (current || lines.length === 0) lines.push(current);
+  return applyUiGutter(lines, safeWidth);
 }
