@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "subagents.ts", "concise.ts", "ponytail.ts", "subagent-tools.ts"];
+const extensions = ["ui.ts", "tools.ts", "web.ts", "ask.ts", "subagents.ts", "todo.ts", "concise.ts", "ponytail.ts", "subagent-tools.ts"];
 const args = [
   "--no-extensions",
   "--no-skills",
