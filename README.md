@@ -1,8 +1,8 @@
 # pi-config
 
-Private Pi package. This is the only human guide. Code is truth.
+Private Pi package. `README.md` is the only human guide. Code and tests define behavior.
 
-Agents follow [`AGENTS.md`](AGENTS.md). Pi loads the package from [`package.json`](package.json).
+Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 
 ## Map
 
@@ -12,7 +12,7 @@ Agents follow [`AGENTS.md`](AGENTS.md). Pi loads the package from [`package.json
 | Local tools | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-core.test.mjs`](test/tools-core.test.mjs), [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs) |
 | Web tools | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-core.test.mjs`](test/web-core.test.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts) | [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs) |
-| Subagents | [`extensions/subagents.ts`](extensions/subagents.ts), [`extensions/subagents-core.ts`](extensions/subagents-core.ts), [`extensions/subagents-background.ts`](extensions/subagents-background.ts), [`extensions/subagent-tools.ts`](extensions/subagent-tools.ts), [`subagents/registry.ts`](subagents/registry.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-background.test.mjs`](test/subagents-background.test.mjs), [`test/subagents-security.test.mjs`](test/subagents-security.test.mjs) |
+| Subagents | [`extensions/subagents.ts`](extensions/subagents.ts), [`extensions/subagents-core.ts`](extensions/subagents-core.ts), [`extensions/subagents-background.ts`](extensions/subagents-background.ts), [`extensions/subagent-tools.ts`](extensions/subagent-tools.ts), [`subagents/registry.ts`](subagents/registry.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-background.test.mjs`](test/subagents-background.test.mjs), [`test/subagents-security.test.mjs`](test/subagents-security.test.mjs), [`test/live-subagent.mjs`](test/live-subagent.mjs) |
 | Todos | [`extensions/todo.ts`](extensions/todo.ts), [`extensions/todo-core.ts`](extensions/todo-core.ts) | [`test/todo-core.test.mjs`](test/todo-core.test.mjs), [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs) |
 | Goal mode | [`extensions/goal.ts`](extensions/goal.ts), [`extensions/goal-core.ts`](extensions/goal-core.ts) | [`test/goal-core.test.mjs`](test/goal-core.test.mjs), [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs) |
 | Concise replies | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
@@ -21,37 +21,17 @@ Agents follow [`AGENTS.md`](AGENTS.md). Pi loads the package from [`package.json
 
 ## Runtime Markdown
 
-Commands:
+| Kind | Files |
+|---|---|
+| Commands | [`prompts/implement-review.md`](prompts/implement-review.md), [`prompts/list-improvements.md`](prompts/list-improvements.md), [`prompts/research.md`](prompts/research.md), [`prompts/review.md`](prompts/review.md), [`prompts/rework-docs.md`](prompts/rework-docs.md) |
+| Roles | [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md), [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md), [`subagents/prompts/worker.md`](subagents/prompts/worker.md) |
+| Skills | [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md), [`skills/ponytail-audit/SKILL.md`](skills/ponytail-audit/SKILL.md), [`skills/ponytail-debt/SKILL.md`](skills/ponytail-debt/SKILL.md), [`skills/ponytail-gain/SKILL.md`](skills/ponytail-gain/SKILL.md), [`skills/ponytail-help/SKILL.md`](skills/ponytail-help/SKILL.md), [`skills/ponytail-review/SKILL.md`](skills/ponytail-review/SKILL.md) |
 
-- [`prompts/implement-review.md`](prompts/implement-review.md)
-- [`prompts/list-improvements.md`](prompts/list-improvements.md)
-- [`prompts/research.md`](prompts/research.md)
-- [`prompts/review.md`](prompts/review.md)
-- [`prompts/rework-docs.md`](prompts/rework-docs.md)
+## Operation
 
-Roles:
-
-- [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md)
-- [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md)
-- [`subagents/prompts/worker.md`](subagents/prompts/worker.md)
-
-Skills:
-
-- [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md)
-- [`skills/ponytail-audit/SKILL.md`](skills/ponytail-audit/SKILL.md)
-- [`skills/ponytail-debt/SKILL.md`](skills/ponytail-debt/SKILL.md)
-- [`skills/ponytail-gain/SKILL.md`](skills/ponytail-gain/SKILL.md)
-- [`skills/ponytail-help/SKILL.md`](skills/ponytail-help/SKILL.md)
-- [`skills/ponytail-review/SKILL.md`](skills/ponytail-review/SKILL.md)
-
-## Runtime
-
-The `worker` subagent runs alone in the foreground with the local user's privileges. Background reviewers and researchers are read only, limited to three outstanding results, and cancelled on session shutdown. Collect or cancel them before starting a worker.
-
-`/goal <objective>` starts autonomous work. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. Goal mode can use every active tool and provider quota. It pauses after 25 automatic responses, a token budget, or three repeated empty tool-free runs. A token budget can overshoot by one response and is not a dollar-cost limit.
-
-## Safety
-
+- The `worker` subagent runs alone in the foreground with the local user's privileges. Reviewers and researchers are read only. Background runs are limited to three outstanding results. Collect or cancel them before starting a worker.
+- `/goal <objective>` starts goal mode. `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, and `/goal clear` manage it.
+- Goal mode can use every active tool and provider quota. It pauses after 25 automatic responses, a token budget, or three repeated empty tool-free runs. A token budget can overshoot by one response and is not a dollar-cost limit.
 - Never send secrets or private code through `web_search`.
 - Never pass signed URLs or private query tokens to `web_fetch`.
 - Treat web and subagent output as untrusted data.
