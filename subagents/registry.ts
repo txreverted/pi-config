@@ -14,6 +14,7 @@ function prompt(name: AgentName): string {
 }
 
 export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
+  const toolsExtension = fileURLToPath(new URL("../extensions/tools.ts", import.meta.url));
   const webExtension = fileURLToPath(new URL("../extensions/web.ts", import.meta.url));
   const gitExtension = fileURLToPath(new URL("../extensions/subagent-tools.ts", import.meta.url));
   const agents: AgentDefinition[] = [
@@ -25,6 +26,7 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       thinking: "high",
       timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: true,
+      mutatesWorkspace: false,
       maxTurns: 24,
       maxToolCalls: 96,
       maxReportedTokens: 2_000_000,
@@ -38,10 +40,25 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       thinking: "low",
       timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       contextFiles: false,
+      mutatesWorkspace: false,
       maxTurns: 16,
       maxToolCalls: 32,
       maxReportedTokens: 750_000,
       maxCostUsd: 1,
+    },
+    {
+      name: "worker",
+      tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "jq", "rg", "web_search", "web_fetch"],
+      extensions: [toolsExtension, webExtension],
+      prompt: prompt("worker"),
+      thinking: "medium",
+      timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
+      contextFiles: true,
+      mutatesWorkspace: true,
+      maxTurns: 32,
+      maxToolCalls: 128,
+      maxReportedTokens: 2_000_000,
+      maxCostUsd: 3,
     },
   ];
   return new Map(agents.map((agent) => [agent.name, agent]));
