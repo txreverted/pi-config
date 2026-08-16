@@ -350,8 +350,8 @@ test("observable protocol and stderr activity reset staleness", async () => {
       definition,
       task: childTask("active", "Stay active", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_MODE: "activity-heartbeats", FAKE_PI_DELAY_MS: "30" },
-      staleTimeoutMs: 50,
+      env: { FAKE_PI_MODE: "activity-heartbeats", FAKE_PI_DELAY_MS: "200" },
+      staleTimeoutMs: 500,
     });
     assert.equal(result.status, "done");
     assert.match(result.stderr, /still working/);
