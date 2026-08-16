@@ -67,7 +67,7 @@ test("status widget renders unknown context honestly and caches unchanged sessio
   const widget = widgetFactory({ requestRender() {} }, theme());
   const first = widget.render(200).join("\n");
   const second = widget.render(200).join("\n");
-  assert.ok(first.startsWith("<accent>π</accent>"));
+  assert.ok(first.startsWith("\n<accent>π</accent>"));
   assert.match(first, /<muted>\?%\/128k \(auto\)<\/muted>/);
   assert.equal(first.split("〉").length - 1, 4);
   assert.match(first, /<accent>\/tmp\/project\(main\)<\/accent>/);
@@ -84,7 +84,13 @@ test("status widget renders unknown context honestly and caches unchanged sessio
   entries.push({ type: "message", message: { role: "assistant", usage: { cost: { total: 0.75 } } } });
   assert.match(widget.render(200).join("\n"), /\$2\.000/);
   extensionStatuses.set("goal", "goal: paused · 4/25 auto");
+  extensionStatuses.set("ponytail", "ponytail: full");
   assert.match(widget.render(200).join("\n"), /<customMessageLabel>goal: paused · 4\/25 auto<\/customMessageLabel>/);
+  assert.doesNotMatch(widget.render(200).join("\n"), /ponytail/);
+
+  entries[0].message.usage.cost.total = 2.25;
+  handlers.get("message_end")({}, ctx);
+  assert.match(widget.render(200).join("\n"), /\$3\.000/);
 
   handlers.get("agent_start")({}, ctx);
   assert.match(widget.render(200).join("\n"), /<customMessageLabel>0s<\/customMessageLabel>/);
