@@ -96,19 +96,20 @@ export default function todoExtension(pi: ExtensionAPI): void {
   const syncWidget = (ctx?: ExtensionContext) => {
     latestContext = ctx ?? latestContext;
     if (latestContext?.mode !== "tui") return;
-    if (!snapshot.tasks.length) {
+    const unfinished = snapshot.tasks.filter((task) => task.status !== "completed");
+    if (!unfinished.length) {
       pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
       return;
     }
     const render: UiPanelRenderer = (width, theme) => {
-      const summary = `Todos · ${snapshot.tasks.filter((task) => task.status === "completed").length}/${snapshot.tasks.length} completed`;
+      const summary = `Todos · ${snapshot.tasks.length - unfinished.length}/${snapshot.tasks.length} completed`;
       if (collapsed) return [truncateToWidth(theme.fg("muted", `${summary} (collapsed)`), width)];
-      const shown = snapshot.tasks.slice(0, WIDGET_TASK_LINES);
+      const shown = unfinished.slice(0, WIDGET_TASK_LINES);
       const lines = [
         theme.fg("accent", summary),
         ...shown.map((task, index) => `${index === 0 ? " └─ " : "    "}${taskLine(task)}`),
       ];
-      if (snapshot.tasks.length > shown.length) lines.push(theme.fg("dim", `    … ${snapshot.tasks.length - shown.length} more`));
+      if (unfinished.length > shown.length) lines.push(theme.fg("dim", `    … ${unfinished.length - shown.length} more`));
       return lines.map((line) => truncateToWidth(line, width));
     };
     pi.events.emit(UI_PANEL_EVENT, { id: "todo", render });
