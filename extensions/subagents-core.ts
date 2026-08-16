@@ -13,7 +13,8 @@ export const MAX_SUBAGENT_TIMEOUT_MS = 30 * 60_000;
 export const MAX_RESULT_BYTES = 16_000;
 const TRUNCATION_NOTICE_BYTES = 160;
 const STARTUP_TIMEOUT_MS = 20_000;
-const MAX_JSON_LINE_CHARS = 2 * 1024 * 1024;
+const SUBAGENT_PROGRESS_INTERVAL_MS = 1_000;
+const MAX_JSON_LINE_CHARS = 8 * 1024 * 1024;
 const MAX_STDERR_CHARS = 64 * 1024;
 const KILL_GRACE_MS = 2_000;
 
@@ -439,6 +440,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   const editedFiles = new Set<string>();
   let killTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
+  let progressTimer: NodeJS.Timeout | undefined;
   let timeoutTimer: NodeJS.Timeout | undefined;
 
   const emit = () => {
@@ -477,6 +479,10 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       startupTimer = setTimeout(() => requestStop("startup"), options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
       startupTimer.unref?.();
       emit();
+      if (options.onUpdate) {
+        progressTimer = setInterval(emit, SUBAGENT_PROGRESS_INTERVAL_MS);
+        progressTimer.unref?.();
+      }
     });
     child.once("error", (error) => {
       spawnError = error.message;
@@ -566,6 +572,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     spawnError = error instanceof Error ? error.message : String(error);
   } finally {
     for (const timer of [killTimer, startupTimer, timeoutTimer]) if (timer) clearTimeout(timer);
+    if (progressTimer) clearInterval(progressTimer);
     await rm(files.dir, { recursive: true, force: true }).catch(() => {});
   }
 

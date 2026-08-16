@@ -158,6 +158,45 @@ test("child runner parses chunked Pi JSON and reports tool progress", async () =
   }
 });
 
+test("child runner emits one-second progress heartbeats during silent tools", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-heartbeat-"));
+  const controller = new AbortController();
+  const updates = [];
+  let running;
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    running = runChildAgent({
+      definition,
+      task: { id: "heartbeat", agent: "reviewer", task: "Wait inside a tool", cwd },
+      signal: controller.signal,
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "tool-hang" },
+      onUpdate: (update) => updates.push(update),
+    });
+
+    const deadline = Date.now() + 1_000;
+    while (!updates.some((update) => update.currentTool === "read")) {
+      if (Date.now() >= deadline) throw new Error("Timed out waiting for child tool progress");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const beforeHeartbeat = updates.length;
+    t.mock.timers.tick(1_000);
+    assert.equal(updates.length, beforeHeartbeat + 1);
+    assert.equal(updates.at(-1).currentTool, "read");
+
+    controller.abort();
+    assert.equal((await running).status, "aborted");
+    const afterAbort = updates.length;
+    t.mock.timers.tick(1_000);
+    assert.equal(updates.length, afterAbort);
+  } finally {
+    controller.abort();
+    await running?.catch(() => {});
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("child progress summarizes edited file count", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-activity-"));
   const updates = [];
@@ -201,6 +240,39 @@ test("child output remains capped in results and progress", async () => {
     const lines = truncateText(Array.from({ length: 2_100 }, () => "x").join("\n"));
     assert.equal(lines.truncated, true);
     assert.ok(lines.text.split("\n").length <= 2_002);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("child runner accepts Pi-sized JSON events and rejects larger lines", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-json-size-"));
+  try {
+    const accepted = await runChildAgent({
+      definition,
+      task: { id: "large-event", agent: "reviewer", task: "Read a large image", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: {
+        FAKE_PI_MODE: "large-json-event",
+        FAKE_PI_JSON_EVENT_CHARS: String(4.5 * 1024 * 1024),
+      },
+      timeoutMs: 5_000,
+    });
+    assert.equal(accepted.status, "completed");
+    assert.equal(accepted.output, "fixture completed");
+
+    const rejected = await runChildAgent({
+      definition,
+      task: { id: "oversized-event", agent: "reviewer", task: "Reject an oversized event", cwd },
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: {
+        FAKE_PI_MODE: "large-json-event",
+        FAKE_PI_JSON_EVENT_CHARS: String(8 * 1024 * 1024),
+      },
+      timeoutMs: 5_000,
+    });
+    assert.equal(rejected.status, "failed");
+    assert.match(rejected.error, /Child JSON event exceeded 8388608 characters/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

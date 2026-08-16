@@ -76,6 +76,11 @@ if (mode === "hang" || mode === "startup-hang") {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   writeEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "read", result: {}, isError: false });
   writeEvent(finalEvent());
+} else if (mode === "tool-hang") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "agent_start" });
+  writeEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "fixture" } });
+  setInterval(() => {}, 1_000);
 } else if (mode === "edit-files") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({ type: "agent_start" });
@@ -89,6 +94,23 @@ if (mode === "hang" || mode === "startup-hang") {
   const event = finalEvent();
   event.message.content[0].text = "x".repeat(20_000);
   writeEvent(event);
+} else if (mode === "large-json-event") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  writeEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "image.png" } });
+  writeEvent({
+    type: "tool_execution_end",
+    toolCallId: "tool-1",
+    toolName: "read",
+    result: {
+      content: [{
+        type: "image",
+        data: "x".repeat(Number(process.env.FAKE_PI_JSON_EVENT_CHARS ?? 2 * 1024 * 1024 + 1)),
+        mimeType: "image/png",
+      }],
+    },
+    isError: false,
+  });
+  writeEvent(finalEvent());
 } else if (mode === "tool-loop") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({ type: "agent_start" });
