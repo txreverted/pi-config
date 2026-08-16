@@ -90,6 +90,36 @@ if (mode === "hang" || mode === "startup-hang") {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   writeEvent({ type: "tool_execution_end", toolCallId: "write-2", toolName: "write", result: {}, isError: false });
   writeEvent(finalEvent());
+} else if (mode === "activities") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  const tools = [
+    ["web_search", { query: "fixture" }],
+    ["web_fetch", { url: "https://example.com" }],
+    ["bash", { command: "npm run check" }],
+    ["git_diff", {}],
+    ["jq", { filter: "." }],
+    ["ls", { path: "." }],
+    ["bash", { command: "printf fixture" }],
+    ["read", { path: "fixture" }],
+  ];
+  for (const [index, [toolName, toolArgs]] of tools.entries()) {
+    const toolCallId = `activity-${index}`;
+    writeEvent({ type: "tool_execution_start", toolCallId, toolName, args: toolArgs });
+    writeEvent({ type: "tool_execution_end", toolCallId, toolName, result: {}, isError: false });
+  }
+  writeEvent(finalEvent());
+} else if (mode === "activity-heartbeats") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  writeEvent({
+    type: "message_update",
+    usage: { totalTokens: 1, cost: { total: 0.01 } },
+    assistantMessageEvent: { type: "text_delta", delta: "working" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  process.stderr.write("still working\n");
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  writeEvent(finalEvent());
 } else if (mode === "large") {
   const event = finalEvent();
   event.message.content[0].text = "x".repeat(20_000);
@@ -118,15 +148,16 @@ if (mode === "hang" || mode === "startup-hang") {
     writeEvent({ type: "tool_execution_start", toolCallId: `tool-${index}`, toolName: "read", args: { path: "fixture" } });
     writeEvent({ type: "tool_execution_end", toolCallId: `tool-${index}`, toolName: "read", result: {}, isError: false });
   }
-  setInterval(() => {}, 1_000);
-} else if (mode === "stream-budget") {
+  writeEvent(finalEvent());
+} else if (mode === "high-stream-cost") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   writeEvent({
     type: "message_update",
-    usage: { totalTokens: 1_000, cost: { total: 2 } },
+    usage: { totalTokens: 10_000_000, cost: { total: 100 } },
     assistantMessageEvent: { type: "text_delta", delta: "streaming" },
   });
-  setInterval(() => {}, 1_000);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  writeEvent(finalEvent());
 } else {
   await writeSuccess(true);
 }

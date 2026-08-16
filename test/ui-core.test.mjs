@@ -17,12 +17,12 @@ test("UI formatters keep status values compact", () => {
   assert.equal(formatTokens(1_250), "1.3k");
   assert.equal(formatTokens(125_000), "125k");
   assert.equal(formatElapsed(999), "0s");
-  assert.equal(formatElapsed(65_000), "1m05s");
+  assert.equal(formatElapsed(65_000), "1m05");
   assert.equal(formatElapsed(3_661_000), "1h01m");
 });
 
 test("status lines wrap without exceeding the terminal width", () => {
-  const status = "\u001b[1mπ\u001b[22m v0.84.2 > ~/Documents/pi-config(main) > gpt-5.6-sol (high) > 35.7%/272k > $69.417 (sub)";
+  const status = "\u001b[1mπ\u001b[22m v0.84.2 〉~/Documents/pi-config(main) 〉gpt-5.6-sol (high) 〉35.7%/272k (auto) 〉$69.417 (sub)";
   for (const width of [1, 20, 40, 80]) {
     const lines = wrapStatusLine(status, width);
     assert.ok(lines.length > 0);

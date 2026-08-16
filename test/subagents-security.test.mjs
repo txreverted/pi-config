@@ -47,11 +47,11 @@ test("expanded subagent output strips terminal control sequences", () => {
     }] },
   }, { expanded: false }, plainTheme, {
     args: { tasks: [
-      { task: "Inspect the current diff" },
-      { task: "Research the API" },
+      { name: "Inspect current diff" },
+      { name: "Research API" },
     ] },
   }).render(120).join("\n");
-  assert.match(collapsed, / ├─ Review  Inspect the current diff · 0 tool uses · 0 token · 0s/);
+  assert.match(collapsed, / ├─ Review  Inspect current diff · 0 tool uses · 0 token · 0s/);
   assert.match(collapsed, / │   └ starting…/);
   assert.match(collapsed, / └─ 1 queued/);
   assert.doesNotMatch(collapsed, /reviewer\/high|task-1|\u001b|\u0007|SGFja2Vk|\nfake/);
@@ -60,7 +60,7 @@ test("expanded subagent output strips terminal control sequences", () => {
   const live = tool.renderResult({
     content: [{ type: "text", text: "unused" }],
     details: { progress: [{
-      id: "review", agent: "reviewer", thinking: "high", status: "completed",
+      id: "review", agent: "reviewer", thinking: "high", status: "done",
       startedAt: now - 360_000, endedAt: now, turns: 3, toolCalls: 49, text: "",
       usage: { totalTokens: 1_500_000 },
     }, {
@@ -73,18 +73,37 @@ test("expanded subagent output strips terminal control sequences", () => {
     }))] },
   }, { expanded: false }, plainTheme, {
     args: { tasks: [
-      { task: "Independently review the current subagents implementation" },
-      { task: "Inspect repository" },
-      { task: "Queued one" },
-      { task: "Queued two" },
-      { task: "Queued three" },
+      { name: "Review subagents" },
+      { name: "Inspect repository" },
+      { name: "Queued one" },
+      { name: "Queued two" },
+      { name: "Queued three" },
     ] },
   }).render(160).join("\n");
-  assert.match(live, / ├─ Review  Independently review the current… · 49 tool uses · 1\.5M token · 6m00s/);
+  assert.match(live, / ├─ Review  Review subagents · 49 tool uses · 1\.5M token · 6m00s/);
   assert.match(live, / │   └ done/);
   assert.match(live, / ├─ Research  Inspect repository · 2 tool uses · 13\.1k token · 1m2[12]s/);
   assert.match(live, / │   └ searching…/);
   assert.match(live, / └─ 3 queued/);
+
+  const terminals = tool.renderResult({
+    content: [{ type: "text", text: "unused" }],
+    details: { progress: ["done", "stale", "bugged", "error"].map((status, index) => ({
+      id: status, agent: "reviewer", thinking: "high", status,
+      startedAt: now - 1_000, endedAt: now, turns: 1, toolCalls: index, text: "",
+      usage: { totalTokens: 10 },
+    })) },
+  }, { expanded: false }, plainTheme, {
+    args: { tasks: [
+      { name: "Done task" },
+      { name: "Stale task" },
+      { name: "Bugged task" },
+      { name: "Error task" },
+    ] },
+  }).render(120).join("\n");
+  for (const status of ["done", "stale", "bugged", "error"]) {
+    assert.match(terminals, new RegExp(`└ ${status}`));
+  }
 
   const collected = tools.get("get_subagent_result").renderResult({
     content: [{ type: "text", text: "safe\u001b]52;c;SGFja2Vk\u0007 result" }],
@@ -94,9 +113,9 @@ test("expanded subagent output strips terminal control sequences", () => {
   assert.equal(safeSubagentDisplay("left\u202eright\u2066end\u2069"), "leftrightend");
 });
 
-test("failed child stderr is returned as untrusted evidence", () => {
+test("errored child stderr is returned as untrusted evidence", () => {
   const output = untrustedOutput([{
-    id: "failed", agent: "reviewer", thinking: "high", status: "failed",
+    id: "failed", agent: "reviewer", thinking: "high", status: "error",
     startedAt: 0, endedAt: 10, durationMs: 10, turns: 0, toolCalls: 0, text: "",
     task: "Review", cwd: process.cwd(), output: "partial result", stderr: "provider authentication failed",
     error: "Subagent exited with code 1", exitCode: 1, truncated: false,
@@ -121,14 +140,21 @@ test("writable workers require trust and exclusive foreground execution", async 
   };
 
   await assert.rejects(() => tool.execute("call", {
-    tasks: [{ agent: "worker", task: "Implement the change" }],
+    tasks: [{ name: "Too many words here", agent: "reviewer", task: "Review" }],
+  }, undefined, undefined, {
+    ...context,
+    isProjectTrusted: () => true,
+  }), /one to three words/);
+
+  await assert.rejects(() => tool.execute("call", {
+    tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
   }, undefined, undefined, {
     ...context,
     isProjectTrusted: () => false,
   }), /trusted project/);
 
   await assert.rejects(() => tool.execute("call", {
-    tasks: [{ agent: "worker", task: "Implement the change" }],
+    tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
     background: true,
   }, undefined, undefined, {
     ...context,
@@ -137,8 +163,8 @@ test("writable workers require trust and exclusive foreground execution", async 
 
   await assert.rejects(() => tool.execute("call", {
     tasks: [
-      { agent: "worker", task: "Implement the change" },
-      { agent: "reviewer", task: "Review the change" },
+      { name: "Implement change", agent: "worker", task: "Implement the change" },
+      { name: "Review change", agent: "reviewer", task: "Review the change" },
     ],
   }, undefined, undefined, {
     ...context,
@@ -146,7 +172,7 @@ test("writable workers require trust and exclusive foreground execution", async 
   }), /only task in its batch/);
 
   await assert.rejects(() => tool.execute("call", {
-    tasks: [{ agent: "reviewer", task: "Review the change" }],
+    tasks: [{ name: "Review change", agent: "reviewer", task: "Review the change" }],
     background: true,
   }, undefined, undefined, {
     ...context,
@@ -162,10 +188,9 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
 
   for (const agent of agents.values()) {
     assert.ok(agent.prompt.length > 0, agent.name);
-    assert.ok(agent.maxTurns > 0, agent.name);
-    assert.ok(agent.maxToolCalls > 0, agent.name);
-    assert.ok(agent.maxReportedTokens > 0, agent.name);
-    assert.ok(agent.maxCostUsd > 0, agent.name);
+    for (const budget of ["maxTurns", "maxToolCalls", "maxReportedTokens", "maxCostUsd", "timeoutMs"]) {
+      assert.equal(budget in agent, false, `${agent.name}:${budget}`);
+    }
     assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
     assert.equal(typeof agent.mutatesWorkspace, "boolean", agent.name);
     for (const tool of agent.tools) assert.ok(allowedTools.has(tool), `${agent.name}:${tool}`);
@@ -240,10 +265,12 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     const events = new Map();
     const messages = [];
     const widgetFactories = [];
+    const dockEvents = [];
     subagentsExtension({
       registerTool(value) { tools.set(value.name, value); },
       on(event, handler) { events.set(event, handler); },
       sendMessage(message, options) { messages.push({ message, options }); },
+      events: { emit(name) { dockEvents.push(name); } },
     });
     shutdown = () => events.get("session_shutdown")?.();
 
@@ -253,15 +280,15 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       model: { provider: "fixture", id: "test-model", reasoning: true },
       isProjectTrusted: () => true,
       ui: {
-        setWidget(_name, factory) {
-          if (factory) widgetFactories.push(factory);
+        setWidget(_name, factory, options) {
+          if (factory) widgetFactories.push({ factory, options });
         },
       },
     };
     events.get("session_start")({}, context);
 
     const started = await tools.get("subagent").execute("call", {
-      tasks: [{ agent: "reviewer", task: "Review background lifecycle integration now" }],
+      tasks: [{ name: "Review lifecycle", agent: "reviewer", task: "Review background lifecycle integration now" }],
       background: true,
     }, undefined, undefined, context);
     const id = started.details.progress[0].id;
@@ -269,12 +296,15 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     assert.ok(widgetFactories.length > 0);
 
     const plainTheme = { fg: (_color, value) => value, bold: (value) => value };
-    const widget = widgetFactories.at(-1)({}, plainTheme).render(160)
+    assert.deepEqual(widgetFactories.at(-1).options, { placement: "aboveEditor" });
+    assert.ok(dockEvents.length > 0);
+    const widget = widgetFactories.at(-1).factory({}, plainTheme).render(160)
       .map((line) => line.trimEnd()).join("\n");
-    assert.match(widget, /^ Agents\n  └─ Review  Review background lifecycle integration… · 0 tool uses · 0 token · 0s/);
+    assert.match(widget, /^ Agents\n  └─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
 
     await waitFor(() => messages.length > 0);
     assert.match(messages[0].message.content, new RegExp(id));
+    assert.equal(messages[0].message.details.status, "done");
     assert.deepEqual(messages[0].options, { deliverAs: "followUp", triggerTurn: true });
 
     const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
