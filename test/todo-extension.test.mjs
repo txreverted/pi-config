@@ -100,20 +100,20 @@ test("todo publishes bounded logical panel content to the composite UI", async (
   const mixed = mixedUpdate.data.render(80, { fg: (_color, text) => text });
   assert.deepEqual(mixed.slice(0, 4), [
     "Todos · 1/10 completed",
-    " └─ ☒ #1 Task 0",
-    "    ■ #2 Task 1 — Working",
+    " └─ ■ #2 Task 1 — Working",
     "    □ #3 Task 2",
+    "    □ #4 Task 3",
   ]);
 
-  for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
-
-  const expanded = panelUpdates.at(-1).data.render;
-  assert.ok(expanded(80, { fg: (_color, text) => text }).length <= 8);
-  assert.match(expanded(80, { fg: (_color, text) => text })[0], /Todos · 10\/10 completed/);
-  assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
   await shortcuts.get("ctrl+shift+t").handler(ctx.value);
   const collapsed = panelUpdates.at(-1).data.render;
   assert.equal(collapsed(80, { fg: (_color, text) => text }).length, 1);
+  await shortcuts.get("ctrl+shift+t").handler(ctx.value);
+
+  for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
+
+  assert.deepEqual(panelUpdates.at(-1).data, { id: "todo" });
+  assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
   await commands.get("todos").handler("", ctx.value);
   assert.match(ctx.notices.at(-1).message, /Todos \(10\)/);
   assert.match(ctx.notices.at(-1).message, /#10 Task 9/);
