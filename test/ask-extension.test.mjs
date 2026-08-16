@@ -39,6 +39,26 @@ test("question tool executes choices and reports cancellation", async () => {
   assert.deepEqual(cancelled.details.answers, []);
 });
 
+test("rendered option labels retain stable identities", async () => {
+  const { tool } = setup();
+  const result = await tool.execute("call", {
+    questions: [{
+      id: "choice",
+      question: "Choose?",
+      options: [{ label: "A (recommended)" }, { label: "A", recommended: true }],
+    }],
+  }, undefined, undefined, {
+    hasUI: true,
+    ui: {
+      select: async (_title, choices) => choices[1],
+      editor: async () => undefined,
+    },
+  });
+
+  assert.equal(result.details.answers[0].answer, "A");
+  assert.equal(result.details.answers[0].optionIndex, 2);
+});
+
 test("question tool rejects non-UI execution and removes itself from non-UI sessions", async () => {
   const { tool, handlers, active } = setup();
   await assert.rejects(
