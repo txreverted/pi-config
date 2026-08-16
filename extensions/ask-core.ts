@@ -1,3 +1,5 @@
+import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+
 export interface AskOption {
   label: string;
   description?: string;
@@ -29,7 +31,7 @@ const RESERVED_LABELS = new Set([
 ]);
 
 function normalizedLabel(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return safeDisplayLine(value).toLowerCase();
 }
 
 export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[] {
@@ -37,9 +39,12 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
 
   const ids = new Set<string>();
   return input.map((question, questionIndex) => {
-    const id = question.id.trim();
-    const prompt = question.question.trim();
+    const id = safeDisplayLine(question.id);
+    const prompt = safeDisplayLine(question.question);
     if (!id) throw new Error(`Question ${questionIndex + 1} requires an id`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) {
+      throw new Error(`Question ${questionIndex + 1} id may contain only letters, digits, dots, underscores, and hyphens`);
+    }
     if (ids.has(id)) throw new Error(`Question ids must be unique: ${id}`);
     ids.add(id);
     if (!prompt) throw new Error(`Question ${id} cannot be empty`);
@@ -52,10 +57,13 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
     const labels = new Set<string>();
     let recommendedCount = 0;
     const options = question.options.map((option, optionIndex) => {
-      const label = option.label.trim();
-      const description = option.description?.trim();
+      const label = safeDisplayLine(option.label);
+      const description = option.description === undefined ? undefined : safeDisplayLine(option.description);
       const normalized = normalizedLabel(label);
       if (!label) throw new Error(`Option ${optionIndex + 1} for ${id} requires a label`);
+      if (option.description !== undefined && !description) {
+        throw new Error(`Option ${optionIndex + 1} for ${id} has an empty description after sanitation`);
+      }
       if (RESERVED_LABELS.has(normalized)) {
         throw new Error(`Option label "${label}" is reserved; the tool adds a custom-answer choice automatically`);
       }
@@ -87,8 +95,8 @@ function indent(value: string): string {
 export function formatAnswers(answers: readonly AskAnswer[]): string {
   const lines = ["User answered the clarification questions:"];
   for (const answer of answers) {
-    lines.push(`- ${answer.id}: ${answer.question}`);
-    lines.push(`  Answer: ${indent(answer.answer)}`);
+    lines.push(`- ${safeDisplayLine(answer.id)}: ${safeDisplayLine(answer.question)}`);
+    lines.push(`  Answer: ${indent(safeDisplayText(answer.answer))}`);
   }
   return lines.join("\n");
 }

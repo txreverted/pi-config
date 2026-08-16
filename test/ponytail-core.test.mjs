@@ -7,6 +7,7 @@ import {
   buildPonytailInstructions,
   filterPonytailSkillForMode,
   isPonytailDeactivationCommand,
+  loadPonytailSettings,
   parsePonytailCommand,
   ponytailConfigPath,
   readPonytailDefaultMode,
@@ -33,8 +34,8 @@ function withConfigEnvironment(run) {
   }
 }
 
-test("Ponytail command parsing is strict and bare activation escapes an off default", () => {
-  assert.deepEqual(parsePonytailCommand("", "off"), { type: "set-mode", mode: "full" });
+test("Ponytail command parsing is strict and bare activation uses the configured default", () => {
+  assert.deepEqual(parsePonytailCommand("", "off"), { type: "set-mode", mode: "off" });
   assert.deepEqual(parsePonytailCommand("lite"), { type: "set-mode", mode: "lite" });
   assert.deepEqual(parsePonytailCommand("status"), { type: "status" });
   assert.deepEqual(parsePonytailCommand("default ultra"), { type: "set-default", mode: "ultra" });
@@ -69,6 +70,12 @@ test("default and booleans resolve from environment before the preserved config"
   assert.equal(readPonytailDefaultMode(), "lite");
   assert.equal(readPonytailQuietStartup(), true);
   assert.equal(readPonytailHideStatus(), true);
+  assert.deepEqual(loadPonytailSettings(), {
+    defaultMode: "lite",
+    quietStartup: true,
+    hideStatus: true,
+    errors: [],
+  });
 
   process.env.PONYTAIL_DEFAULT_MODE = "ultra";
   process.env.PONYTAIL_QUIET_STARTUP = "false";
@@ -76,6 +83,12 @@ test("default and booleans resolve from environment before the preserved config"
   assert.equal(readPonytailDefaultMode(), "ultra");
   assert.equal(readPonytailQuietStartup(), false);
   assert.equal(readPonytailHideStatus(), false);
+  assert.deepEqual(loadPonytailSettings(), {
+    defaultMode: "ultra",
+    quietStartup: false,
+    hideStatus: false,
+    errors: [],
+  });
 
   process.env.PONYTAIL_HIDE_STATUS = "flase";
   assert.throws(() => readPonytailHideStatus(), /must be one of/);

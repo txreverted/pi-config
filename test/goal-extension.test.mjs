@@ -66,7 +66,7 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
   await h.events.get("session_start")({}, h.context);
   assert.deepEqual(h.active(), ["read"]);
 
-  await h.commands.get("goal").handler("Implement safely --tokens 100k", h.context);
+  await h.commands.get("goal").handler("Implement safely", h.context);
   assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => h.active().includes(name)));
   assert.match(h.messages[0], /untrusted task data/);
   assert.match(h.messages[0], /goal_id:/);
@@ -83,6 +83,25 @@ test("goal activation waits for an idle boundary", async () => {
   assert.equal(h.messages.length, 0);
   assert.equal(h.entries.length, 0);
   assert.match(h.notices.at(-1).message, /idle/);
+});
+
+test("goal completion requires separate verification evidence", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("Finish verified work", h.context);
+  const id = h.entries.at(-1).data.goal.id;
+  await assert.rejects(
+    () => h.tools.get("goal_complete").execute("x", { goal_id: id, summary: "done", evidence: "\u001b]0;title\u0007" }),
+    /evidence is required/i,
+  );
+  const completed = await h.tools.get("goal_complete").execute("x", {
+    goal_id: id,
+    summary: "Implemented safely",
+    evidence: "npm test passed\u202e",
+  });
+  assert.equal(completed.terminate, true);
+  assert.match(completed.details.goal.note, /Implemented safely Evidence: npm test passed/);
+  assert.doesNotMatch(completed.details.goal.note, /\u202e/);
 });
 
 test("continuations dispatch only when settled, idle, and without pending messages", async () => {
@@ -114,26 +133,21 @@ test("aborted or failed turns pause instead of restarting autonomous work", asyn
   }
 });
 
-test("token budget permits one-response overshoot and response 26 is never dispatched", async () => {
-  const budget = harness();
-  await budget.events.get("session_start")({}, budget.context);
-  await budget.commands.get("goal").handler("Budgeted --tokens 100", budget.context);
-  await response(budget, "initial", { tokens: 10, tool: true });
-  assert.equal(budget.messages.length, 2);
-  await response(budget, "overshoot", { tokens: 120, tool: true });
-  assert.equal(budget.messages.length, 2);
-  assert.match(budget.statuses.at(-1).value, /paused/);
+test("productive goals continue beyond the former response ceiling and reject token caps", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("Unlimited", h.context);
+  await response(h, "initial", { tool: true });
+  for (let index = 0; index < 30; index++) await response(h, `automatic ${index}`, { tool: true });
+  assert.equal(h.messages.length, 32, "one kickoff and 31 productive continuations remain active");
+  assert.match(h.statuses.at(-1).value, /goal: active · 30 auto/);
+  assert.doesNotMatch(h.statuses.at(-1).value, /\//);
 
-  const capped = harness();
-  await capped.events.get("session_start")({}, capped.context);
-  await capped.commands.get("goal").handler("Bounded", capped.context);
-  await response(capped, "initial", { tool: true });
-  for (let index = 0; index < 25; index++) await response(capped, `automatic ${index}`, { tool: true });
-  assert.equal(capped.messages.length, 26, "one kickoff plus exactly 25 automatic prompts");
-  assert.match(capped.statuses.at(-1).value, /paused/);
-  await capped.commands.get("goal").handler("resume", capped.context);
-  assert.equal(capped.messages.length, 27, "resume starts a user-confirmed fresh safety epoch");
-  assert.equal(capped.entries.at(-1).data.goal.automaticResponses, 0);
+  const rejected = harness();
+  await rejected.events.get("session_start")({}, rejected.context);
+  await rejected.commands.get("goal").handler("Budgeted --tokens 100", rejected.context);
+  assert.equal(rejected.messages.length, 0);
+  assert.match(rejected.notices.at(-1).message, /no longer supported/);
 });
 
 test("blocker requires the same report on three separate automatic runs and rejects stale ids", async () => {
@@ -147,7 +161,7 @@ test("blocker requires the same report on three separate automatic runs and reje
   );
   for (const name of ["goal_complete", "goal_wait", "goal_blocked"]) {
     const params = name === "goal_complete"
-      ? { goal_id: "stale", summary: "done" }
+      ? { goal_id: "stale", summary: "done", evidence: "checks passed" }
       : name === "goal_wait"
         ? { goal_id: "stale", reason: "wait" }
         : { goal_id: "stale", reason: "blocked", evidence: "proof", repeated_turns: 3 };
@@ -187,7 +201,7 @@ test("paused tools cannot terminate a goal and external input wakes a waiting go
   assert.ok(paused.aborts() > 0);
   assert.ok(!paused.active().includes("goal_complete"));
   await assert.rejects(
-    paused.tools.get("goal_complete").execute("x", { goal_id: pausedId, summary: "done" }),
+    paused.tools.get("goal_complete").execute("x", { goal_id: pausedId, summary: "done", evidence: "verified" }),
     /not active/,
   );
 
@@ -232,13 +246,15 @@ test("wait deadlines wake once and continue from the idle boundary", async (t) =
 
 test("branch restore pauses active goals, preserves waiting goals, and clears timers on shutdown", async () => {
   const base = {
-    id: "goal-restored", objective: "Restore me", status: "active", tokensUsed: 4,
+    id: "goal-restored", objective: "Restore me", status: "active", tokensUsed: 4, tokenBudget: 10,
     automaticResponses: 2, automaticRuns: 2, repeatedToolFreeRuns: 0,
   };
   const active = harness([snapshotEntry(base)]);
   await active.events.get("session_start")({}, active.context);
   assert.match(active.statuses.at(-1).value, /paused/);
   assert.ok(!active.active().includes("goal_complete"));
+  assert.equal("tokenBudget" in active.entries.at(-1).data.goal, false);
+  assert.equal("tokensUsed" in active.entries.at(-1).data.goal, false);
 
   const waiting = harness([snapshotEntry({ ...base, status: "waiting", waitingUntil: Date.now() + 60_000 })]);
   await waiting.events.get("session_start")({}, waiting.context);

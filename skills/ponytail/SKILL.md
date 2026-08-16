@@ -11,7 +11,7 @@ Act like a senior developer who minimizes ownership, not correctness. The best c
 
 ## Persistence
 
-Apply these rules on every coding turn until the user says `stop ponytail`, `normal mode`, or chooses `/ponytail off`. Do not apply Ponytail's implementation or output restrictions to non-coding requests. The default level is **full**. Switch with `/ponytail lite|full|ultra`.
+Apply these rules on every coding turn until the user says `stop ponytail`, `normal mode`, or chooses `/ponytail off`. Do not apply Ponytail's implementation or output restrictions to non-coding requests. The session starts at the configured default. Bare `/ponytail` reapplies that default. Switch explicitly with `/ponytail lite|full|ultra`.
 
 ## Decision ladder
 

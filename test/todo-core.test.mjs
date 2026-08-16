@@ -11,13 +11,24 @@ const apply = (snapshot, action) => applyTodoAction(snapshot, action).snapshot;
 
 test("todo lifecycle is deterministic and snapshots are independent", () => {
   const empty = emptyTodoSnapshot();
-  const created = applyTodoAction(empty, { action: "create", subject: " First\n\u001b[31m task " });
-  assert.deepEqual(created.task, { id: 1, subject: "First [31m task", description: undefined, activeForm: undefined, status: "pending", blockedBy: [] });
+  const created = applyTodoAction(empty, {
+    action: "create",
+    subject: " First\n\u001b[31m task\u001b[0m\u202e ",
+    description: "safe\u001b]52;c;SGFja2Vk\u0007 description\r\nnext",
+  });
+  assert.deepEqual(created.task, {
+    id: 1,
+    subject: "First task",
+    description: "safe description next",
+    activeForm: undefined,
+    status: "pending",
+    blockedBy: [],
+  });
   assert.deepEqual(empty, { tasks: [], nextId: 1 });
 
   const updated = applyTodoAction(created.snapshot, { action: "update", id: 1, status: "in_progress", activeForm: "Working" });
   assert.equal(updated.task.status, "in_progress");
-  assert.equal(applyTodoAction(updated.snapshot, { action: "get", id: 1 }).task.subject, "First [31m task");
+  assert.equal(applyTodoAction(updated.snapshot, { action: "get", id: 1 }).task.subject, "First task");
 
   const removed = applyTodoAction(updated.snapshot, { action: "delete", id: 1 });
   assert.equal(removed.deleted.id, 1);

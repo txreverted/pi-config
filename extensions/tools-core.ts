@@ -1,15 +1,12 @@
 import { spawn } from "node:child_process";
-import { constants, createWriteStream } from "node:fs";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import {
-  createFindTool,
-  createGrepTool,
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
-  getAgentDir,
   truncateHead,
   type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
@@ -36,70 +33,6 @@ export interface BoundedProcessOptions {
   timeoutMs?: number;
   tempPrefix?: string;
   maxOutputBytes?: number;
-  outputDelimiter?: "newline" | "nul";
-}
-
-export type ManagedSearchTool = "fd" | "rg";
-
-async function isExecutable(path: string): Promise<boolean> {
-  try {
-    await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolveSearchExecutable(tool: ManagedSearchTool): Promise<string | undefined> {
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  const managedPath = join(getAgentDir(), "bin", `${tool}${suffix}`);
-  if (await isExecutable(managedPath)) return managedPath;
-
-  const names = tool === "fd" ? ["fd", "fdfind"] : ["rg"];
-  const extensions = process.platform === "win32"
-    ? (process.env.PATHEXT ?? ".EXE;.COM").split(";").filter((extension) => [".EXE", ".COM"].includes(extension.toUpperCase()))
-    : [""];
-  for (const directory of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
-    for (const name of names) {
-      for (const extension of extensions) {
-        const candidate = join(directory, process.platform === "win32" ? `${name}${extension}` : name);
-        if (await isExecutable(candidate)) return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
-/** Use Pi's maintained downloader to install fd/rg, then return the resolved executable. */
-export async function ensureSearchExecutable(
-  tool: ManagedSearchTool,
-  signal?: AbortSignal,
-): Promise<string> {
-  const existing = await resolveSearchExecutable(tool);
-  if (existing) return existing;
-
-  const probeDirectory = await mkdtemp(join(tmpdir(), `pi-${tool}-install-`));
-  try {
-    if (tool === "rg") {
-      await createGrepTool(probeDirectory).execute(
-        "install-rg",
-        { pattern: "__pi_config_install_probe_no_match__", path: ".", literal: true },
-        signal,
-      );
-    } else {
-      await createFindTool(probeDirectory).execute(
-        "install-fd",
-        { pattern: "__pi_config_install_probe_no_match__", path: ".", limit: 1 },
-        signal,
-      );
-    }
-  } finally {
-    await rm(probeDirectory, { recursive: true, force: true });
-  }
-
-  const installed = await resolveSearchExecutable(tool);
-  if (!installed) throw new Error(`${tool} is not installed and Pi could not install it`);
-  return installed;
 }
 
 export async function removeBoundedOutput(fullOutputPath: string): Promise<void> {
@@ -131,45 +64,19 @@ function actualTruncation(
   sample: Buffer,
   totalBytes: number,
   records: number,
-  delimiter: "newline" | "nul",
 ): TruncationResult {
-  if (delimiter === "newline") {
-    const base = truncateHead(sample.toString("utf8"), {
-      maxLines: DEFAULT_MAX_LINES,
-      maxBytes: DEFAULT_MAX_BYTES,
-    });
-    const truncated = totalBytes > DEFAULT_MAX_BYTES || records > DEFAULT_MAX_LINES;
-    return {
-      ...base,
-      truncated,
-      truncatedBy: base.truncatedBy ??
-        (records > DEFAULT_MAX_LINES ? "lines" : totalBytes > DEFAULT_MAX_BYTES ? "bytes" : null),
-      totalBytes,
-      totalLines: records,
-    };
-  }
-
-  let outputBytes = 0;
-  let outputLines = 0;
-  for (let index = 0; index < sample.length && index < DEFAULT_MAX_BYTES; index++) {
-    if (sample[index] !== 0) continue;
-    outputBytes = index + 1;
-    outputLines++;
-    if (outputLines === DEFAULT_MAX_LINES) break;
-  }
-  const truncated = totalBytes > outputBytes;
-  return {
-    content: sample.subarray(0, outputBytes).toString("utf8"),
-    truncated,
-    truncatedBy: !truncated ? null : outputLines === DEFAULT_MAX_LINES ? "lines" : "bytes",
-    totalBytes,
-    totalLines: records,
-    outputBytes,
-    outputLines,
-    lastLinePartial: false,
-    firstLineExceedsLimit: records > 0 && outputLines === 0,
+  const base = truncateHead(sample.toString("utf8"), {
     maxLines: DEFAULT_MAX_LINES,
     maxBytes: DEFAULT_MAX_BYTES,
+  });
+  const truncated = totalBytes > DEFAULT_MAX_BYTES || records > DEFAULT_MAX_LINES;
+  return {
+    ...base,
+    truncated,
+    truncatedBy: base.truncatedBy ??
+      (records > DEFAULT_MAX_LINES ? "lines" : totalBytes > DEFAULT_MAX_BYTES ? "bytes" : null),
+    totalBytes,
+    totalLines: records,
   };
 }
 
@@ -189,8 +96,6 @@ export async function runBoundedProcess(
   const captureLimit = DEFAULT_MAX_BYTES + CAPTURE_PADDING_BYTES;
   const captured: Buffer[] = [];
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES;
-  const delimiter = options.outputDelimiter ?? "newline";
-  const delimiterByte = delimiter === "nul" ? 0x00 : 0x0a;
   let capturedBytes = 0;
   let stdoutBytes = 0;
   let delimiterCount = 0;
@@ -229,9 +134,9 @@ export async function runBoundedProcess(
     const portion = chunk.subarray(0, Math.min(chunk.length, remaining));
     stdoutBytes += portion.length;
     for (const byte of portion) {
-      if (byte === delimiterByte) delimiterCount++;
+      if (byte === 0x0a) delimiterCount++;
     }
-    if (portion.length > 0) endsWithDelimiter = portion[portion.length - 1] === delimiterByte;
+    if (portion.length > 0) endsWithDelimiter = portion[portion.length - 1] === 0x0a;
 
     if (capturedBytes < captureLimit) {
       const capturedPortion = portion.subarray(0, captureLimit - capturedBytes);
@@ -302,7 +207,7 @@ export async function runBoundedProcess(
 
   const records = totalRecords(stdoutBytes, delimiterCount, endsWithDelimiter);
   const sample = Buffer.concat(captured, capturedBytes);
-  const truncation = actualTruncation(sample, stdoutBytes, records, delimiter);
+  const truncation = actualTruncation(sample, stdoutBytes, records);
   const stderrText = stderr.toString("utf8");
   const stderrNotice = stderrBytes > stderr.length
     ? `[stderr truncated: showing last ${stderr.length} of ${stderrBytes} bytes]\n${stderrText}`

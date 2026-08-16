@@ -14,6 +14,13 @@ interface PonytailConfig {
   [key: string]: unknown;
 }
 
+export interface PonytailSettings {
+  defaultMode: PonytailMode;
+  quietStartup: boolean;
+  hideStatus: boolean;
+  errors: string[];
+}
+
 export type PonytailCommand =
   | { type: "set-mode"; mode: PonytailMode }
   | { type: "set-default"; mode: PonytailMode }
@@ -87,6 +94,49 @@ function configBoolean(config: PonytailConfig, key: "quietStartup" | "hideStatus
   throw new Error(`Ponytail config ${key} must be a boolean`);
 }
 
+export function loadPonytailSettings(): PonytailSettings {
+  const errors: string[] = [];
+  let config: PonytailConfig = {};
+  try {
+    config = readConfig();
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  let defaultMode = DEFAULT_PONYTAIL_MODE;
+  try {
+    const environment = process.env.PONYTAIL_DEFAULT_MODE;
+    const configured = environment ?? config.defaultMode;
+    if (configured !== undefined) {
+      const mode = normalizePonytailMode(configured);
+      if (!mode) {
+        throw new Error(environment !== undefined
+          ? `PONYTAIL_DEFAULT_MODE must be one of: ${PONYTAIL_RUNTIME_MODES.join(", ")}`
+          : `Ponytail config defaultMode must be one of: ${PONYTAIL_RUNTIME_MODES.join(", ")}`);
+      }
+      defaultMode = mode;
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  const booleanSetting = (environmentName: string, key: "quietStartup" | "hideStatus"): boolean => {
+    try {
+      return environmentBoolean(environmentName) ?? configBoolean(config, key);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  };
+
+  return {
+    defaultMode,
+    quietStartup: booleanSetting("PONYTAIL_QUIET_STARTUP", "quietStartup"),
+    hideStatus: booleanSetting("PONYTAIL_HIDE_STATUS", "hideStatus"),
+    errors: [...new Set(errors)],
+  };
+}
+
 export function readPonytailDefaultMode(): PonytailMode {
   const environment = process.env.PONYTAIL_DEFAULT_MODE;
   if (environment !== undefined) {
@@ -125,7 +175,7 @@ export function writePonytailDefaultMode(value: unknown): PonytailMode | undefin
 
 export function parsePonytailCommand(value: unknown, configuredDefault = DEFAULT_PONYTAIL_MODE): PonytailCommand {
   const text = String(value ?? "").trim().toLowerCase();
-  if (!text) return { type: "set-mode", mode: configuredDefault === "off" ? "full" : configuredDefault };
+  if (!text) return { type: "set-mode", mode: configuredDefault };
 
   const [command, argument, ...rest] = text.split(/\s+/);
   if (rest.length > 0) return { type: "invalid" };

@@ -1,7 +1,7 @@
 ---
 description: Audit the repo and rank concrete improvements
 ---
-Read the whole repo. Read code, config, tests, and runtime Markdown. Code wins.
+Start from the repository map. Read the relevant code, config, tests, and runtime Markdown. Expand to the whole repository only when the requested audit requires it. Code wins.
 
 Do not edit.
 

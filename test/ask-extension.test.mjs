@@ -59,6 +59,56 @@ test("rendered option labels retain stable identities", async () => {
   assert.equal(result.details.answers[0].optionIndex, 2);
 });
 
+test("questionnaire sanitizes titles, choices, and custom answers", async () => {
+  const { tool } = setup();
+  let shownTitle = "";
+  let shownChoices = [];
+  const result = await tool.execute("call", {
+    context: "Context\u001b]0;title\u0007",
+    questions: [{
+      id: "choice",
+      question: "Choose\u202e?",
+      options: [{ label: "Small\u001b[31m" }, { label: "Large" }],
+    }],
+  }, undefined, undefined, {
+    hasUI: true,
+    ui: {
+      select: async (title, choices) => {
+        shownTitle = title;
+        shownChoices = choices;
+        return choices.at(-1);
+      },
+      editor: async () => "custom\u001b]52;c;SGFja2Vk\u0007\nanswer",
+    },
+  });
+
+  assert.equal(shownTitle, "Context\n\n1/1 · Choose?");
+  assert.equal(shownChoices[0], "1. Small");
+  assert.match(result.content[0].text, /Answer: custom\n    answer/);
+  assert.doesNotMatch(result.content[0].text, /[\u001b\u0007\u202e]/);
+
+  await assert.rejects(
+    () => tool.execute("call", {
+      context: "\u001b]0;gone\u0007",
+      questions: [{ id: "scope", question: "Scope?" }],
+    }, undefined, undefined, {
+      hasUI: true,
+      ui: { editor: async () => "answer" },
+    }),
+    /context cannot be empty after sanitation/,
+  );
+
+  await assert.rejects(
+    () => tool.execute("call", {
+      questions: [{ id: "scope", question: "Scope?" }],
+    }, undefined, undefined, {
+      hasUI: true,
+      ui: { editor: async () => "\u001b]52;c;SGFja2Vk\u0007" },
+    }),
+    /answer cannot be empty after sanitation/,
+  );
+});
+
 test("question tool rejects non-UI execution and removes itself from non-UI sessions", async () => {
   const { tool, handlers, active } = setup();
   await assert.rejects(
