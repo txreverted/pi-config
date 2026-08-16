@@ -96,7 +96,9 @@ export default function askExtension(pi: ExtensionAPI) {
           continue;
         }
 
-        const choices = [...question.options.map(optionDisplay), CUSTOM_CHOICE];
+        const choices = question.options.map((option, optionIndex) => `${optionIndex + 1}. ${optionDisplay(option)}`);
+        const customChoice = `${choices.length + 1}. ${CUSTOM_CHOICE}`;
+        choices.push(customChoice);
         const selected = await ctx.ui.select(title, choices, { signal });
         if (selected === undefined) {
           return {
@@ -105,7 +107,7 @@ export default function askExtension(pi: ExtensionAPI) {
           };
         }
 
-        if (selected === CUSTOM_CHOICE) {
+        if (selected === customChoice) {
           const written = await ctx.ui.editor(`${index + 1}/${questions.length} · Write your answer`, "");
           if (written === undefined) {
             return {
