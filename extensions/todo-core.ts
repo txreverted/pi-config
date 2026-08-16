@@ -1,3 +1,5 @@
+import { safeDisplayLine } from "./text-safety.ts";
+
 export const TODO_LIMITS = {
   tasks: 25,
   subject: 200,
@@ -53,7 +55,7 @@ function validText(value: unknown, name: string, maximum: number, required = fal
   }
   if (typeof value !== "string") throw new Error(`${name} must be a string`);
   if (value.length > maximum) throw new Error(`${name} must be at most ${maximum} characters`);
-  const text = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+  const text = safeDisplayLine(value);
   if (required && !text) throw new Error(`${name} is required`);
   return text || undefined;
 }

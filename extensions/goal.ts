@@ -30,25 +30,38 @@ function assistantText(message: unknown): string {
     : []).join("\n").slice(0, GOAL_LIMITS.snapshotText);
 }
 
-function messageTokens(message: unknown): number {
-  if (!message || typeof message !== "object") return 0;
-  const usage = (message as { usage?: Record<string, unknown> }).usage;
-  if (Number.isSafeInteger(usage?.totalTokens) && (usage!.totalTokens as number) > 0) return usage!.totalTokens as number;
-  return ["input", "output", "cacheRead", "cacheWrite"].reduce((total, key) => {
-    const value = usage?.[key];
-    return total + (Number.isSafeInteger(value) && (value as number) > 0 ? value as number : 0);
-  }, 0);
+function completionNote(summary: string, evidence: string): string {
+  const separator = " Evidence: ";
+  const summaryLimit = Math.floor((GOAL_LIMITS.snapshotText - separator.length) / 2);
+  const evidenceLimit = GOAL_LIMITS.snapshotText - separator.length - summaryLimit;
+  return `${cleanGoalText(summary).slice(0, summaryLimit)}${separator}${cleanGoalText(evidence).slice(0, evidenceLimit)}`;
 }
 
-export function restoreGoalSnapshot(ctx: ExtensionContext): GoalSnapshot | undefined {
+function restoreGoalState(ctx: ExtensionContext): { goal?: GoalSnapshot; migrated: boolean } {
   let restored: GoalSnapshot | undefined;
+  let migrated = false;
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "custom" || entry.customType !== ENTRY) continue;
     const data = entry.data as { goal?: unknown } | undefined;
-    restored = data?.goal === null ? undefined : validateGoalSnapshot(data?.goal) ?? restored;
+    if (data?.goal === null) {
+      restored = undefined;
+      migrated = false;
+      continue;
+    }
+    const validated = validateGoalSnapshot(data?.goal);
+    if (!validated) continue;
+    restored = validated;
+    const raw = data?.goal as Record<string, unknown>;
+    migrated = "tokenBudget" in raw || "tokensUsed" in raw;
   }
-  if (restored?.status === "active") return { ...restored, status: "paused", note: "Restored active goal paused; use /goal resume." };
-  return restored;
+  if (restored?.status === "active") {
+    restored = { ...restored, status: "paused", note: "Restored active goal paused; use /goal resume." };
+  }
+  return { goal: restored, migrated };
+}
+
+export function restoreGoalSnapshot(ctx: ExtensionContext): GoalSnapshot | undefined {
+  return restoreGoalState(ctx).goal;
 }
 
 export default function goalExtension(pi: ExtensionAPI): void {
@@ -59,11 +72,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
   let runKind: RunKind | undefined;
   let continuationPending = false;
   let runText = "";
-  let runTokens = 0;
   let runResponses = 0;
   let runUsedTool = false;
   let runStopReason: string | undefined;
-  let stopAfterTurn = false;
 
   const persist = () => pi.appendEntry(ENTRY, { goal: goal ? { ...goal } : null });
   const clearTimer = () => {
@@ -83,8 +94,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
       latestContext.ui.setStatus("goal", undefined);
       return;
     }
-    const budget = goal.tokenBudget === undefined ? "" : ` · ${goal.tokensUsed}/${goal.tokenBudget} tokens`;
-    latestContext.ui.setStatus("goal", `goal: ${goal.status} · ${goal.automaticResponses}/${GOAL_LIMITS.automaticResponses} auto${budget}`.slice(0, 200));
+    latestContext.ui.setStatus("goal", `goal: ${goal.status} · ${goal.automaticResponses} auto`.slice(0, 200));
   };
   const armWaiting = () => {
     clearTimer();
@@ -133,7 +143,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
       return true;
     } catch (error) {
       queuedKind = undefined;
-      goal = { ...goal, status: "paused", note: `Could not start goal turn: ${error instanceof Error ? error.message : String(error)}`.slice(0, GOAL_LIMITS.snapshotText) };
+      goal = {
+        ...goal,
+        status: "paused",
+        note: cleanGoalText(`Could not start goal turn: ${error instanceof Error ? error.message : String(error)}`).slice(0, GOAL_LIMITS.snapshotText),
+      };
       persist();
       setToolsVisible(false);
       syncStatus();
@@ -166,12 +180,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       goal_id: Type.String({ minLength: 1, maxLength: 100 }),
       summary: Type.String({ minLength: 1, maxLength: GOAL_LIMITS.summary }),
-    }),
+      evidence: Type.String({ minLength: 1, maxLength: GOAL_LIMITS.evidence }),
+    }, { additionalProperties: false }),
     async execute(_id, params) {
       requireActiveGoal(params.goal_id);
       const summary = cleanGoalText(params.summary);
+      const evidence = cleanGoalText(params.evidence);
       if (!summary) throw new Error("Completion summary is required.");
-      finish("completed", summary);
+      if (!evidence) throw new Error("Completion evidence is required.");
+      finish("completed", completionNote(summary, evidence));
       return { ...textResult("Goal completed.", goal!), terminate: true };
     },
   });
@@ -250,7 +267,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("goal", {
-    description: "Manage one conservative session goal: /goal <objective> [--tokens 100k] | status | pause | resume | edit | clear",
+    description: "Manage one persistent session goal: /goal <objective> | status | pause | resume | edit | clear",
     handler: async (args, ctx) => {
       latestContext = ctx;
       const command = parseGoalCommand(args);
@@ -287,8 +304,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
           id: randomUUID(),
           objective: command.objective,
           status: "active",
-          tokenBudget: command.tokenBudget,
-          tokensUsed: 0,
           automaticResponses: 0,
           automaticRuns: 0,
           repeatedToolFreeRuns: 0,
@@ -307,7 +322,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
         clearTimer();
         continuationPending = false;
         queuedKind = undefined;
-        goal = { ...goal, objective: command.objective, tokenBudget: command.tokenBudget ?? goal.tokenBudget, status: "paused", waitingUntil: undefined, note: "Edited; use /goal resume." };
+        goal = { ...goal, objective: command.objective, status: "paused", waitingUntil: undefined, note: "Edited; use /goal resume." };
         persist();
         setToolsVisible(false);
         syncStatus(ctx);
@@ -331,10 +346,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
       }
       if (goal.status === "completed") {
         ctx.ui.notify("Cannot resume a completed goal.", "error");
-        return;
-      }
-      if (goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
-        ctx.ui.notify("Token budget is exhausted. Use /goal edit with a larger --tokens budget.", "error");
         return;
       }
       if (!ctx.isIdle()) {
@@ -368,17 +379,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
     runKind = undefined;
     continuationPending = false;
     runText = "";
-    runTokens = 0;
     runResponses = 0;
     runUsedTool = false;
     runStopReason = undefined;
-    stopAfterTurn = false;
   };
   const restore = (ctx: ExtensionContext) => {
     latestContext = ctx;
     clearTimer();
     resetRun();
-    goal = restoreGoalSnapshot(ctx);
+    const restored = restoreGoalState(ctx);
+    goal = restored.goal;
+    if (restored.migrated && goal) persist();
     setToolsVisible(goal?.status === "active");
     syncStatus(ctx);
     armWaiting();
@@ -415,11 +426,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
     runKind = queuedKind;
     queuedKind = undefined;
     runText = "";
-    runTokens = 0;
     runResponses = 0;
     runUsedTool = false;
     runStopReason = undefined;
-    stopAfterTurn = false;
   });
   pi.on("tool_execution_start", () => {
     if (runKind) runUsedTool = true;
@@ -427,17 +436,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.on("message_end", (event) => {
     if (!runKind || !event.message || event.message.role !== "assistant") return;
     runText = `${runText}\n${assistantText(event.message)}`.slice(-GOAL_LIMITS.snapshotText);
-    runTokens += messageTokens(event.message);
     runResponses += 1;
     const stopReason = (event.message as { stopReason?: unknown }).stopReason;
     runStopReason = typeof stopReason === "string" ? stopReason : runStopReason;
-    if (!goal || goal.status !== "active") return;
-    const responseLimitReached = runKind === "automatic" && goal.automaticResponses + runResponses >= GOAL_LIMITS.automaticResponses;
-    const tokenLimitReached = goal.tokenBudget !== undefined && goal.tokensUsed + runTokens >= goal.tokenBudget;
-    stopAfterTurn ||= responseLimitReached || tokenLimitReached;
-  });
-  pi.on("turn_end", (_event, ctx) => {
-    if (stopAfterTurn && goal?.status === "active") ctx.abort();
   });
   pi.on("before_agent_start", (event) => {
     if (!goal || goal.status !== "active" || !queuedKind) return;
@@ -448,19 +449,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.on("agent_settled", (_event, ctx) => {
     latestContext = ctx;
     const settledKind = runKind;
-    const controllerAbort = stopAfterTurn;
     if (goal && settledKind) {
       if (settledKind === "automatic" && goal.lastBlockerRun !== goal.automaticRuns + 1) {
         goal = { ...goal, blockerSignature: undefined, blockerReports: undefined, lastBlockerRun: undefined };
       }
-      goal = settledKind === "automatic"
-        ? recordAutomaticRun(goal, runText, runUsedTool, runResponses, runTokens)
-        : { ...goal, tokensUsed: goal.tokensUsed + runTokens };
-      persist();
+      if (settledKind === "automatic") {
+        goal = recordAutomaticRun(goal, runText, runUsedTool, runResponses);
+        persist();
+      }
     }
     runKind = undefined;
-    stopAfterTurn = false;
-    const interrupted = goal?.status === "active" && settledKind && !controllerAbort &&
+    const interrupted = goal?.status === "active" && settledKind &&
       (runStopReason === "aborted" || runStopReason === "error");
     runStopReason = undefined;
     if (goal && interrupted) {

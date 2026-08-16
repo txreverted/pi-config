@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatSize } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -7,14 +8,15 @@ import {
   runBoundedProcess,
   type BoundedProcessResult,
 } from "./tools-core.ts";
+import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 
 function resultText(result: BoundedProcessResult): string {
-  let text = result.stdout || result.stderr || "(no output)";
+  let text = safeDisplayText(result.stdout || result.stderr) || "(no output)";
   if (result.truncation && result.fullOutputPath) {
     text +=
       `\n\n[Output truncated: showing ${result.truncation.outputLines} of ${result.truncation.totalLines} lines ` +
       `(${formatSize(result.truncation.outputBytes)} of ${formatSize(result.truncation.totalBytes)}). ` +
-      `${result.outputLimitReached ? "Captured" : "Full"} stdout saved to: ${result.fullOutputPath}` +
+      `${result.outputLimitReached ? "Captured" : "Full"} stdout saved to: ${safeDisplayLine(result.fullOutputPath)}` +
       `${result.outputLimitReached ? `; process stopped at ${formatSize(result.outputLimitReached)}` : ""}]`;
   }
   return text;
@@ -29,7 +31,11 @@ async function runGit(args: string[], cwd: string, signal?: AbortSignal): Promis
   });
   if (result.code !== 0 && !result.outputLimitReached) {
     if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
-    throw new Error(`git exited with code ${result.code}: ${(result.stderr || result.stdout).trim()}`);
+    throw new Error(`git exited with code ${result.code}: ${safeDisplayLine(result.stderr || result.stdout, 1_000)}`);
+  }
+  if (result.fullOutputPath) {
+    const content = await readFile(result.fullOutputPath, "utf8");
+    await writeFile(result.fullOutputPath, safeDisplayText(content), "utf8");
   }
   return result;
 }

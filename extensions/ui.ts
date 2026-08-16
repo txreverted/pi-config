@@ -12,6 +12,7 @@ import {
   STATUS_WIDGET_DOCK_EVENT,
   wrapStatusLine,
 } from "./ui-core.ts";
+import { safeDisplayLine } from "./text-safety.ts";
 
 function usageCost(entry: SessionEntry): number {
   let usage: unknown;
@@ -31,8 +32,6 @@ function usageCost(entry: SessionEntry): number {
 
 function isSubscription(ctx: ExtensionContext, model: Model<any> | undefined): boolean {
   if (!model) return false;
-  if (model.provider === "kimi-coding") return true;
-
   const provider = ctx.modelRegistry.getProvider(model.provider);
   return ctx.modelRegistry.isUsingOAuth(model) && provider?.auth.oauth?.isSubscription === true;
 }
@@ -47,8 +46,8 @@ export default function uiExtension(pi: ExtensionAPI) {
   let cachedEntryCount = -1;
   let cachedCost = 0;
 
-  const sessionCost = (ctx: ExtensionContext): number => {
-    const entries = ctx.sessionManager.getEntries();
+  const branchCost = (ctx: ExtensionContext): number => {
+    const entries = ctx.sessionManager.getBranch();
     if (entries.length !== cachedEntryCount) {
       cachedEntryCount = entries.length;
       cachedCost = entries.reduce((total, entry) => total + usageCost(entry), 0);
@@ -105,20 +104,21 @@ export default function uiExtension(pi: ExtensionAPI) {
           },
           invalidate() {},
           render(width: number): string[] {
-            const branch = getGitBranch();
-            const sessionName = ctx.sessionManager.getSessionName();
+            const branch = safeDisplayLine(getGitBranch());
+            const sessionName = safeDisplayLine(ctx.sessionManager.getSessionName());
             const location = [
-              `${formatCwd(ctx.cwd)}${branch ? `(${branch})` : ""}`,
+              `${safeDisplayLine(formatCwd(ctx.cwd))}${branch ? `(${branch})` : ""}`,
               sessionName,
             ].filter(Boolean).join(" · ");
-            const cost = sessionCost(ctx);
+            const cost = branchCost(ctx);
             const usage = ctx.getContextUsage();
             const contextWindow = usage?.contextWindow ?? currentModel?.contextWindow ?? 0;
             const contextPercentValue = usage?.percent ?? 0;
             const contextPercent = usage?.percent == null ? "?" : contextPercentValue.toFixed(1);
             const subscription = isSubscription(ctx, currentModel) ? " (sub)" : "";
             const elapsed = responseStartedAt === undefined ? undefined : formatElapsed(Date.now() - responseStartedAt);
-            const model = currentModel?.id ?? "no-model";
+            const model = safeDisplayLine(currentModel?.id ?? "no-model", 200);
+            const thinking = safeDisplayLine(currentThinking, 40) || "off";
 
             const dim = (value: string) => theme.fg("dim", value);
             const contextColor = usage?.percent == null
@@ -131,11 +131,12 @@ export default function uiExtension(pi: ExtensionAPI) {
               `${logo} ${segments.filter(Boolean).join(separator)}`;
             const version = dim(`v${VERSION}`);
             const place = theme.fg("accent", location);
-            const fullModel = theme.fg("syntaxType", `${model} (${currentThinking})`);
+            const fullModel = theme.fg("syntaxType", `${model} (${thinking})`);
             const price = theme.fg("syntaxNumber", `$${cost.toFixed(3)}${subscription}`);
             const statuses = [...getExtensionStatuses()]
-              .filter(([name, value]) => name !== "ponytail" && value)
-              .map(([, value]) => theme.fg("customMessageLabel", value));
+              .map(([, value]) => safeDisplayLine(value, 200))
+              .filter(Boolean)
+              .map((value) => theme.fg("customMessageLabel", value));
             const time = elapsed ? theme.fg("customMessageLabel", elapsed) : undefined;
             const line = renderCandidate([
               version,

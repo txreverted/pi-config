@@ -34,22 +34,6 @@ test("bounded process streams complete truncated output to a private temporary f
   await assert.rejects(() => stat(result.fullOutputPath));
 });
 
-test("bounded process truncates NUL-delimited records without losing every record", async () => {
-  const result = await runBoundedProcess(
-    process.execPath,
-    ["-e", "for (let i = 0; i < 3000; i++) process.stdout.write(`record-${i.toString().padStart(5, '0')}-${'x'.repeat(20)}\\0`)"],
-    { cwd: process.cwd(), outputDelimiter: "nul", tempPrefix: "pi-tools-test-nul-records" },
-  );
-
-  assert.equal(result.truncation?.truncated, true);
-  assert.equal(result.truncation?.truncatedBy, "bytes");
-  assert.ok(result.stdout.startsWith("record-00000-"));
-  assert.ok(result.stdout.endsWith("\0"));
-  assert.ok(result.stdout.split("\0").length > 100);
-  assert.ok(result.fullOutputPath);
-  await removeBoundedOutput(result.fullOutputPath);
-});
-
 test("bounded process stops at a hard stdout limit", async () => {
   const hardLimit = 64 * 1024;
   const result = await runBoundedProcess(

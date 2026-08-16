@@ -9,7 +9,7 @@ import subagentsExtension, { safeSubagentDisplay, untrustedOutput } from "../ext
 import { MAX_SUBAGENT_TASKS } from "../extensions/subagents-core.ts";
 
 const allowedTools = new Set([
-  "read", "bash", "edit", "write", "grep", "find", "ls", "jq", "rg",
+  "read", "bash", "edit", "write", "grep", "find", "ls", "jq",
   "web_search", "web_fetch", "git_status", "git_diff",
 ]);
 
@@ -212,7 +212,7 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
 
   const worker = agents.get("worker");
   assert.deepEqual(worker.tools, [
-    "read", "bash", "edit", "write", "grep", "find", "ls", "jq", "rg", "web_search", "web_fetch",
+    "read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch",
   ]);
   assert.match(worker.extensions[0], /extensions[/\\]tools\.ts$/);
   assert.match(worker.extensions[1], /extensions[/\\]web\.ts$/);
@@ -288,11 +288,15 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     events.get("session_start")({}, context);
 
     const started = await tools.get("subagent").execute("call", {
-      tasks: [{ name: "Review lifecycle", agent: "reviewer", task: "Review background lifecycle integration now" }],
+      tasks: [
+        { name: "Review lifecycle", agent: "reviewer", task: "Review background lifecycle integration now" },
+        { name: "Review cleanup", agent: "reviewer", task: "Review background cleanup integration now" },
+      ],
       background: true,
     }, undefined, undefined, context);
-    const id = started.details.progress[0].id;
-    assert.ok(id);
+    const ids = started.details.progress.map((entry) => entry.id);
+    assert.equal(ids.length, 2);
+    assert.ok(ids.every(Boolean));
     assert.ok(widgetFactories.length > 0);
 
     const plainTheme = { fg: (_color, value) => value, bold: (value) => value };
@@ -300,20 +304,24 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     assert.ok(dockEvents.length > 0);
     const widget = widgetFactories.at(-1).factory({}, plainTheme).render(160)
       .map((line) => line.trimEnd()).join("\n");
-    assert.match(widget, /^ Agents\n  └─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
+    assert.match(widget, /^ Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 token · 0s/);
 
     await waitFor(() => messages.length > 0);
-    assert.match(messages[0].message.content, new RegExp(id));
-    assert.equal(messages[0].message.details.status, "done");
+    await sleep(150);
+    assert.equal(messages.length, 1);
+    for (const id of ids) assert.match(messages[0].message.content, new RegExp(id));
+    assert.deepEqual(messages[0].message.details.results.map((result) => result.status), ["done", "done"]);
     assert.deepEqual(messages[0].options, { deliverAs: "followUp", triggerTurn: true });
 
-    const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
-    assert.match(collected.content[0].text, /fixture completed/);
-    assert.equal(collected.usage.totalTokens, 17);
-    await assert.rejects(
-      () => tools.get("get_subagent_result").execute("collect-again", { id }, undefined),
-      /Unknown background subagent id/,
-    );
+    for (const id of ids) {
+      const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
+      assert.match(collected.content[0].text, /fixture completed/);
+      assert.equal(collected.usage.totalTokens, 17);
+      await assert.rejects(
+        () => tools.get("get_subagent_result").execute("collect-again", { id }, undefined),
+        /Unknown background subagent id/,
+      );
+    }
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;

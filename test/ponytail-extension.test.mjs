@@ -63,10 +63,17 @@ test("extension registers the complete local Ponytail command set", () => withEn
     "ponytail",
     "ponytail-audit",
     "ponytail-debt",
-    "ponytail-gain",
     "ponytail-help",
     "ponytail-review",
   ]);
+}));
+
+test("hideStatus suppresses Ponytail status publication", () => withEnvironment(async () => {
+  process.env.PONYTAIL_HIDE_STATUS = "1";
+  const harness = createHarness();
+  const { context, statuses } = createContext();
+  await harness.events.get("session_start")({}, context);
+  assert.deepEqual(statuses.at(-1), { name: "ponytail", value: undefined });
 }));
 
 test("session mode persists, injects filtered instructions, and updates internal status activity", () => withEnvironment(async () => {

@@ -378,7 +378,7 @@ function summarizeActivity(activeTools: Iterable<ActiveTool>, editedFiles: Reado
     .filter((tool) => tool.name.toLowerCase() === "bash" && typeof tool.args?.command === "string")
     .map((tool) => tool.args!.command as string);
   if (bashCommands.some((command) => /\b(?:test|check|typecheck|lint|build)\b/i.test(command))) return "running checks";
-  if (names.some((name) => name === "web_search" || name === "find" || name === "grep" || name === "rg")) return "searching";
+  if (names.some((name) => name === "web_search" || name === "find" || name === "grep")) return "searching";
   if (names.includes("web_fetch")) return "reading source";
   if (names.includes("read")) return "reading files";
   if (names.some((name) => name === "git_status" || name === "git_diff") ||
