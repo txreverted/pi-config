@@ -4,6 +4,8 @@ Private Pi package. `README.md` is the only human guide. Code and tests define b
 
 Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 
+![Pi config TUI](assets/pi-config.png)
+
 ## Map
 
 | Feature | Source | Tests |
