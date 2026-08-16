@@ -54,6 +54,8 @@ test("theme stays neutral except for added and removed diff lines", () => {
   const resolved = (token) => theme.vars[theme.colors[token]] ?? theme.colors[token];
   assert.equal(new Set(["success", "error", "warning"].map(resolved)).size, 3);
   assert.equal(new Set(["userMessageBg", "customMessageBg", "toolSuccessBg", "toolErrorBg"].map(resolved)).size, 4);
+  assert.equal(resolved("toolPendingBg"), resolved("toolSuccessBg"));
+  assert.notEqual(resolved("toolPendingBg"), resolved("userMessageBg"));
   for (const token of ["text", "muted", "dim", "thinkingText", "syntaxComment"]) {
     assert.ok(contrast(resolved(token), theme.vars.base) >= 4.5, token);
   }
