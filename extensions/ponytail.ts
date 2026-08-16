@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   buildPonytailInstructions,
+  DEFAULT_PONYTAIL_MODE,
   isPonytailDeactivationCommand,
   parsePonytailCommand,
   readPonytailDefaultMode,
@@ -31,10 +32,11 @@ const ICONS: Record<PonytailSessionMode, string> = {
 };
 
 export default function ponytailExtension(pi: ExtensionAPI): void {
-  let configuredDefault: PonytailMode = readPonytailDefaultMode();
+  let configuredDefault: PonytailMode = DEFAULT_PONYTAIL_MODE;
   let currentMode: PonytailSessionMode = configuredDefault;
   let active = false;
-  let hideStatus = readPonytailHideStatus();
+  let quietStartup = false;
+  let hideStatus = false;
   let latestContext: ExtensionContext | undefined;
 
   const syncStatus = (context?: ExtensionContext) => {
@@ -52,6 +54,31 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     } catch {
       // Some non-TUI adapters expose status methods before their theme is ready.
     }
+  };
+
+  const loadSettings = (ctx: ExtensionContext): boolean => {
+    const errors = new Set<string>();
+    const read = <T>(reader: () => T, fallback: T): T => {
+      try {
+        return reader();
+      } catch (error) {
+        errors.add(error instanceof Error ? error.message : String(error));
+        return fallback;
+      }
+    };
+    configuredDefault = read(readPonytailDefaultMode, DEFAULT_PONYTAIL_MODE);
+    quietStartup = read(readPonytailQuietStartup, false);
+    hideStatus = read(readPonytailHideStatus, false);
+    if (errors.size > 0) {
+      ctx.ui.notify(`Could not load some Ponytail settings; using defaults: ${[...errors].join("; ")}`.slice(0, 500), "error");
+    }
+    return errors.size === 0;
+  };
+
+  const restoreMode = (ctx: ExtensionContext) => {
+    currentMode = resolvePonytailSessionMode(ctx.sessionManager.getBranch(), configuredDefault);
+    active = false;
+    syncStatus(ctx);
   };
 
   const setMode = (mode: PonytailSessionMode, ctx?: ExtensionContext) => {
@@ -108,14 +135,12 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", (_event, ctx) => {
-    configuredDefault = readPonytailDefaultMode();
-    hideStatus = readPonytailHideStatus();
-    const entries = ctx.sessionManager.getBranch();
-    currentMode = resolvePonytailSessionMode(entries, configuredDefault);
-    active = false;
-    syncStatus(ctx);
-    if (!readPonytailQuietStartup()) ctx.ui.notify(`Ponytail loaded: ${currentMode}`, "info");
+    const loaded = loadSettings(ctx);
+    restoreMode(ctx);
+    if (loaded && !quietStartup) ctx.ui.notify(`Ponytail loaded: ${currentMode}`, "info");
   });
+
+  pi.on("session_tree", (_event, ctx) => restoreMode(ctx));
 
   pi.on("input", (event, ctx) => {
     if (event.source !== "extension" && currentMode !== "off" && isPonytailDeactivationCommand(event.text)) {
