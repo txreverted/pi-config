@@ -372,6 +372,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const details = result.details as SubagentToolDetails | undefined;
       const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
       if (!details || expanded) return new Text(normalizeDisplayText(content), 0, 0);
+      if (context.args.background) {
+        const count = details.progress.length;
+        return new Text(theme.fg("dim", `${count} background agent${count === 1 ? "" : "s"} started`), 0, 0);
+      }
 
       return renderAgentTree(details.progress.map((progress, index) => ({
         progress,
