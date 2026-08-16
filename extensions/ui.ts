@@ -55,6 +55,10 @@ export default function uiExtension(pi: ExtensionAPI) {
     }
     return cachedCost;
   };
+  const invalidateSessionCost = () => {
+    cachedEntryCount = -1;
+    requestStatusRender?.();
+  };
 
   const stopResponseTimer = () => {
     if (responseTimer) clearInterval(responseTimer);
@@ -70,16 +74,18 @@ export default function uiExtension(pi: ExtensionAPI) {
 
     currentModel = ctx.model;
     currentThinking = ctx.thinkingLevel ?? "off";
+    cachedEntryCount = -1;
+    cachedCost = 0;
 
     let getGitBranch = (): string | null => null;
-    let getGoalStatus = (): string | undefined => undefined;
+    let getExtensionStatuses = (): ReadonlyMap<string, string> => new Map();
     let onBranchChange = (_callback: () => void): (() => void) => () => {};
 
     // FooterDataProvider owns Pi's reactive git branch and extension status state.
     // Capture its public accessors, then replace the footer with a zero-line component.
     ctx.ui.setFooter((_tui, _theme, footerData) => {
       getGitBranch = () => footerData.getGitBranch();
-      getGoalStatus = () => footerData.getExtensionStatuses().get("goal");
+      getExtensionStatuses = () => footerData.getExtensionStatuses();
       onBranchChange = (callback) => footerData.onBranchChange(callback);
       return { invalidate() {}, render: () => [] };
     });
@@ -127,8 +133,9 @@ export default function uiExtension(pi: ExtensionAPI) {
             const place = theme.fg("accent", location);
             const fullModel = theme.fg("syntaxType", `${model} (${currentThinking})`);
             const price = theme.fg("syntaxNumber", `$${cost.toFixed(3)}${subscription}`);
-            const goalStatus = getGoalStatus();
-            const goal = goalStatus ? theme.fg("customMessageLabel", goalStatus) : undefined;
+            const statuses = [...getExtensionStatuses()]
+              .filter(([name, value]) => name !== "ponytail" && value)
+              .map(([, value]) => theme.fg("customMessageLabel", value));
             const time = elapsed ? theme.fg("customMessageLabel", elapsed) : undefined;
             const line = renderCandidate([
               version,
@@ -136,11 +143,11 @@ export default function uiExtension(pi: ExtensionAPI) {
               fullModel,
               context,
               price,
-              ...(goal ? [goal] : []),
+              ...statuses,
               ...(time ? [time] : []),
             ]);
 
-            return wrapStatusLine(line, width);
+            return ["", ...wrapStatusLine(line, width)];
           },
         };
       },
@@ -177,6 +184,10 @@ export default function uiExtension(pi: ExtensionAPI) {
   pi.on("session_info_changed", () => {
     requestStatusRender?.();
   });
+
+  pi.on("message_end", invalidateSessionCost);
+  pi.on("session_tree", invalidateSessionCost);
+  pi.on("session_compact", invalidateSessionCost);
 
   pi.on("session_shutdown", () => {
     if (responseTimer) clearInterval(responseTimer);
