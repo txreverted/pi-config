@@ -77,6 +77,32 @@ test("invalid questionnaires are rejected", () => {
     ]),
     /at most one/,
   );
+  assert.throws(
+    () => normalizeQuestions([{ id: "bad id", question: "Unsafe?" }]),
+    /letters, digits/,
+  );
+  assert.throws(
+    () => normalizeQuestions([{
+      id: "empty",
+      question: "Unsafe?",
+      options: [{ label: "One", description: "\u001b]0;gone\u0007" }, { label: "Two" }],
+    }]),
+    /empty description after sanitation/,
+  );
+});
+
+test("question text is safe before it reaches the terminal", () => {
+  const [question] = normalizeQuestions([{
+    id: "safe",
+    question: "Choose\u001b]52;c;SGFja2Vk\u0007 now\u202e?",
+    options: [
+      { label: "One\u001b[31m" },
+      { label: "Two", description: "line\nwrapped" },
+    ],
+  }]);
+  assert.equal(question.question, "Choose now?");
+  assert.equal(question.options[0].label, "One");
+  assert.equal(question.options[1].description, "line wrapped");
 });
 
 test("answers are formatted clearly, including multiline custom text", () => {

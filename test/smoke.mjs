@@ -12,7 +12,7 @@ const args = [
   "--no-themes",
 ];
 for (const extension of extensions) args.push("--extension", resolve(root, "extensions", extension));
-for (const skill of ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-gain", "ponytail-help"]) {
+for (const skill of ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"]) {
   args.push("--skill", resolve(root, "skills", skill, "SKILL.md"));
 }
 args.push("--theme", resolve(root, "themes", "neutral.json"));

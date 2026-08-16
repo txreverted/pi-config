@@ -15,6 +15,6 @@ Rank largest credible cuts first. One line each:
 
 `<tag> <what to cut>. <replacement>. [<path>:L<line>]`
 
-End with `net: -<N> lines, -<M> deps possible.` If there is no substantiated cut, output only `Lean already. Ship.`
+When the repository evidence supports an estimate, end with `estimated removable surface: ~<N> lines, <M> deps.` Omit the estimate when line or dependency counts are not substantiated. If there is no substantiated cut, output only `Lean already. Ship.`
 
 Scope is complexity only. Exclude correctness, security, and performance findings. Read and report; apply nothing.

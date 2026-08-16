@@ -37,7 +37,7 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "worker",
-      tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "jq", "rg", "web_search", "web_fetch"],
+      tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch"],
       extensions: [toolsExtension, webExtension],
       prompt: prompt("worker"),
       thinking: "medium",

@@ -8,6 +8,7 @@ import {
   type AskAnswer,
   type AskQuestion,
 } from "./ask-core.ts";
+import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 
 const TOOL_NAME = "ask_user_question";
 
@@ -20,7 +21,12 @@ const OptionSchema = Type.Object({
 });
 
 const QuestionSchema = Type.Object({
-  id: Type.String({ minLength: 1, maxLength: 50, description: "Short unique identifier, such as scope or storage" }),
+  id: Type.String({
+    minLength: 1,
+    maxLength: 50,
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    description: "Short unique identifier, such as scope or storage",
+  }),
   question: Type.String({ minLength: 1, maxLength: 500, description: "Clear question for the user" }),
   options: Type.Optional(
     Type.Array(OptionSchema, {
@@ -41,6 +47,12 @@ interface AskDetails {
 function questionTitle(context: string | undefined, question: AskQuestion, index: number, total: number): string {
   const prefix = context && index === 0 ? `${context}\n\n` : "";
   return `${prefix}${index + 1}/${total} · ${question.question}`;
+}
+
+function customAnswer(value: string): string {
+  const sanitized = safeDisplayText(value).trim();
+  if (!sanitized) throw new Error("Custom answer cannot be empty after sanitation");
+  return Array.from(sanitized).slice(0, 10_000).join("");
 }
 
 export default function askExtension(pi: ExtensionAPI) {
@@ -71,7 +83,8 @@ export default function askExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (!ctx.hasUI) throw new Error("ask_user_question requires an interactive TUI or RPC client");
 
-      const context = params.context?.trim();
+      const context = params.context === undefined ? undefined : safeDisplayLine(params.context);
+      if (params.context !== undefined && !context) throw new Error("Question context cannot be empty after sanitation");
       const questions = normalizeQuestions(params.questions as AskQuestion[]);
       const answers: AskAnswer[] = [];
 
@@ -90,7 +103,7 @@ export default function askExtension(pi: ExtensionAPI) {
           answers.push({
             id: question.id,
             question: question.question,
-            answer: written.trim() || "(no answer provided)",
+            answer: customAnswer(written),
             kind: "custom",
           });
           continue;
@@ -118,7 +131,7 @@ export default function askExtension(pi: ExtensionAPI) {
           answers.push({
             id: question.id,
             question: question.question,
-            answer: written.trim() || "(no answer provided)",
+            answer: customAnswer(written),
             kind: "custom",
           });
           continue;

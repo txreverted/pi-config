@@ -10,7 +10,8 @@ Return a compact reference containing:
 ## Levels
 
 - `/ponytail lite` — implement the request and mention the lazier alternative.
-- `/ponytail` or `/ponytail full` — enforce YAGNI → reuse → stdlib → native → installed dependency → minimum code.
+- `/ponytail` — activate the configured default.
+- `/ponytail full` — enforce YAGNI → reuse → stdlib → native → installed dependency → minimum code.
 - `/ponytail ultra` — delete first and challenge speculative requirements.
 - `/ponytail off` — disable the mode for this session.
 - `/ponytail status` — show current and configured-default modes.
@@ -21,10 +22,9 @@ Return a compact reference containing:
 - `/ponytail-review` — over-engineering review of the current diff.
 - `/ponytail-audit` — whole-repository complexity audit.
 - `/ponytail-debt` — collect `ponytail:` shortcuts.
-- `/ponytail-gain` — published benchmark card.
 - `/ponytail-help` — this reference.
 
-Say `stop ponytail` or `normal mode` to deactivate. Resume with `/ponytail`.
+Say `stop ponytail` or `normal mode` to deactivate. Resume with `/ponytail`, or `/ponytail full` when the configured default is `off`.
 
 Configuration uses `PONYTAIL_DEFAULT_MODE`, `PONYTAIL_QUIET_STARTUP`, and `PONYTAIL_HIDE_STATUS`, with `~/.config/ponytail/config.json` (or the platform/XDG equivalent) as fallback:
 
