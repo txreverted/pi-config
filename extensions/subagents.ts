@@ -20,6 +20,7 @@ import {
   type ChildTask,
   type UsageSummary,
 } from "./subagents-core.ts";
+import { STATUS_WIDGET_DOCK_EVENT } from "./ui-core.ts";
 
 const SUBAGENT_WIDGET_INTERVAL_MS = 1_000;
 
@@ -31,6 +32,7 @@ interface SubagentToolDetails {
 
 const taskSchema = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  name: Type.String({ minLength: 1, maxLength: 80, pattern: "^\\S+(?:\\s+\\S+){0,2}$", description: "Descriptive task name of at most three words" }),
   agent: StringEnum(AGENT_NAMES, { description: "Fixed delegated role" }),
   task: Type.String({ minLength: 1, maxLength: 50_000, pattern: "\\S", description: "Bounded non-blank task for this agent" }),
   cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096, description: "Working directory inside the current workspace" })),
@@ -85,6 +87,14 @@ function shortStatusText(value: string, maxChars = 64): string {
   return characters.length <= maxChars ? characters.join("") : `${characters.slice(0, maxChars - 1).join("")}…`;
 }
 
+function cleanTaskName(value: string): string {
+  const name = safeStatusText(value);
+  if (!name || name.length > 80 || name.split(" ").length > 3) {
+    throw new Error("Subagent task names must contain one to three words");
+  }
+  return name;
+}
+
 function roleLabel(agent: AgentName): string {
   if (agent === "reviewer") return "Review";
   if (agent === "researcher") return "Research";
@@ -102,24 +112,18 @@ function tokenCount(value: number): string {
 }
 
 function progressActivity(entry: ChildRunProgress): string {
-  if (entry.status === "completed") return "done";
-  if (entry.status === "failed") return shortStatusText((entry as ChildRunResult).error || "failed");
-  if (entry.status === "aborted") return "aborted";
-  if (entry.status === "timed_out") return "timed out";
+  if (entry.status === "done") return "done";
+  if (entry.status === "stale") return "stale";
+  if (entry.status === "bugged") return "bugged";
+  if (entry.status === "error") return "error";
   if (entry.status === "starting") return "starting…";
   const activity = entry.activity ?? entry.currentTool;
   return activity ? `${shortStatusText(activity)}…` : "thinking…";
 }
 
-function taskLabel(task: string | undefined, fallback: string): string {
-  const visibleTask = safeStatusText(task?.split("\n\n--- Active parent coding policy ---", 1)[0] || fallback);
-  const words = visibleTask.split(" ").filter(Boolean);
-  return shortStatusText(`${words.slice(0, 4).join(" ")}${words.length > 4 ? "…" : ""}`);
-}
-
 interface AgentDisplayEntry {
   progress: ChildRunProgress;
-  task?: string;
+  name?: string;
 }
 
 function renderAgentTree(entries: readonly AgentDisplayEntry[], theme: Theme, includeHeader = false): Text {
@@ -127,17 +131,17 @@ function renderAgentTree(entries: readonly AgentDisplayEntry[], theme: Theme, in
   const queued = entries.length - active.length;
   const indent = includeHeader ? " " : "";
   const lines: string[] = includeHeader ? [theme.bold(" Agents")] : [];
-  active.forEach(({ progress, task }, index) => {
+  active.forEach(({ progress, name }, index) => {
     const last = index === active.length - 1 && queued === 0;
     const branch = theme.fg("dim", `${indent}${last ? " └─" : " ├─"}`);
     const continuation = theme.fg("dim", `${indent}${last ? "     └" : " │   └"}`);
-    const elapsed = (progress.status === "completed" || progress.status === "failed" || progress.status === "aborted" || progress.status === "timed_out") && "endedAt" in progress
+    const elapsed = (progress.status === "done" || progress.status === "stale" || progress.status === "bugged" || progress.status === "error") && "endedAt" in progress
       ? (progress as ChildRunResult).endedAt - progress.startedAt
       : Date.now() - progress.startedAt;
     const toolUses = `${progress.toolCalls} tool use${progress.toolCalls === 1 ? "" : "s"}`;
     const stats = `${toolUses} · ${tokenCount(progress.usage.totalTokens)} token · ${duration(elapsed)}`;
     lines.push(
-      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", taskLabel(task, progress.id))} ${theme.fg("dim", `· ${stats}`)}`,
+      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", shortStatusText(name || progress.id))} ${theme.fg("dim", `· ${stats}`)}`,
       `${continuation} ${theme.fg("dim", progressActivity(progress))}`,
     );
   });
@@ -179,8 +183,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     if (!ctx || ctx.mode !== "tui") return;
     const active = background.active();
     ctx.ui.setWidget("subagents", active.length > 0
-      ? (_tui, theme) => renderAgentTree(active.map((entry) => ({ progress: entry.progress, task: entry.task })), theme, true)
-      : undefined);
+      ? (_tui, theme) => renderAgentTree(active.map((entry) => ({ progress: entry.progress, name: entry.name })), theme, true)
+      : undefined, { placement: "aboveEditor" });
+    pi.events.emit(STATUS_WIDGET_DOCK_EVENT, undefined);
     if (active.length > 0 && !widgetTimer) {
       widgetTimer = setInterval(refreshWidget, SUBAGENT_WIDGET_INTERVAL_MS);
       widgetTimer.unref?.();
@@ -213,6 +218,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only. Worker can edit files, run commands and tests with the local user's privileges, but runs only in the foreground. Children use separate processes and contexts, expose no subagent tool, and load only static tools and extensions. Background tasks are read-only, session-scoped, and limited to three outstanding results.",
     promptSnippet: "Delegate implementation, independent review, or public-web research to isolated child contexts",
     promptGuidelines: [
+      "Give every subagent task a descriptive name of at most three words.",
       "Use subagent worker for a self-contained implementation task that benefits from isolated context; give it explicit scope and acceptance criteria.",
       "Use subagent reviewer for a fresh read-only code review and researcher for an independent public-web pass.",
       "Use background subagents only for independent read-only work. Background reviewers inspect the live checkout, so do not edit files they are reviewing. Collect completion notifications with get_subagent_result instead of polling.",
@@ -224,6 +230,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       if (!ctx.model) throw new Error("Subagent requires a selected parent model");
       if (params.tasks.some((task) => !task.task.trim())) throw new Error("Subagent tasks must not be blank");
+      const names = params.tasks.map((task) => cleanTaskName(task.name));
 
       const reservedIds = new Set<string>();
       const ids = params.tasks.map((task, index) => {
@@ -242,6 +249,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
       const tasks: ChildTask[] = await Promise.all(params.tasks.map(async (task, index) => ({
         id: ids[index],
+        name: names[index],
         agent: task.agent as AgentName,
         task: task.task.trim(),
         cwd: await resolveWorkspaceCwd(ctx.cwd, task.cwd),
@@ -349,7 +357,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
       return renderAgentTree(details.progress.map((progress, index) => ({
         progress,
-        task: context.args.tasks?.[index]?.task,
+        name: context.args.tasks?.[index]?.name,
       })), theme);
     },
   });
