@@ -9,6 +9,7 @@ import {
   formatCwd,
   formatElapsed,
   formatTokens,
+  STATUS_WIDGET_DOCK_EVENT,
   wrapStatusLine,
 } from "./ui-core.ts";
 
@@ -42,6 +43,7 @@ export default function uiExtension(pi: ExtensionAPI) {
   let responseStartedAt: number | undefined;
   let responseTimer: ReturnType<typeof setInterval> | undefined;
   let requestStatusRender: (() => void) | undefined;
+  let redockStatusWidget: (() => void) | undefined;
   let cachedEntryCount = -1;
   let cachedCost = 0;
 
@@ -61,6 +63,8 @@ export default function uiExtension(pi: ExtensionAPI) {
     requestStatusRender?.();
   };
 
+  pi.events.on(STATUS_WIDGET_DOCK_EVENT, () => redockStatusWidget?.());
+
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 
@@ -68,12 +72,14 @@ export default function uiExtension(pi: ExtensionAPI) {
     currentThinking = ctx.thinkingLevel ?? "off";
 
     let getGitBranch = (): string | null => null;
+    let getGoalStatus = (): string | undefined => undefined;
     let onBranchChange = (_callback: () => void): (() => void) => () => {};
 
-    // FooterDataProvider owns Pi's reactive git branch state. Capture its public
-    // accessors, then replace the footer with a zero-line component.
+    // FooterDataProvider owns Pi's reactive git branch and extension status state.
+    // Capture its public accessors, then replace the footer with a zero-line component.
     ctx.ui.setFooter((_tui, _theme, footerData) => {
       getGitBranch = () => footerData.getGitBranch();
+      getGoalStatus = () => footerData.getExtensionStatuses().get("goal");
       onBranchChange = (callback) => footerData.onBranchChange(callback);
       return { invalidate() {}, render: () => [] };
     });
@@ -81,7 +87,7 @@ export default function uiExtension(pi: ExtensionAPI) {
     // Remove the startup header. The status widget is docked directly above the
     // editor, so transcript output, working state, and tool calls stay above it.
     ctx.ui.setHeader(() => ({ invalidate() {}, render: () => [] }));
-    ctx.ui.setWidget(
+    redockStatusWidget = () => ctx.ui.setWidget(
       "minimal-status",
       (tui, theme) => {
         requestStatusRender = () => tui.requestRender();
@@ -90,10 +96,6 @@ export default function uiExtension(pi: ExtensionAPI) {
         return {
           dispose() {
             unsubscribeBranch();
-            if (responseTimer) clearInterval(responseTimer);
-            responseTimer = undefined;
-            responseStartedAt = undefined;
-            requestStatusRender = undefined;
           },
           invalidate() {},
           render(width: number): string[] {
@@ -116,15 +118,17 @@ export default function uiExtension(pi: ExtensionAPI) {
             const contextColor = usage?.percent == null
               ? "muted"
               : contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "success";
-            const context = theme.fg(contextColor, `${contextPercent}%/${formatTokens(contextWindow)}`);
-            const separator = dim(" > ");
+            const context = theme.fg(contextColor, `${contextPercent}%/${formatTokens(contextWindow)} (auto)`);
+            const separator = dim(" 〉");
             const logo = theme.bold(theme.fg("accent", "π"));
             const renderCandidate = (segments: readonly string[]) =>
-              ` ${logo} ${segments.filter(Boolean).join(separator)}`;
+              `${logo} ${segments.filter(Boolean).join(separator)}`;
             const version = dim(`v${VERSION}`);
             const place = theme.fg("accent", location);
             const fullModel = theme.fg("syntaxType", `${model} (${currentThinking})`);
             const price = theme.fg("syntaxNumber", `$${cost.toFixed(3)}${subscription}`);
+            const goalStatus = getGoalStatus();
+            const goal = goalStatus ? theme.fg("customMessageLabel", goalStatus) : undefined;
             const time = elapsed ? theme.fg("customMessageLabel", elapsed) : undefined;
             const line = renderCandidate([
               version,
@@ -132,6 +136,7 @@ export default function uiExtension(pi: ExtensionAPI) {
               fullModel,
               context,
               price,
+              ...(goal ? [goal] : []),
               ...(time ? [time] : []),
             ]);
 
@@ -141,6 +146,7 @@ export default function uiExtension(pi: ExtensionAPI) {
       },
       { placement: "aboveEditor" },
     );
+    redockStatusWidget();
   });
 
   pi.on("agent_start", (_event, ctx) => {
@@ -177,6 +183,7 @@ export default function uiExtension(pi: ExtensionAPI) {
     responseTimer = undefined;
     responseStartedAt = undefined;
     requestStatusRender = undefined;
+    redockStatusWidget = undefined;
     cachedEntryCount = -1;
     cachedCost = 0;
   });

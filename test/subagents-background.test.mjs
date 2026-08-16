@@ -10,10 +10,10 @@ function deferred() {
 }
 
 function task(id) {
-  return { id, agent: "worker", task: `Task ${id}`, cwd: process.cwd() };
+  return { id, name: `Task ${id}`, agent: "worker", task: `Task ${id}`, cwd: process.cwd() };
 }
 
-function resultFor(value, status = "completed") {
+function resultFor(value, status = "done") {
   const now = Date.now();
   return {
     id: value.id,
@@ -23,13 +23,13 @@ function resultFor(value, status = "completed") {
     startedAt: now,
     turns: 1,
     toolCalls: 1,
-    text: status === "completed" ? "done" : "",
+    text: status === "done" ? "done" : "",
     usage: { ...emptyUsage(), output: 1, totalTokens: 1 },
     task: value.task,
     cwd: value.cwd,
-    output: status === "completed" ? "done" : "",
-    ...(status === "aborted" ? { error: "aborted" } : {}),
-    exitCode: status === "completed" ? 0 : null,
+    output: status === "done" ? "done" : "",
+    ...(status === "error" ? { error: "cancelled" } : {}),
+    exitCode: status === "done" ? 0 : null,
     endedAt: now,
     durationMs: 0,
     truncated: false,
@@ -54,7 +54,7 @@ test("background manager bounds concurrency and drains FIFO", async () => {
   }
   await nextTurn();
   assert.deepEqual(started, ["job-1", "job-2"]);
-  assert.deepEqual(manager.active().map((entry) => entry.task), ["Task job-1", "Task job-2", "Task job-3"]);
+  assert.deepEqual(manager.active().map((entry) => entry.name), ["Task job-1", "Task job-2", "Task job-3"]);
   assert.equal(manager.progress("job-3").status, "queued");
 
   gates[0].resolve();
@@ -88,14 +88,14 @@ test("background manager cancels queued work and aborts running work on shutdown
 
   manager.enqueue(first, "medium", (signal) => new Promise((resolve) => {
     signal.addEventListener("abort", () => {
-      setTimeout(() => resolve(resultFor(first, "aborted")), 20);
+      setTimeout(() => resolve(resultFor(first, "error")), 20);
     }, { once: true });
   }));
   manager.enqueue(second, "medium", async () => resultFor(second));
   await nextTurn();
 
   assert.equal(manager.cancel("queued"), true);
-  assert.equal((await manager.wait("queued")).status, "aborted");
+  assert.equal((await manager.wait("queued")).status, "error");
   assert.deepEqual(completed, ["queued"]);
 
   let shutdownSettled = false;
@@ -103,6 +103,6 @@ test("background manager cancels queued work and aborts running work on shutdown
   await nextTurn();
   assert.equal(shutdownSettled, false);
   await shutdown;
-  assert.equal((await manager.wait("running")).status, "aborted");
+  assert.equal((await manager.wait("running")).status, "error");
   assert.deepEqual(completed, ["queued"]);
 });

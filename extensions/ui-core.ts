@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import { relative, resolve, sep } from "node:path";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
+export const STATUS_WIDGET_DOCK_EVENT = "ui:dock-status-widget";
+
 export function formatCwd(cwd: string): string {
   const home = resolve(homedir());
   const absoluteCwd = resolve(cwd);
@@ -28,7 +30,7 @@ export function formatElapsed(durationMs: number): string {
   const totalMinutes = Math.floor(totalSeconds / 60);
 
   if (totalMinutes === 0) return `${seconds}s`;
-  if (totalMinutes < 60) return `${totalMinutes}m${seconds.toString().padStart(2, "0")}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m${seconds.toString().padStart(2, "0")}`;
 
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
