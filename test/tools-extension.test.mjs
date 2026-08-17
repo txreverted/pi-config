@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-import toolsExtension from "../extensions/tools.ts";
+import toolsExtension, { sanitizeRetainedOutput } from "../extensions/tools.ts";
 
 function fakePi(initialActive = ["read", "grep", "find"]) {
   const tools = new Map();
@@ -45,6 +47,29 @@ test("jq executes shell-free input and enforces exclusive input modes", async ()
     () => jq.execute("jq-test", { filter: ".", input: "{}", files: ["package.json"] }, undefined, undefined, { cwd: process.cwd() }),
     /either input or files/,
   );
+});
+
+test("jq preserves leading-at filenames after the option terminator", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-jq-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "@data.json"), JSON.stringify({ name: "at-file" }));
+  await writeFile(join(root, "data.json"), JSON.stringify({ name: "plain-file" }));
+  const pi = fakePi();
+  toolsExtension(pi);
+  const result = await pi.tools.get("jq").execute("jq-path", {
+    filter: ".name",
+    files: ["@data.json"],
+    rawOutput: true,
+  }, undefined, undefined, { cwd: root });
+  assert.equal(result.content[0].text.trim(), "at-file");
+});
+
+test("failed retained-output sanitation removes its temporary directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-jq-sanitize-"));
+  const invalidOutput = join(root, "output.txt");
+  await mkdir(invalidOutput);
+  await assert.rejects(() => sanitizeRetainedOutput(invalidOutput));
+  await assert.rejects(() => stat(root));
 });
 
 test("jq excludes parent secrets from its child environment", async () => {

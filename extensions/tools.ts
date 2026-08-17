@@ -58,10 +58,6 @@ const jqSchema = Type.Object({
   sortKeys: Type.Optional(Type.Boolean({ description: "Sort object keys in output (-S)" })),
 }, { additionalProperties: false });
 
-function normalizePath(path: string): string {
-  return path.startsWith("@") ? path.slice(1) : path;
-}
-
 function processError(result: BoundedProcessResult): Error {
   const diagnostic = safeDisplayLine(result.stderr || result.stdout, 1_000);
   return new Error(`jq exited with code ${result.code}${diagnostic ? `: ${diagnostic}` : ""}`);
@@ -73,9 +69,14 @@ function appendStderr(stdout: string, stderr: string): string {
   return `${stdout.replace(/\n$/, "")}\n\n[stderr]\n${stderr}`;
 }
 
-async function sanitizeRetainedOutput(path: string): Promise<void> {
-  const content = await readFile(path, "utf8");
-  await writeFile(path, safeDisplayText(content), "utf8");
+export async function sanitizeRetainedOutput(path: string): Promise<void> {
+  try {
+    const content = await readFile(path, "utf8");
+    await writeFile(path, safeDisplayText(content), "utf8");
+  } catch (error) {
+    await removeBoundedOutput(path).catch(() => undefined);
+    throw error;
+  }
 }
 
 function jqEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -149,7 +150,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
       if (params.nullInput) args.push("--null-input");
       if (params.sortKeys) args.push("--sort-keys");
       for (const { name, value } of params.variables ?? []) args.push("--arg", name, value);
-      args.push("--", params.filter, ...(params.files ?? []).map(normalizePath));
+      args.push("--", params.filter, ...(params.files ?? []));
 
       const result = await runBoundedProcess("jq", args, {
         cwd: ctx.cwd,
