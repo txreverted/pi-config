@@ -60,6 +60,37 @@ test("questionnaire rendering obeys available rows on short terminals", () => {
   }
 });
 
+test("single-choice enter submits immediately with checkbox styling", () => {
+  const questions = normalizeQuestions([{
+    id: "scope",
+    header: "Scope",
+    question: "Which scope?",
+    options: [{ label: "Small" }, { label: "Large" }],
+  }]);
+  const theme = {
+    fg: (_color, text) => text,
+    bold: (text) => text,
+    italic: (text) => text,
+    strikethrough: (text) => text,
+  };
+  const keybindings = {
+    matches: (data, action) => data === "\r" && action === "tui.select.confirm",
+  };
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  let result;
+  const component = createAskComponent(tui, theme, keybindings, questions, undefined, (value) => { result = value; });
+
+  const rendered = component.render(80).join("\n");
+  assert.match(rendered, /\[ \] Scope/);
+  assert.match(rendered, /> \[ \] Small/);
+  assert.doesNotMatch(rendered, /[●○]/);
+
+  component.handleInput("\r");
+
+  assert.equal(result.cancelled, false);
+  assert.equal(result.answers[0].answer, "Small");
+});
+
 test("question state supports multi-select, custom answers, and backtracking", () => {
   const questions = normalizeQuestions([
     {
