@@ -53,6 +53,20 @@ test("tool returns full snapshots and bounded list output in headless mode", asy
   assert.deepEqual(listed.details.snapshot, created.details.snapshot);
 });
 
+test("todo output labels dependencies without claiming completed tasks still block", async () => {
+  const { tool, events } = setup();
+  const headless = context([], "print");
+  events.get("session_start")({}, headless.value);
+
+  await tool.execute("call", { action: "create", subject: "Prepare" });
+  await tool.execute("call", { action: "create", subject: "Use result", blockedBy: [1] });
+  await tool.execute("call", { action: "update", id: 1, status: "completed" });
+  await tool.execute("call", { action: "update", id: 2, status: "in_progress" });
+  const listed = await tool.execute("call", { action: "list" });
+  assert.match(listed.content[0].text, /#2 Use result depends on #1/);
+  assert.doesNotMatch(listed.content[0].text, /blocked by #1/);
+});
+
 test("session events restore the latest validated current-branch snapshot", async () => {
   const { tool, events } = setup();
   const first = { tasks: [{ id: 1, subject: "Old", status: "pending", blockedBy: [] }], nextId: 2 };
