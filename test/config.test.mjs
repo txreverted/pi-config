@@ -23,6 +23,7 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
     "./extensions/ask.ts",
     "./extensions/subagents.ts",
     "./extensions/todo.ts",
+    "./extensions/task.ts",
     "./extensions/goal.ts",
     "./extensions/concise.ts",
     "./extensions/ponytail.ts",

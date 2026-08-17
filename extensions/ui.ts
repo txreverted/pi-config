@@ -27,7 +27,7 @@ import {
 } from "./ui-core.ts";
 import { safeDisplayLine } from "./text-safety.ts";
 
-const PANEL_ORDER: readonly UiPanelId[] = ["todo", "subagents"];
+const PANEL_ORDER: readonly UiPanelId[] = ["todo", "task", "subagents"];
 const MODE_ORDER: readonly UiModeStatusId[] = ["goal", "ponytail"];
 
 function usageCost(entry: SessionEntry): number {
