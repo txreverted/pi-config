@@ -180,6 +180,28 @@ test("a successful child retry clears an earlier assistant error", async () => {
   }
 });
 
+test("an empty final child response does not reuse earlier commentary", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-empty-final-"));
+  try {
+    const updates = [];
+    const result = await runChildAgent({
+      definition,
+      task: childTask("empty-final", "Return an empty final response", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "empty-final" },
+      onUpdate: (update) => updates.push(update),
+    });
+    assert.equal(result.status, "bugged");
+    assert.equal(result.output, "");
+    assert.match(result.error, /no final text response/);
+    const finalUpdates = updates.filter((update) => update.turns === 2);
+    assert.ok(finalUpdates.length > 0);
+    assert.ok(finalUpdates.every((update) => update.text === ""));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("child runner reports and preserves a run directory when cleanup fails", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-cleanup-failure-"));
   const taskPathFile = join(cwd, "task-path");
