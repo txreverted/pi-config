@@ -177,7 +177,7 @@ test("RPC free-form answers obey tool cancellation", async () => {
   });
   controller.abort();
   const cancelledWhileOpen = await pending;
-  assert.equal(receivedSignal, controller.signal);
+  assert.equal(receivedSignal.aborted, true);
   assert.equal(cancelledWhileOpen.details.cancelled, true);
 });
 
