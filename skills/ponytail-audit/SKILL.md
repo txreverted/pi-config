@@ -1,6 +1,6 @@
 ---
 name: ponytail-audit
-description: Audit an entire repository for over-engineering and produce a ranked read-only delete list. Finds avoidable dependencies, wrappers, speculative abstractions, dead configuration, and custom code replaceable by existing, standard-library, or native features. Use for repo bloat audits or /ponytail-audit.
+description: Audit an entire repository for over-engineering and produce a ranked read-only delete list. Finds avoidable dependencies, wrappers, speculative abstractions, dead configuration, and custom code replaceable by existing, standard-library, or native features. Use for repo bloat audits or /skill:ponytail-audit.
 ---
 
 # Ponytail Audit

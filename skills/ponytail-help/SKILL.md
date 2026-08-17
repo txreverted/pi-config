@@ -1,6 +1,6 @@
 ---
 name: ponytail-help
-description: Show a one-shot quick-reference for Ponytail levels, commands, configuration, and deactivation. Use for Ponytail help, command questions, or /ponytail-help. Does not change mode.
+description: Show a one-shot quick-reference for Ponytail levels, commands, configuration, and deactivation. Use for Ponytail help, command questions, or /skill:ponytail-help. Does not change mode.
 ---
 
 # Ponytail Help
@@ -19,10 +19,10 @@ Return a compact reference containing:
 
 ## One-shot skills
 
-- `/ponytail-review` — over-engineering review of the current diff.
-- `/ponytail-audit` — whole-repository complexity audit.
-- `/ponytail-debt` — collect `ponytail:` shortcuts.
-- `/ponytail-help` — this reference.
+- `/skill:ponytail-review` — over-engineering review of the current diff.
+- `/skill:ponytail-audit` — whole-repository complexity audit.
+- `/skill:ponytail-debt` — collect `ponytail:` shortcuts.
+- `/skill:ponytail-help` — this reference.
 
 Say `stop ponytail` or `normal mode` to deactivate. Resume with `/ponytail`, or `/ponytail full` when the configured default is `off`.
 
