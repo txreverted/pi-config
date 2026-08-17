@@ -101,7 +101,7 @@ test("production tarball installs without dev dependencies and loads through Pi"
     await writeFile(join(application, "package.json"), '{"private":true,"type":"module"}\n');
 
     const installed = spawnSync("npm", [
-      "install", "--offline", "--ignore-scripts", "--omit=dev", "--legacy-peer-deps", "--no-package-lock", tarball,
+      "install", "--prefer-offline", "--ignore-scripts", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund", "--no-package-lock", tarball,
     ], {
       cwd: application,
       encoding: "utf8",
