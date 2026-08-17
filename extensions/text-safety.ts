@@ -21,5 +21,5 @@ export function safeDisplayLine(value: unknown, maxChars?: number): string {
   if (!Number.isSafeInteger(maxChars) || maxChars < 1) throw new Error("maxChars must be a positive integer");
   const characters = Array.from(text);
   if (characters.length <= maxChars) return text;
-  return maxChars === 1 ? "…" : `${characters.slice(0, maxChars - 1).join("")}…`;
+  return maxChars <= 3 ? ".".repeat(maxChars) : `${characters.slice(0, maxChars - 3).join("")}...`;
 }

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const mode = process.env.FAKE_PI_MODE ?? "success";
@@ -22,15 +22,15 @@ let running = false;
 let descendant;
 
 async function runPrompt(message) {
-  const taskPath = /@([^ ]+)/.exec(message)?.[1];
-  if (taskPath && process.env.FAKE_PI_TASK_PATH_FILE) await writeFile(process.env.FAKE_PI_TASK_PATH_FILE, taskPath);
-  if (taskPath) await readFile(taskPath, "utf8");
+  if (process.env.FAKE_PI_PROMPT_FILE) await writeFile(process.env.FAKE_PI_PROMPT_FILE, message);
+  const rolePath = args[args.indexOf("--append-system-prompt") + 1];
+  if (rolePath && process.env.FAKE_PI_RUN_PATH_FILE) await writeFile(process.env.FAKE_PI_RUN_PATH_FILE, rolePath);
   running = true;
   send({ type: "agent_start" });
   if (mode === "hang" || mode === "startup-hang" || mode === "quiet") return;
   if (mode === "malformed" || mode === "malformed-hang") { process.stdout.write("not json\n"); if (mode === "malformed") process.exit(1); return; }
   if (mode === "stderr-failure") { process.stderr.write("provider authentication failed\n"); process.exit(1); }
-  if (mode === "stderr-large") { process.stderr.write(`${"x".repeat(70_000)}\u001b]52;c;payload\u0007`); process.exit(1); }
+  if (mode === "stderr-large") { process.stderr.write(`${"😀".repeat(20_000)}\u001b]52;c;payload\u0007`); process.exit(1); }
   if (mode === "stubborn-descendant") {
     descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], { stdio: "ignore" });
     await writeFile(process.env.FAKE_PI_PID_FILE, String(descendant.pid));

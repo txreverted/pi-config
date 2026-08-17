@@ -5,23 +5,15 @@ export const GOAL_LIMITS = {
   summary: 4000,
   reason: 2000,
   evidence: 4000,
-  repeatedRuns: 3,
-  automaticRuns: 20,
   snapshotText: 4000,
 } as const;
 
-export type GoalStatus = "active" | "paused" | "waiting" | "completed" | "blocked";
+export type GoalStatus = "active" | "paused" | "waiting" | "completed";
 
 export interface GoalSnapshot {
   id: string;
   objective: string;
   status: GoalStatus;
-  automaticRuns: number;
-  repeatedToolFreeRuns: number;
-  lastToolFreeSignature?: string;
-  blockerSignature?: string;
-  blockerReports?: number;
-  lastBlockerRun?: number;
   waitingUntil?: number;
   note?: string;
 }
@@ -32,7 +24,7 @@ export type GoalCommand =
   | { type: "edit"; objective: string }
   | { type: "invalid"; error: string };
 
-const VALID_STATUSES = new Set<GoalStatus>(["active", "paused", "waiting", "completed", "blocked"]);
+const VALID_STATUSES = new Set<GoalStatus>(["active", "paused", "waiting", "completed"]);
 
 export function cleanGoalText(value: string): string {
   return safeDisplayLine(value);
@@ -77,50 +69,13 @@ export function validateGoalSnapshot(value: unknown): GoalSnapshot | undefined {
   const input = value as Record<string, unknown>;
   const objective = boundedText(input.objective, GOAL_LIMITS.objective);
   const id = boundedText(input.id, 100);
-  const automaticResponses = input.automaticResponses === undefined ? undefined : nonnegativeInteger(input.automaticResponses);
-  const automaticRuns = nonnegativeInteger(input.automaticRuns);
-  const repeatedToolFreeRuns = nonnegativeInteger(input.repeatedToolFreeRuns);
-  if (!id || !objective?.trim() || !VALID_STATUSES.has(input.status as GoalStatus) || (input.automaticResponses !== undefined && automaticResponses === undefined) || automaticRuns === undefined || repeatedToolFreeRuns === undefined) return undefined;
+  if (!id || !objective?.trim() || !VALID_STATUSES.has(input.status as GoalStatus)) return undefined;
   const waitingUntil = input.waitingUntil === undefined ? undefined : nonnegativeInteger(input.waitingUntil);
   if (input.waitingUntil !== undefined && waitingUntil === undefined) return undefined;
-  const blockerReports = input.blockerReports === undefined ? undefined : nonnegativeInteger(input.blockerReports);
-  const lastBlockerRun = input.lastBlockerRun === undefined ? undefined : nonnegativeInteger(input.lastBlockerRun);
-  if (input.blockerReports !== undefined && blockerReports === undefined) return undefined;
-  if (input.lastBlockerRun !== undefined && lastBlockerRun === undefined) return undefined;
-  const lastToolFreeSignature = boundedText(input.lastToolFreeSignature, GOAL_LIMITS.snapshotText);
-  const blockerSignature = boundedText(input.blockerSignature, 64);
   const note = boundedText(input.note, GOAL_LIMITS.snapshotText);
-  if (input.blockerSignature !== undefined && blockerSignature === undefined) return undefined;
   return {
-    id, objective, status: input.status as GoalStatus, automaticRuns, repeatedToolFreeRuns,
-    ...(lastToolFreeSignature === undefined ? {} : { lastToolFreeSignature }),
-    ...(blockerSignature === undefined ? {} : { blockerSignature }),
-    ...(blockerReports === undefined ? {} : { blockerReports }),
-    ...(lastBlockerRun === undefined ? {} : { lastBlockerRun }),
+    id, objective, status: input.status as GoalStatus,
     ...(waitingUntil === undefined ? {} : { waitingUntil }),
     ...(note === undefined ? {} : { note }),
   };
-}
-
-export function recordAutomaticRun(goal: GoalSnapshot, text: string, usedTool: boolean): GoalSnapshot {
-  const next = { ...goal };
-  next.automaticRuns += 1;
-  const signature = cleanGoalText(text).slice(0, GOAL_LIMITS.snapshotText);
-  if (usedTool) {
-    next.repeatedToolFreeRuns = 0;
-    delete next.lastToolFreeSignature;
-  } else if (!signature || signature === next.lastToolFreeSignature) {
-    next.repeatedToolFreeRuns += 1;
-    next.lastToolFreeSignature = signature;
-  } else {
-    next.repeatedToolFreeRuns = 1;
-    next.lastToolFreeSignature = signature;
-  }
-  return next;
-}
-
-export function automaticStopReason(goal: GoalSnapshot): string | undefined {
-  if (goal.automaticRuns >= GOAL_LIMITS.automaticRuns) return `${GOAL_LIMITS.automaticRuns} automatic runs`;
-  if (goal.repeatedToolFreeRuns >= GOAL_LIMITS.repeatedRuns) return `${GOAL_LIMITS.repeatedRuns} repeated or empty tool-free automatic runs`;
-  return undefined;
 }

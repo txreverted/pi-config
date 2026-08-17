@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import askExtension from "../extensions/ask.ts";
 import goalExtension from "../extensions/goal.ts";
 import subagentsExtension from "../extensions/subagents.ts";
 import todoExtension from "../extensions/todo.ts";
@@ -23,18 +22,20 @@ function rendererHarness(load) {
     getActiveTools: () => [...active],
     setActiveTools(names) { active = [...names]; },
   };
-  load(pi);
+  const child = process.env.PI_CONFIG_SUBAGENT_CHILD;
+  delete process.env.PI_CONFIG_SUBAGENT_CHILD;
+  try { load(pi); }
+  finally { if (child !== undefined) process.env.PI_CONFIG_SUBAGENT_CHILD = child; }
   return { tools, lifecycle };
 }
 
 test("config tool renderers collapse repeated display-only blank rows without adding a gutter", () => {
   const cases = [
-    [askExtension, ["ask_user_question"]],
     [toolsExtension, ["jq"]],
     [webExtension, ["web_search", "web_fetch"]],
-    [subagentsExtension, ["subagent", "get_subagent_result", "cancel_subagent"]],
+    [subagentsExtension, ["subagent"]],
     [todoExtension, ["todo"]],
-    [goalExtension, ["goal_complete", "goal_blocked", "goal_wait"]],
+    [goalExtension, ["goal_complete", "goal_wait"]],
   ];
   const result = { content: [{ type: "text", text: "one\n\n \n\n\u001b[31mtwo\u001b[0m" }] };
   const theme = { fg: (_color, value) => value, bold: (value) => value };

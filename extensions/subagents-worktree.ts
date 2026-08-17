@@ -1,23 +1,20 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, mkdir, realpath, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isPathInside } from "./path-safety.ts";
 
 const exec = promisify(execFile);
 export const MAX_AGENT_DIFF_BYTES = 2_000_000;
 const MAX_UNTRACKED_FILES = 1_000;
+const MAX_METADATA_BYTES = 1_024;
 
 export interface AgentWorkspace {
   repoRoot: string;
   worktree: string;
   baseCommit: string;
-}
-
-function inside(root: string, candidate: string): boolean {
-  const value = relative(root, candidate);
-  return value === "" || (value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value));
 }
 
 async function git(cwd: string, args: string[], maxBuffer = MAX_AGENT_DIFF_BYTES): Promise<string> {
@@ -30,61 +27,87 @@ async function git(cwd: string, args: string[], maxBuffer = MAX_AGENT_DIFF_BYTES
   return stdout;
 }
 
+async function repositoryRoot(cwd: string): Promise<string> {
+  const root = await realpath((await git(cwd, ["rev-parse", "--show-toplevel"])).trim());
+  if (!(await stat(root)).isDirectory()) throw new Error("Writable agents require a Git repository");
+  return root;
+}
+
+function worktreeLocation(repoRoot: string, agentId: string): { root: string; worktree: string; metadataRoot: string; metadata: string } {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(agentId)) throw new Error("Invalid agent id");
+  const hash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 24);
+  const root = join(getAgentDir(), "pi-config", "worktrees", hash);
+  const worktree = join(root, agentId);
+  const metadataRoot = join(root, ".metadata");
+  return { root, worktree, metadataRoot, metadata: join(metadataRoot, `${agentId}.json`) };
+}
+
 export async function repositoryIdentity(cwd: string): Promise<{ repoRoot: string; baseCommit: string }> {
-  const rootText = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
-  const repoRoot = await realpath(rootText);
-  if (!(await stat(repoRoot)).isDirectory()) throw new Error("Writable agents require a Git repository");
+  const repoRoot = await repositoryRoot(cwd);
+  if (await git(repoRoot, ["status", "--porcelain=v1", "-z"])) {
+    throw new Error("Worker isolation requires a clean parent checkout");
+  }
   const baseCommit = (await git(repoRoot, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
   if (!/^[0-9a-f]{40,64}$/i.test(baseCommit)) throw new Error("Git HEAD is not a commit");
   return { repoRoot, baseCommit };
 }
 
 export async function createAgentWorktree(cwd: string, agentId: string): Promise<AgentWorkspace & { cwd: string }> {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(agentId)) throw new Error("Invalid agent id");
   const { repoRoot, baseCommit } = await repositoryIdentity(cwd);
-  if ((await git(repoRoot, ["status", "--porcelain=v1", "--untracked-files=normal"])).trim()) {
-    throw new Error("Background writable agents require a clean parent checkout; use a foreground worker or clean/stash first");
-  }
   const requested = await realpath(resolve(cwd));
-  if (!inside(repoRoot, requested)) throw new Error("Agent cwd must be inside its repository");
-  const hash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 24);
-  const root = join(getAgentDir(), "pi-config", "worktrees", hash);
-  const worktree = join(root, agentId);
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  try {
-    await lstat(worktree);
-    throw new Error(`Agent worktree already exists: ${worktree}`);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  if (!isPathInside(repoRoot, requested)) throw new Error("Agent cwd must be inside its repository");
+  const { worktree, metadataRoot, metadata } = worktreeLocation(repoRoot, agentId);
+  await mkdir(metadataRoot, { recursive: true, mode: 0o700 });
+  for (const path of [worktree, metadata]) {
+    try {
+      await lstat(path);
+      throw new Error(`Agent worktree already exists: ${worktree}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
   await git(repoRoot, ["worktree", "add", "--detach", "--no-checkout", worktree, baseCommit]);
   try {
     await git(worktree, ["checkout", "--detach", baseCommit]);
-    const mapped = join(worktree, relative(repoRoot, requested));
-    return { repoRoot, worktree: await realpath(worktree), baseCommit, cwd: await realpath(mapped) };
+    const actualWorktree = await realpath(worktree);
+    await writeFile(metadata, `${JSON.stringify({ repoRoot, worktree: actualWorktree, baseCommit })}\n`, { mode: 0o600, flag: "wx" });
+    const mapped = join(actualWorktree, relative(repoRoot, requested));
+    return { repoRoot, worktree: actualWorktree, baseCommit, cwd: await realpath(mapped) };
   } catch (error) {
     await git(repoRoot, ["worktree", "remove", "--force", worktree]).catch(() => undefined);
-    await rm(worktree, { recursive: true, force: true });
+    await Promise.all([rm(worktree, { recursive: true, force: true }), rm(metadata, { force: true })]);
+    await rm(metadataRoot, { recursive: false }).catch(() => undefined);
+    await rm(dirname(worktree), { recursive: false }).catch(() => undefined);
     throw error;
   }
 }
 
+export async function recoverAgentWorktree(cwd: string, agentId: string): Promise<AgentWorkspace> {
+  const repoRoot = await repositoryRoot(cwd);
+  const { root, worktree, metadata } = worktreeLocation(repoRoot, agentId);
+  const info = await lstat(worktree);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Invalid agent worktree");
+  const actualWorktree = await realpath(worktree);
+  if (!isPathInside(await realpath(root), actualWorktree)) throw new Error("Invalid agent worktree path");
+  const metadataInfo = await lstat(metadata);
+  if (!metadataInfo.isFile() || metadataInfo.isSymbolicLink() || metadataInfo.size > MAX_METADATA_BYTES) throw new Error("Invalid agent worktree metadata");
+  const saved = JSON.parse(await readFile(metadata, "utf8")) as Record<string, unknown>;
+  if (saved.repoRoot !== repoRoot || saved.worktree !== actualWorktree || typeof saved.baseCommit !== "string" || !/^[0-9a-f]{40,64}$/i.test(saved.baseCommit)) {
+    throw new Error("Invalid agent worktree metadata");
+  }
+  const parentCommon = await realpath(resolve(repoRoot, (await git(repoRoot, ["rev-parse", "--git-common-dir"])).trim()));
+  const workerCommon = await realpath(resolve(actualWorktree, (await git(actualWorktree, ["rev-parse", "--git-common-dir"])).trim()));
+  if (parentCommon !== workerCommon) throw new Error("Agent worktree belongs to another repository");
+  const baseCommit = (await git(repoRoot, ["rev-parse", "--verify", `${saved.baseCommit}^{commit}`])).trim();
+  if (baseCommit !== saved.baseCommit) throw new Error("Invalid agent worktree base commit");
+  return { repoRoot, worktree: actualWorktree, baseCommit };
+}
+
 export async function agentDiff(workspace: AgentWorkspace): Promise<string> {
-  const tracked = await git(workspace.worktree, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", workspace.baseCommit, "--"]);
   const untracked = (await git(workspace.worktree, ["ls-files", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
   if (untracked.length > MAX_UNTRACKED_FILES) throw new Error(`Agent diff contains more than ${MAX_UNTRACKED_FILES} untracked files`);
-  let patch = tracked;
-  for (const path of untracked) {
-    try {
-      patch += await git(workspace.worktree, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", "--no-index", "--", "/dev/null", path]);
-    } catch (error) {
-      const output = (error as { stdout?: string }).stdout;
-      if (typeof output === "string") patch += output;
-      else throw error;
-    }
-    if (Buffer.byteLength(patch) > MAX_AGENT_DIFF_BYTES) throw new Error(`Agent diff exceeds ${MAX_AGENT_DIFF_BYTES} bytes`);
-  }
-  return patch;
+  for (const path of untracked) await git(workspace.worktree, ["add", "--intent-to-add", "--", path]);
+  return git(workspace.worktree, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", workspace.baseCommit, "--"]);
 }
 
 export async function applyAgentDiff(workspace: AgentWorkspace, patch: string): Promise<void> {
@@ -108,6 +131,12 @@ export async function applyAgentDiff(workspace: AgentWorkspace, patch: string): 
 
 export async function discardAgentWorktree(workspace: AgentWorkspace): Promise<void> {
   await git(workspace.repoRoot, ["worktree", "remove", "--force", workspace.worktree]);
-  await rm(workspace.worktree, { recursive: true, force: true });
-  await rm(dirname(workspace.worktree), { recursive: false }).catch(() => undefined);
+  const root = dirname(workspace.worktree);
+  const metadataRoot = join(root, ".metadata");
+  await Promise.all([
+    rm(workspace.worktree, { recursive: true, force: true }),
+    rm(join(metadataRoot, `${basename(workspace.worktree)}.json`), { force: true }),
+  ]);
+  await rm(metadataRoot, { recursive: false }).catch(() => undefined);
+  await rm(root, { recursive: false }).catch(() => undefined);
 }

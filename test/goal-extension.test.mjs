@@ -63,9 +63,8 @@ async function startRun(h) {
   return injected;
 }
 
-async function response(h, text, { tokens = 10, tool = false, toolError = false } = {}) {
+async function response(h, text, { tokens = 10 } = {}) {
   await startRun(h);
-  if (tool || toolError) await h.events.get("tool_execution_end")({ isError: toolError }, h.context);
   await h.events.get("message_end")({ message: assistant(text, tokens) }, h.context);
   await h.events.get("agent_settled")({}, h.context);
 }
@@ -81,7 +80,7 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
 
   const sentinel = "IGNORE_SYSTEM_SENTINEL";
   await h.commands.get("goal").handler(`Implement safely ${sentinel}`, h.context);
-  assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => !h.active().includes(name)));
+  assert.ok(["goal_complete", "goal_wait"].every((name) => !h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: paused/);
   assert.match(h.messages[0], /untrusted task data/);
   assert.match(h.messages[0], /goal_id:/);
@@ -93,7 +92,7 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
   assert.match(injected.systemPrompt, /goal controller user message/);
   assert.match(injected.systemPrompt, /Current goal_id:/);
   assert.doesNotMatch(injected.systemPrompt, new RegExp(sentinel));
-  assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => h.active().includes(name)));
+  assert.ok(["goal_complete", "goal_wait"].every((name) => h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: active/);
 });
 
@@ -199,30 +198,14 @@ test("provider retries preserve ownership of the current goal run", async () => 
   assert.match(h.entries.at(-1).data.goal.note, /queued/);
 });
 
-test("failed tool calls do not bypass repeated automatic-run detection", async () => {
+test("automatic continuation has no run or repeated-output ceiling", async () => {
   const h = harness();
   await h.events.get("session_start")({}, h.context);
-  await h.commands.get("goal").handler("Stop failed loops", h.context);
-  await response(h, "initial", { tool: true });
-  for (let index = 0; index < 3; index++) await response(h, "same failed attempt", { toolError: true });
-  assert.match(h.statuses.at(-1).value, /paused/);
-  assert.equal(h.messages.length, 4);
-});
-
-test("harmless successful-tool loops pause at the automatic ceiling and resume renews it", async () => {
-  const h = harness();
-  await h.events.get("session_start")({}, h.context);
-  await h.commands.get("goal").handler("Bound the loop", h.context);
-  await response(h, "initial", { tool: true });
-  for (let index = 0; index < 20; index++) await response(h, `automatic ${index}`, { tool: true });
-  assert.equal(h.messages.length, 21);
-  assert.match(h.statuses.at(-1).value, /goal: paused · 20\/20 auto/);
-
-  await h.commands.get("goal").handler("resume", h.context);
-  assert.equal(h.messages.length, 22);
-  assert.match(h.statuses.at(-1).value, /goal: paused · 0\/20 auto/);
+  await h.commands.get("goal").handler("Continue until complete", h.context);
+  for (let index = 0; index < 25; index++) await response(h, "same output");
+  assert.equal(h.messages.length, 26);
   await startRun(h);
-  assert.match(h.statuses.at(-1).value, /goal: active · 0\/20 auto/);
+  assert.match(h.statuses.at(-1).value, /goal: active/);
 
   const rejected = harness();
   await rejected.events.get("session_start")({}, rejected.context);
@@ -231,51 +214,15 @@ test("harmless successful-tool loops pause at the automatic ceiling and resume r
   assert.match(rejected.notices.at(-1).message, /no longer supported/);
 });
 
-test("blocker requires the same report on three separate automatic runs and rejects stale ids", async () => {
+test("goal tools reject stale ids", async () => {
   const h = harness();
   await h.events.get("session_start")({}, h.context);
   await h.commands.get("goal").handler("Hard goal", h.context);
-  const id = h.entries.at(-1).data.goal.id;
   await h.events.get("before_agent_start")({ prompt: h.messages[0], systemPrompt: "BASE" }, h.context);
-  const blockedTool = h.tools.get("goal_blocked");
-  assert.equal("repeated_turns" in blockedTool.parameters.properties, false);
-  assert.deepEqual(
-    blockedTool.prepareArguments({ goal_id: id, reason: "claimed", evidence: "none", repeated_turns: 99 }),
-    { goal_id: id, reason: "claimed", evidence: "none" },
-  );
-  await assert.rejects(
-    blockedTool.execute("x", { goal_id: id, reason: "claimed", evidence: "none" }),
-    /only during an automatic/,
-  );
-  for (const name of ["goal_complete", "goal_wait", "goal_blocked"]) {
-    const params = name === "goal_complete"
-      ? { goal_id: "stale", summary: "done", evidence: "checks passed" }
-      : name === "goal_wait"
-        ? { goal_id: "stale", reason: "wait" }
-        : { goal_id: "stale", reason: "blocked", evidence: "proof" };
-    await assert.rejects(h.tools.get(name).execute("x", params), /Stale goal_id; no state was changed/);
-  }
-
-  await response(h, "initial", { tool: true });
-  const report = async (reason, expected) => {
-    await startRun(h);
-    const call = h.tools.get("goal_blocked").execute("x", {
-      goal_id: id,
-      reason,
-      evidence: "verified",
-    });
-    if (expected === "complete") return call;
-    await assert.rejects(call, new RegExp(`report ${expected}/3`, "i"));
-    await h.events.get("message_end")({ message: assistant("still blocked") }, h.context);
-    await h.events.get("agent_settled")({}, h.context);
-  };
-
-  await report("blocker A", 1);
-  await report("blocker B", 1);
-  await report("blocker B", 2);
-  const result = await report("blocker B", "complete");
-  assert.equal(result.terminate, true);
-  assert.match(h.statuses.at(-1).value, /blocked/);
+  for (const [name, params] of [
+    ["goal_complete", { goal_id: "stale", summary: "done", evidence: "checks passed" }],
+    ["goal_wait", { goal_id: "stale", reason: "wait" }],
+  ]) await assert.rejects(h.tools.get(name).execute("x", params), /Stale goal_id; no state was changed/);
 });
 
 test("paused tools cannot terminate a goal and external input wakes a waiting goal", async () => {
@@ -338,22 +285,21 @@ test("wait deadlines wake once and continue from the idle boundary", async (t) =
   }
 });
 
-test("a waiting goal cannot wake past the automatic-run ceiling", async (t) => {
+test("a waiting goal wakes without an automatic-run ceiling", async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
   try {
     const h = harness([snapshotEntry({
       id: "goal-wait-limit",
-      objective: "Stop after waiting",
+      objective: "Continue after waiting",
       status: "waiting",
-      automaticRuns: 20,
-      repeatedToolFreeRuns: 0,
       waitingUntil: 1_010,
     })]);
     await h.events.get("session_start")({}, h.context);
     t.mock.timers.tick(10);
-    assert.equal(h.messages.length, 0);
-    assert.match(h.statuses.at(-1).value, /paused · 20\/20 auto/);
-    assert.ok(!h.active().includes("goal_complete"));
+    assert.equal(h.messages.length, 1);
+    await startRun(h);
+    assert.match(h.statuses.at(-1).value, /active/);
+    assert.ok(h.active().includes("goal_complete"));
     await h.events.get("session_shutdown")({}, h.context);
   } finally {
     t.mock.timers.reset();
@@ -361,17 +307,11 @@ test("a waiting goal cannot wake past the automatic-run ceiling", async (t) => {
 });
 
 test("branch restore pauses active goals, preserves waiting goals, and clears timers on shutdown", async () => {
-  const base = {
-    id: "goal-restored", objective: "Restore me", status: "active", tokensUsed: 4, tokenBudget: 10,
-    automaticResponses: 2, automaticRuns: 2, repeatedToolFreeRuns: 0,
-  };
+  const base = { id: "goal-restored", objective: "Restore me", status: "active" };
   const active = harness([snapshotEntry(base)]);
   await active.events.get("session_start")({}, active.context);
   assert.match(active.statuses.at(-1).value, /paused/);
   assert.ok(!active.active().includes("goal_complete"));
-  assert.equal("tokenBudget" in active.entries.at(-1).data.goal, false);
-  assert.equal("tokensUsed" in active.entries.at(-1).data.goal, false);
-  assert.equal("automaticResponses" in active.entries.at(-1).data.goal, false);
 
   const waiting = harness([snapshotEntry({ ...base, status: "waiting", waitingUntil: Date.now() + 60_000 })]);
   await waiting.events.get("session_start")({}, waiting.context);
@@ -381,10 +321,7 @@ test("branch restore pauses active goals, preserves waiting goals, and clears ti
 });
 
 test("a malformed latest snapshot fails closed instead of restoring older waiting state", async () => {
-  const validWaiting = {
-    id: "goal-old", objective: "Do not resurrect", status: "waiting",
-    automaticRuns: 2, repeatedToolFreeRuns: 0,
-  };
+  const validWaiting = { id: "goal-old", objective: "Do not resurrect", status: "waiting" };
   const h = harness([
     snapshotEntry(validWaiting),
     snapshotEntry({ ...validWaiting, objective: "" }),

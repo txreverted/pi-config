@@ -24,13 +24,6 @@ const SKILL_BODY = (() => {
   }
 })();
 
-const ICONS: Record<PonytailSessionMode, string> = {
-  off: "",
-  lite: "🌿",
-  full: "⚡",
-  ultra: "🔥",
-};
-
 export default function ponytailExtension(pi: ExtensionAPI): void {
   let configuredDefault: PonytailMode = DEFAULT_PONYTAIL_MODE;
   let currentMode: PonytailSessionMode = configuredDefault;
@@ -43,9 +36,8 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
       pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
       return;
     }
-    const indicator = active ? "●" : "○";
-    const label = `${ICONS[currentMode]} ${currentMode.toUpperCase()}`;
-    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: `${indicator} 🐴 ponytail: ${label}` });
+    const state = active ? "active" : "idle";
+    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: `ponytail: ${currentMode} (${state})` });
   };
 
   const loadSettings = (ctx: ExtensionContext): boolean => {
@@ -77,7 +69,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const command = parsePonytailCommand(args, configuredDefault);
       if (command.type === "status") {
-        ctx.ui.notify(normalizeDisplayText(`Ponytail: current ${currentMode} · default ${configuredDefault}`), "info");
+        ctx.ui.notify(normalizeDisplayText(`Ponytail: current ${currentMode}, default ${configuredDefault}`), "info");
         return;
       }
       if (command.type === "set-mode") {

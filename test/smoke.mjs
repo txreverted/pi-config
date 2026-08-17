@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 const manifestExtensions = packageJson.pi.extensions.map((path) => resolve(root, path));
 const internalExtensions = [resolve(root, "extensions/subagent-tools.ts")];
-const skillNames = ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"];
+const skillNames = ["ponytail"];
 const extensions = [...manifestExtensions, ...internalExtensions];
 assert.equal(new Set(extensions).size, extensions.length, "Smoke extension paths must be unique");
 assert.ok(manifestExtensions.every((path) => extensions.includes(path)), "Every manifest extension must load directly");
