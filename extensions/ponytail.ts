@@ -72,17 +72,6 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     ctx?.ui.notify(normalizeDisplayText(`Ponytail mode set to ${mode}.`), "info");
   };
 
-  const runSkill = (name: string, args: string, ctx: ExtensionContext) => {
-    const argument = args.trim();
-    const message = `/skill:${name}${argument ? ` ${argument}` : ""}`;
-    if (!ctx.isIdle()) {
-      pi.sendUserMessage(message, { deliverAs: "followUp", expandPromptTemplates: true });
-      ctx.ui.notify(normalizeDisplayText(`${name} queued as a follow-up.`), "info");
-      return;
-    }
-    pi.sendUserMessage(message, { expandPromptTemplates: true });
-  };
-
   pi.registerCommand("ponytail", {
     description: "Set Ponytail mode (lite, full, ultra, off), show status, or save default <mode>",
     handler: async (args, ctx) => {
@@ -117,13 +106,6 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
       ctx.ui.notify(normalizeDisplayText("Usage: /ponytail [lite|full|ultra|off|status|default <mode>]"), "warning");
     },
   });
-
-  for (const name of ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"] as const) {
-    pi.registerCommand(name, {
-      description: `Run /skill:${name}`,
-      handler: async (args, ctx) => runSkill(name, args, ctx),
-    });
-  }
 
   pi.on("session_start", (_event, ctx) => {
     const loaded = loadSettings(ctx);

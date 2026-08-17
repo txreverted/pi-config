@@ -70,6 +70,10 @@ test("task store fails closed on corruption and recovers only an unambiguous sta
   await store.transact((snapshot) => ({ snapshot, result: undefined }));
 
   await mkdir(store.lock);
+  await utimes(store.lock, old, old);
+  await store.transact((snapshot) => ({ snapshot, result: undefined }));
+
+  await mkdir(store.lock);
   await chmod(store.lock, 0o700);
   await assert.rejects(
     store.transact((snapshot) => ({ snapshot, result: undefined })),

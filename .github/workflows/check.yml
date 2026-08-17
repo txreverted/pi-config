@@ -10,13 +10,18 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node: ["22.19.0", "22.x"]
         pi: [pinned, latest]
+        include:
+          - os: windows-latest
+            node: "22.19.0"
+            pi: pinned
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -28,4 +33,9 @@ jobs:
         run: npm audit --omit=dev
       - if: matrix.pi == 'latest'
         run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
-      - run: npm run check
+      - if: runner.os != 'Windows'
+        run: npm run check
+      - if: runner.os == 'Windows'
+        run: npm run typecheck
+      - if: runner.os == 'Windows'
+        run: node --experimental-strip-types --test --test-name-pattern "supervisor change subscriptions|closed supervisors|missing managed artifacts|removed delegated cwd|background worktrees reject|read-only agent tools|writable policy|permits only one concurrent claim|fails closed on corruption" test/subagents-supervisor.test.mjs test/subagents-worktree.test.mjs test/task-store.test.mjs

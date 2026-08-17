@@ -62,15 +62,9 @@ async function withEnvironment(run) {
   }
 }
 
-test("extension registers the complete local Ponytail command set", () => withEnvironment(() => {
+test("extension registers only the Ponytail mode command", () => withEnvironment(() => {
   const { commands } = createHarness();
-  assert.deepEqual([...commands.keys()].sort(), [
-    "ponytail",
-    "ponytail-audit",
-    "ponytail-debt",
-    "ponytail-help",
-    "ponytail-review",
-  ]);
+  assert.deepEqual([...commands.keys()], ["ponytail"]);
 }));
 
 test("Ponytail status is hidden by default", () => withEnvironment(async () => {
@@ -194,27 +188,4 @@ test("oversized subagent policy propagation blocks atomically", () => withEnviro
   });
   assert.equal(tasks[0].task, "Inspect first");
   assert.equal(tasks[1].task.length, 50_000);
-}));
-
-test("every skill alias expands immediately when idle and queues when busy", () => withEnvironment(async () => {
-  const names = ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"];
-  const idle = createHarness();
-  const idleContext = createContext().context;
-  for (const name of names) await idle.commands.get(name).handler(`scope for ${name}`, idleContext);
-  assert.deepEqual(idle.messages, names.map((name) => ({
-    text: `/skill:${name} scope for ${name}`,
-    options: { expandPromptTemplates: true },
-  })));
-
-  const busy = createHarness();
-  const busyState = createContext([], [], false);
-  for (const name of names) await busy.commands.get(name).handler(`scope for ${name}`, busyState.context);
-  assert.deepEqual(busy.messages, names.map((name) => ({
-    text: `/skill:${name} scope for ${name}`,
-    options: { deliverAs: "followUp", expandPromptTemplates: true },
-  })));
-  assert.deepEqual(busyState.notices.map(({ message, level }) => ({ message, level })), names.map((name) => ({
-    message: `${name} queued as a follow-up.`,
-    level: "info",
-  })));
 }));
