@@ -268,9 +268,9 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
   assert.equal(reviewer.mutatesWorkspace, false);
 
   const researcher = agents.get("researcher");
-  assert.deepEqual(researcher.tools, ["web_search", "web_fetch", "task"]);
+  assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
+  assert.equal(researcher.extensions.length, 1);
   assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
-  assert.match(researcher.extensions[1], /extensions[/\\]task\.ts$/);
   assert.equal(researcher.contextFiles, false);
   assert.equal(researcher.thinking, "low");
   assert.equal(researcher.mutatesWorkspace, false);

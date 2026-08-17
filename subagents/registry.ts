@@ -50,8 +50,8 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "researcher",
-      tools: ["web_search", "web_fetch", "task"],
-      extensions: [webExtension, taskExtension],
+      tools: ["web_search", "web_fetch"],
+      extensions: [webExtension],
       prompt: prompt("researcher"),
       thinking: "low",
       contextFiles: false,
