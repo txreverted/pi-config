@@ -3,16 +3,19 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+const promptNames = ["r-docs", "r-git", "r-impl"];
 const skillNames = ["ponytail"];
 const roleNames = ["Explore", "researcher", "reviewer", "worker"];
 const runtimeMarkdownPaths = [
+  ...promptNames.map((name) => `prompts/${name}.md`),
   ...roleNames.map((name) => `subagents/prompts/${name}.md`),
   ...skillNames.map((name) => `skills/${name}/SKILL.md`),
 ];
@@ -21,9 +24,8 @@ const themes = await Promise.all(themeNames.map(async (name) =>
   JSON.parse(await readFile(new URL(`../themes/${name}.json`, import.meta.url), "utf8"))
 ));
 
-test("only frozen-scope extensions and the Ponytail skill are enabled", async () => {
+test("only frozen-scope resources are enabled", async () => {
   assert.deepEqual(packageJson.pi.extensions, [
-    "./extensions/ui.ts",
     "./extensions/tools.ts",
     "./extensions/web.ts",
     "./extensions/ask.ts",
@@ -39,10 +41,11 @@ test("only frozen-scope extensions and the Ponytail skill are enabled", async ()
     "@earendil-works/pi-tui": ">=0.84.2",
     typebox: ">=1.3.14",
   });
-  assert.deepEqual(packageJson.pi.skills, ["./skills"]);
-  assert.equal(packageJson.pi.prompts, undefined);
+  assert.equal(packageJson.pi.skills, undefined);
+  assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
   assert.deepEqual(packageJson.pi.themes, themeNames.map((name) => `./themes/${name}.json`));
-  assert.deepEqual(packageJson.files, ["extensions", "skills", "subagents", "themes", "README.md"]);
+  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
+  assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
   assert.deepEqual((await readdir(new URL("../skills/", import.meta.url))).sort(), skillNames);
   for (const skill of skillNames) {
     await access(new URL(`../skills/${skill}/SKILL.md`, import.meta.url));
@@ -51,6 +54,40 @@ test("only frozen-scope extensions and the Ponytail skill are enabled", async ()
   assert.match(ponytailSkill, /disable-model-invocation: true/);
   await access(new URL("../extensions/subagents.ts", import.meta.url));
   await access(new URL("../extensions/subagents-core.ts", import.meta.url));
+});
+
+test("workflow prompts load and expand through Pi's built-in templates", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-config-prompts-"));
+  try {
+    const root = fileURLToPath(new URL("../", import.meta.url));
+    const loader = new DefaultResourceLoader({
+      cwd: root,
+      agentDir,
+      additionalPromptTemplatePaths: [join(root, "prompts")],
+      noExtensions: true,
+      noSkills: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const loaded = loader.getPrompts();
+    assert.deepEqual(loaded.diagnostics, []);
+    assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
+    assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
+      { name: "r-docs", description: "Audit and simplify repository documentation", argumentHint: "[scope]" },
+      { name: "r-git", description: "Split unstaged work into coherent PRs and merge it", argumentHint: undefined },
+      { name: "r-impl", description: "Evidence-based implementation audit", argumentHint: "[scope]" },
+    ]);
+
+    const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
+    const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
+    assert.match(expandPromptTemplate("/r-docs", loaded.prompts), /Scope: entire repository\./);
+    assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
+    assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
+    assert.match(expandPromptTemplate("/r-git", loaded.prompts), /^Process all unstaged and untracked work/);
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("extension source uses only approved special UI glyphs", async () => {
@@ -177,8 +214,10 @@ test("CI checks pushes and the human guide links runtime resources and safety fa
   assert.match(readme, /\]\(extensions\/[^)]+\)/);
   assert.match(readme, /\]\(test\/[^)]+\)/);
   for (const path of runtimeMarkdownPaths) await access(new URL(`../${path}`, import.meta.url));
+  assert.match(readme, /\]\(prompts\/\)/);
   assert.match(readme, /\]\(subagents\/prompts\/\)/);
   assert.match(readme, /\]\(skills\/ponytail\/SKILL\.md\)/);
+  for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
 
   for (const pattern of [
     /worker.*local user's privileges/i,
