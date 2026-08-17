@@ -5,7 +5,6 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { AGENT_NAMES, createAgentRegistry } from "../subagents/registry.ts";
-import { BackgroundRunManager } from "./subagents-background.ts";
 import {
   MAX_SUBAGENT_CONCURRENCY,
   MAX_SUBAGENT_TASKS,
@@ -22,7 +21,7 @@ import {
   type ChildTask,
   type UsageSummary,
 } from "./subagents-core.ts";
-import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
+import { normalizeDisplayText, UI_PANEL_EVENT } from "./ui-core.ts";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import { AgentSupervisor, type PersistentAgentRecord } from "./subagents-supervisor.ts";
 import { AgentsView, formatRecentTranscript, type AgentsUiAction, type AgentsUiState } from "./subagents-ui.ts";
@@ -73,6 +72,16 @@ function modelName(ctx: ExtensionContext): string | undefined {
   return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
 }
 
+async function waitForRun(run: Promise<ChildRunResult>, signal?: AbortSignal): Promise<ChildRunResult> {
+  if (!signal) return run;
+  if (signal.aborted) throw new Error("Waiting for background subagent was aborted");
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new Error("Waiting for background subagent was aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    void run.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 function cleanId(value: string | undefined, index: number): string {
   const id = value?.trim() || `task-${index + 1}`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) {
@@ -112,14 +121,14 @@ function tokenCount(value: number): string {
   return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-function progressActivity(entry: ChildRunProgress): string {
+function progressActivity(entry: ChildRunProgress): string | undefined {
   if (entry.status === "done") return "done";
   if (entry.status === "stale") return "stale";
   if (entry.status === "bugged") return "bugged";
   if (entry.status === "error") return "error";
   if (entry.status === "starting") return "starting…";
   const activity = entry.activity ?? entry.currentTool;
-  return activity ? `${safeDisplayLine(activity, 64)}…` : "thinking…";
+  return activity ? `${safeDisplayLine(activity, 64)}…` : undefined;
 }
 
 interface AgentDisplayEntry {
@@ -142,10 +151,9 @@ function agentTreeLines(entries: readonly AgentDisplayEntry[], theme: Theme, inc
     const toolUses = `${progress.toolCalls} tool use${progress.toolCalls === 1 ? "" : "s"}`;
     const tokens = Math.round(progress.usage.totalTokens);
     const stats = `${toolUses} · ${tokenCount(tokens)} token${tokens === 1 ? "" : "s"} · ${duration(elapsed)}`;
-    lines.push(
-      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", safeDisplayLine(name || progress.id, 64))} ${theme.fg("dim", `· ${stats}`)}`,
-      `${continuation} ${theme.fg("dim", progressActivity(progress))}`,
-    );
+    lines.push(`${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", safeDisplayLine(name || progress.id, 64))} ${theme.fg("dim", `· ${stats}`)}`);
+    const activity = progressActivity(progress);
+    if (activity) lines.push(`${continuation} ${theme.fg("dim", activity)}`);
   });
   if (queued > 0) lines.push(`${theme.fg("dim", `${indent} └─`)} ${theme.fg("dim", `${queued} queued`)}`);
   return lines;
@@ -232,16 +240,15 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let widgetTimer: NodeJS.Timeout | undefined;
   let completionTimer: NodeJS.Timeout | undefined;
   const pendingCompletions = new Map<string, ChildRunResult>();
-  let background: BackgroundRunManager;
+  const backgroundRuns = new Map<string, Promise<ChildRunResult>>();
   let supervisorPromise: Promise<AgentSupervisor> | undefined;
   let rootContext: ExtensionContext | undefined;
   let unsubscribeSupervisor = () => {};
-  let supervisorPanelVisible = false;
   const refreshWidget = () => {
     const ctx = widgetContext;
     if (!ctx || ctx.mode !== "tui") return;
-    const records = background.active();
     void supervisorPromise?.then((supervisor) => {
+      if (widgetContext !== ctx) return;
       const active = supervisor.list().filter((record) => ["queued", "starting", "running"].includes(record.status));
       const entries = active.map((record) => ({
         name: record.name,
@@ -250,28 +257,18 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           startedAt: record.createdAt, turns: 0, toolCalls: 0, text: "", usage: aggregateUsage([]),
         },
       }));
-      if (active.some((record) => record.progress)) {
-        supervisorPanelVisible = true;
-        pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render: (_width: number, theme: Theme) => agentTreeLines(entries, theme, true) });
-      } else if (active.length === 0 && background.active().length === 0 && supervisorPanelVisible) {
-        supervisorPanelVisible = false;
-        pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
+      pi.events.emit(UI_PANEL_EVENT, {
+        id: "subagents",
+        render: active.length > 0 ? (_width: number, theme: Theme) => agentTreeLines(entries, theme, true) : undefined,
+      });
+      if (active.length > 0 && !widgetTimer) {
+        widgetTimer = setInterval(refreshWidget, SUBAGENT_WIDGET_INTERVAL_MS);
+        widgetTimer.unref?.();
+      } else if (active.length === 0 && widgetTimer) {
+        clearInterval(widgetTimer);
+        widgetTimer = undefined;
       }
-      if (active.length > 0 && !widgetTimer) { widgetTimer = setInterval(refreshWidget, SUBAGENT_WIDGET_INTERVAL_MS); widgetTimer.unref?.(); }
-      else if (active.length === 0 && widgetTimer) { clearInterval(widgetTimer); widgetTimer = undefined; }
     }).catch(() => {});
-    const render: UiPanelRenderer | undefined = records.length > 0
-      ? (_width, theme) => agentTreeLines(records.map((entry) => ({ progress: entry.progress, name: entry.name })), theme, true)
-      : undefined;
-    if (render || !supervisorPanelVisible) pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render });
-    const activeCount = records.length;
-    if (activeCount > 0 && !widgetTimer) {
-      widgetTimer = setInterval(refreshWidget, SUBAGENT_WIDGET_INTERVAL_MS);
-      widgetTimer.unref?.();
-    } else if (activeCount === 0 && widgetTimer) {
-      clearInterval(widgetTimer);
-      widgetTimer = undefined;
-    }
   };
   const flushCompletions = () => {
     completionTimer = undefined;
@@ -290,12 +287,13 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       // Session shutdown owns detached children and suppresses stale notifications.
     }
   };
-  background = new BackgroundRunManager(maxAgentConcurrency(), MAX_SUBAGENT_TASKS, (result) => {
+  const notifyBackgroundCompletion = (result: ChildRunResult) => {
+    if (!widgetContext) return;
     pendingCompletions.set(result.id, result);
     if (completionTimer) return;
     completionTimer = setTimeout(flushCompletions, COMPLETION_COALESCE_MS);
     completionTimer.unref?.();
-  }, refreshWidget);
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     widgetContext = ctx;
@@ -367,10 +365,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: rootContext!.isProjectTrusted() ? "1" : "0",
           PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? rootContext!.sessionManager.getSessionId(),
           PI_CONFIG_TASK_OWNER: task.id,
-          ...(workspaces[index] ? {
-            PI_CONFIG_AGENT_WORKTREE: workspaces[index]!.worktree,
-            PI_CONFIG_AGENT_CWD: task.cwd,
-          } : {}),
+          PI_CONFIG_AGENT_WORKSPACE: workspaces[index]?.worktree ?? descendantRoot,
+          PI_CONFIG_AGENT_CWD: task.cwd,
+          ...(workspaces[index] ? { PI_CONFIG_AGENT_WORKTREE: workspaces[index]!.worktree } : {}),
           ...supervisor.childEnvironment(task.id),
         };
         void runChildAgent({
@@ -415,21 +412,22 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         if (task.id) return cleanId(task.id, index);
         let id: string;
         do id = `${task.agent}-${randomUUID().slice(0, 12)}`;
-        while (reservedIds.has(id) || background.has(id));
+        while (reservedIds.has(id) || backgroundRuns.has(id));
         reservedIds.add(id);
         return id;
       });
       if (new Set(ids).size !== ids.length) throw new Error("Subagent task ids must be unique");
       if (params.background) {
-        for (const id of ids) if (background.has(id)) throw new Error(`Background subagent id '${id}' already exists`);
+        for (const id of ids) if (backgroundRuns.has(id)) throw new Error(`Background subagent id '${id}' already exists`);
       }
 
+      const workspaceRoot = await resolveWorkspaceCwd(ctx.cwd);
       const tasks: ChildTask[] = await Promise.all(params.tasks.map(async (task, index) => ({
         id: ids[index],
         name: names[index],
         agent: task.agent as AgentName,
         task: task.task.trim(),
-        cwd: await resolveWorkspaceCwd(ctx.cwd, task.cwd),
+        cwd: await resolveWorkspaceCwd(workspaceRoot, task.cwd),
       })));
       const definitions = tasks.map((task) => {
         const definition = agents.get(task.agent);
@@ -443,10 +441,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       if (!params.background && writable.length > 0 && tasks.length !== 1) {
         throw new Error("A foreground writable worker must be the only task in its batch");
       }
-      if (writable.length > 0 && background.hasOutstanding()) {
-        throw new Error("Collect all outstanding background subagent results before starting a writable worker");
-      }
-
       if (params.background && (ctx.mode === "print" || ctx.mode === "json")) {
         throw new Error("Background subagents require a persistent TUI or RPC session");
       }
@@ -455,7 +449,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const sessionId = (ctx.sessionManager as { getSessionId?: () => string } | undefined)?.getSessionId?.();
       const taskListId = process.env.PI_CONFIG_TASK_LIST_ID ?? sessionId ?? `isolated-${randomUUID()}`;
       const supervisor = await (supervisorPromise ??= AgentSupervisor.create(sessionId ?? taskListId));
-      if (params.background && tasks.length > background.availableSlots()) {
+      const outstandingBackground = supervisor.list().filter((record) => record.background && !record.collected).length;
+      if (writable.length > 0 && outstandingBackground > 0) {
+        throw new Error("Collect all outstanding background subagent results before starting a writable worker");
+      }
+      if (params.background && outstandingBackground + tasks.length > MAX_SUBAGENT_TASKS) {
         throw new Error(`At most ${MAX_SUBAGENT_TASKS} background results may be outstanding; collect completed results first`);
       }
       const workspaces = await prepareAgentBatch(supervisor, tasks, definitions, undefined, 1, Boolean(params.background));
@@ -463,33 +461,43 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0",
         PI_CONFIG_TASK_LIST_ID: taskListId,
         PI_CONFIG_TASK_OWNER: taskId,
-        ...(workspaces[index] ? {
-          PI_CONFIG_AGENT_WORKTREE: workspaces[index]!.worktree,
+        ...(!definitions[index].mutatesWorkspace || workspaces[index] ? {
+          PI_CONFIG_AGENT_WORKSPACE: workspaces[index]?.worktree ?? workspaceRoot,
           PI_CONFIG_AGENT_CWD: tasks[index].cwd,
         } : {}),
+        ...(workspaces[index] ? { PI_CONFIG_AGENT_WORKTREE: workspaces[index]!.worktree } : {}),
         ...supervisor.childEnvironment(taskId),
       });
 
       if (params.background) {
-        const progress = tasks.map((task, index) => {
+        const progress = tasks.map((task, index): ChildRunProgress => {
           const definition = definitions[index];
-          return background.enqueue(task, definition.thinking, (backgroundSignal, update) => runChildAgent({
+          const controller = new AbortController();
+          supervisor.track(task.id, controller);
+          const run = runChildAgent({
             definition,
             task,
             model: childModel,
-            signal: backgroundSignal,
+            signal: controller.signal,
             env: childEnvironment(task.id, index),
             sessionDir: supervisor.sessionsDirectory,
-            onSession: (sessionFile, client) => supervisor.attach(task.id, sessionFile, client),
-            onUpdate: (progress) => {
-              update(progress);
-              void supervisor.update(task.id, progress).catch(() => {});
-            },
+            onSession: (sessionFile, client) => supervisor.attach(task.id, sessionFile, client, controller),
+            onUpdate: (update) => { void supervisor.update(task.id, update).catch(() => {}); },
           }).then(async (result) => {
             await supervisor.finish(task.id, result);
+            notifyBackgroundCompletion(result);
             return result;
-          }));
+          });
+          backgroundRuns.set(task.id, run);
+          void run.finally(refreshWidget).catch(() => undefined);
+          const initial: ChildRunProgress = {
+            id: task.id, agent: task.agent, thinking: definition.thinking, status: "starting",
+            startedAt: Date.now(), turns: 0, toolCalls: 0, text: "", usage: aggregateUsage([]),
+          };
+          void supervisor.update(task.id, initial).catch(() => {});
+          return initial;
         });
+        refreshWidget();
         return {
           content: [{
             type: "text",
@@ -581,13 +589,29 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     executionMode: "sequential",
     async execute(_toolCallId, params, signal) {
       const supervisor = await supervisorPromise;
-      const persisted = supervisor?.get(params.id);
+      if (!supervisor) throw new Error("Agent supervisor is not initialized");
+      const persisted = supervisor.get(params.id);
       if (!persisted?.background) throw new Error(`Unknown background subagent id '${params.id}'`);
-      const current = background.progress(params.id) ?? persisted.progress ?? persisted.result;
-      if (!current || persisted.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
-      let result = background.result(params.id) ?? persisted?.result;
-      if (!result && params.wait) result = await background.wait(params.id, signal);
+      if (persisted.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
+      const current = persisted.progress ?? persisted.result ?? {
+        id: persisted.id,
+        agent: persisted.agent,
+        thinking: agents.get(persisted.agent)?.thinking ?? "off",
+        status: persisted.status as ChildRunProgress["status"],
+        startedAt: persisted.createdAt,
+        turns: 0,
+        toolCalls: 0,
+        text: "",
+        usage: aggregateUsage([]),
+      };
+      let result = persisted.result;
+      const run = backgroundRuns.get(params.id);
+      if (!result && params.wait && run) result = await waitForRun(run, signal);
       if (!result) {
+        if (!["queued", "starting", "running"].includes(persisted.status)) {
+          await supervisor.collect(params.id);
+          backgroundRuns.delete(params.id);
+        }
         return {
           content: [{ type: "text", text: `Background subagent ${params.id} is ${current.status}.` }],
           details: {
@@ -598,18 +622,16 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         };
       }
 
-      const collected = background.collect(params.id);
-      const finalResult = collected?.result ?? result;
-      if (!finalResult) throw new Error(`Background subagent '${params.id}' could not be collected`);
-      await supervisor?.collect(params.id);
+      await supervisor.collect(params.id);
+      backgroundRuns.delete(params.id);
       return {
-        content: [{ type: "text", text: untrustedOutput([finalResult]) }],
+        content: [{ type: "text", text: untrustedOutput([result]) }],
         details: {
-          progress: [finalResult],
-          results: [finalResult],
-          usage: finalResult.usage,
+          progress: [result],
+          results: [result],
+          usage: result.usage,
         } satisfies SubagentToolDetails,
-        usage: finalResult.usage as Usage,
+        usage: result.usage as Usage,
       };
     },
     renderResult(result) {
@@ -642,7 +664,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         if (!record) { ctx.ui.notify(`Unknown agent '${action.id}'.`, "error"); continue; }
         try {
           if (action.type === "message") await supervisor.send("main", record.id, action.message);
-          else if (action.type === "interrupt") { background.cancel(record.id); await supervisor.cancel(record.id); }
+          else if (action.type === "interrupt") await supervisor.cancel(record.id);
           else if (action.type === "diff") {
             if (!ctx.isProjectTrusted()) throw new Error("Agent worktree inspection requires a trusted project");
             state.transcript = truncateText(safeDisplayText(await agentDiff(workspaceFor(record))), 12_000).text || "No agent changes.";
@@ -651,7 +673,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             if (["queued", "starting", "running"].includes(record.status)) throw new Error("Cannot apply changes from an active agent");
             if (!await ctx.ui.confirm(`Apply changes from ${record.name}?`, `Apply into ${record.repoRoot}? This does not commit.`)) continue;
             const workspace = workspaceFor(record); const patch = await agentDiff(workspace); await applyAgentDiff(workspace, patch);
-            ctx.ui.notify(patch ? `Applied changes from ${record.id}.` : "No agent changes.", "info");
+            await discardAgentWorktree(workspace); await supervisor.clearWorkspace(record.id);
+            ctx.ui.notify(patch ? `Applied changes from ${record.id}; its managed worktree was removed.` : "No agent changes; its managed worktree was removed.", "info");
           } else if (action.type === "discard") {
             if (!ctx.isProjectTrusted()) throw new Error("Discarding an agent worktree requires a trusted project");
             if (["queued", "starting", "running"].includes(record.status)) throw new Error("Cannot discard an active agent worktree");
@@ -670,7 +693,17 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             void runChildAgent({
               definition: agentDefinitionForTask(definition, ctx.model.reasoning), task, model: modelName(ctx), signal: controller.signal,
               sessionDir: supervisor.sessionsDirectory, sessionPath: record.sessionFile,
-              env: { PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0", PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? ctx.sessionManager.getSessionId(), PI_CONFIG_TASK_OWNER: record.id, ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree, PI_CONFIG_AGENT_CWD: record.cwd } : {}), ...supervisor.childEnvironment(record.id) },
+              env: {
+                PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0",
+                PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? ctx.sessionManager.getSessionId(),
+                PI_CONFIG_TASK_OWNER: record.id,
+                ...(!definition.mutatesWorkspace || record.worktree ? {
+                  PI_CONFIG_AGENT_WORKSPACE: record.worktree ?? record.cwd,
+                  PI_CONFIG_AGENT_CWD: record.cwd,
+                } : {}),
+                ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree } : {}),
+                ...supervisor.childEnvironment(record.id),
+              },
               onSession: (sessionFile, client) => supervisor.attach(record.id, sessionFile, client, controller), onUpdate: (progress) => { void supervisor.update(record.id, progress).catch(() => {}); },
             }).then(async (result) => { await supervisor.finish(record.id, result); await supervisor.collect(record.id); })
               .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
@@ -725,7 +758,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0",
           PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? ctx.sessionManager.getSessionId(),
           PI_CONFIG_TASK_OWNER: record.id,
-          ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree, PI_CONFIG_AGENT_CWD: record.cwd } : {}),
+          ...(!definition.mutatesWorkspace || record.worktree ? {
+            PI_CONFIG_AGENT_WORKSPACE: record.worktree ?? record.cwd,
+            PI_CONFIG_AGENT_CWD: record.cwd,
+          } : {}),
+          ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree } : {}),
           ...supervisor.childEnvironment(record.id),
         },
         onSession: (sessionFile, client) => supervisor.attach(record.id, sessionFile, client),
@@ -794,7 +831,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "apply_agent_changes",
     label: "apply agent changes",
-    description: "Apply a managed agent's tracked and untracked binary patch to the parent checkout after human confirmation. Never commits or merges.",
+    description: "Apply a managed agent's tracked and untracked binary patch to the parent checkout after human confirmation, then permanently remove its worktree. Never commits or merges.",
     parameters: worktreeSchema,
     executionMode: "sequential",
     async execute(_call, params, _signal, _update, ctx) {
@@ -807,7 +844,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const workspace = workspaceFor(record);
       const patch = await agentDiff(workspace);
       await applyAgentDiff(workspace, patch);
-      return { content: [{ type: "text", text: patch ? `Applied changes from agent ${record.id}.` : "No agent changes." }], details: { id: record.id, bytes: Buffer.byteLength(patch) } };
+      await discardAgentWorktree(workspace);
+      await supervisor!.clearWorkspace(record.id);
+      return {
+        content: [{ type: "text", text: patch
+          ? `Applied changes from agent ${record.id} and removed its managed worktree.`
+          : `No agent changes; removed the managed worktree for ${record.id}.` }],
+        details: { id: record.id, bytes: Buffer.byteLength(patch) },
+      };
     },
   });
 
@@ -857,12 +901,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     parameters: cancelSchema,
     executionMode: "sequential",
     async execute(_toolCallId, params) {
-      const progress = background.progress(params.id);
       const supervisor = await supervisorPromise;
-      if (!progress && !supervisor?.get(params.id)) throw new Error(`Unknown agent '${params.id}'`);
-      const cancelledInManager = progress ? background.cancel(params.id) : false;
-      const cancelledInSupervisor = supervisor?.get(params.id) ? await supervisor.cancel(params.id) : false;
-      const cancelled = cancelledInManager || cancelledInSupervisor;
+      if (!supervisor?.get(params.id)) throw new Error(`Unknown agent '${params.id}'`);
+      const cancelled = await supervisor.cancel(params.id);
       return {
         content: [{
           type: "text",
@@ -891,7 +932,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     unsubscribeSupervisor();
     unsubscribeSupervisor = () => {};
     const supervisor = await supervisorPromise;
-    await Promise.all([background.shutdown(), supervisor?.shutdown()]);
+    await supervisor?.shutdown();
+    await Promise.allSettled([...backgroundRuns.values()]);
+    backgroundRuns.clear();
     rootContext = undefined;
   });
 }

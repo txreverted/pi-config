@@ -90,6 +90,18 @@ test("expanded subagent output strips terminal control sequences", () => {
   assert.match(worker, / └─ Agent  Refactor auth module · 1 tool use · 1 token · 0s/);
   assert.match(worker, /     └ editing 2 files…/);
 
+  const idle = tool.renderResult({
+    content: [{ type: "text", text: "unused" }],
+    details: { progress: [{
+      id: "idle", agent: "worker", thinking: "high", status: "running",
+      startedAt: Date.now(), turns: 0, toolCalls: 0, text: "", usage: { totalTokens: 0 },
+    }] },
+  }, { expanded: false }, plainTheme, {
+    args: { tasks: [{ name: "Wait quietly" }] },
+  }).render(120).join("\n");
+  assert.equal(idle.trimEnd().split("\n").length, 1);
+  assert.doesNotMatch(idle, /thinking/);
+
   const now = Date.now();
   const live = tool.renderResult({
     content: [{ type: "text", text: "unused" }],
@@ -261,15 +273,20 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
     for (const budget of ["maxTurns", "maxToolCalls", "maxReportedTokens", "maxCostUsd", "timeoutMs"]) {
       assert.equal(budget in agent, false, `${agent.name}:${budget}`);
     }
-    if (agent.name !== "Explore") assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
+    assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
     assert.equal(typeof agent.mutatesWorkspace, "boolean", agent.name);
     for (const tool of agent.tools) assert.ok(allowedTools.has(tool), `${agent.name}:${tool}`);
   }
+
+  const explore = agents.get("Explore");
+  assert.match(explore.extensions[0], /extensions[/\\]task\.ts$/);
+  assert.match(explore.extensions[1], /extensions[/\\]subagents-policy\.ts$/);
 
   const reviewer = agents.get("reviewer");
   assert.deepEqual(reviewer.tools, ["read", "grep", "find", "ls", "git_status", "git_diff", "task"]);
   assert.match(reviewer.extensions[0], /extensions[/\\]subagent-tools\.ts$/);
   assert.match(reviewer.extensions[1], /extensions[/\\]task\.ts$/);
+  assert.match(reviewer.extensions[2], /extensions[/\\]subagents-policy\.ts$/);
   assert.equal(reviewer.contextFiles, true);
   assert.equal(reviewer.thinking, "high");
   assert.equal(reviewer.mutatesWorkspace, false);
