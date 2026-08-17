@@ -1,4 +1,17 @@
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+
+export const ASK_LIMITS = {
+  context: 500,
+  id: 50,
+  question: 500,
+  label: 80,
+  description: 240,
+  questions: { min: 1, max: 4 },
+  options: { min: 2, max: 5 },
+  customAnswerBytes: 2_000,
+  outputBytes: DEFAULT_MAX_BYTES,
+} as const;
 
 export interface AskOption {
   label: string;
@@ -22,6 +35,8 @@ export interface AskAnswer {
 
 export const CUSTOM_CHOICE = "Write a different answer…";
 
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 const RESERVED_LABELS = new Set([
   "other",
   "type something",
@@ -34,24 +49,39 @@ function normalizedLabel(value: string): string {
   return safeDisplayLine(value).toLowerCase();
 }
 
+function assertLength(value: string, limit: number, name: string): void {
+  if ([...GRAPHEMES.segment(value)].length > limit) throw new Error(`${name} must be at most ${limit} characters`);
+}
+
+export function normalizeContext(value: string): string {
+  const context = safeDisplayLine(value);
+  if (!context) throw new Error("Question context cannot be empty after sanitation");
+  assertLength(context, ASK_LIMITS.context, "Question context");
+  return context;
+}
+
 export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[] {
-  if (input.length < 1 || input.length > 4) throw new Error("Ask between 1 and 4 questions at a time");
+  if (input.length < ASK_LIMITS.questions.min || input.length > ASK_LIMITS.questions.max) {
+    throw new Error(`Ask between ${ASK_LIMITS.questions.min} and ${ASK_LIMITS.questions.max} questions at a time`);
+  }
 
   const ids = new Set<string>();
   return input.map((question, questionIndex) => {
     const id = safeDisplayLine(question.id);
     const prompt = safeDisplayLine(question.question);
     if (!id) throw new Error(`Question ${questionIndex + 1} requires an id`);
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) {
+    assertLength(id, ASK_LIMITS.id, `Question ${questionIndex + 1} id`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
       throw new Error(`Question ${questionIndex + 1} id may contain only letters, digits, dots, underscores, and hyphens`);
     }
     if (ids.has(id)) throw new Error(`Question ids must be unique: ${id}`);
     ids.add(id);
     if (!prompt) throw new Error(`Question ${id} cannot be empty`);
+    assertLength(prompt, ASK_LIMITS.question, `Question ${id}`);
 
     if (question.options === undefined) return { id, question: prompt };
-    if (question.options.length < 2 || question.options.length > 5) {
-      throw new Error(`Question ${id} must provide 2-5 options, or omit options for a free-form answer`);
+    if (question.options.length < ASK_LIMITS.options.min || question.options.length > ASK_LIMITS.options.max) {
+      throw new Error(`Question ${id} must provide ${ASK_LIMITS.options.min}-${ASK_LIMITS.options.max} options, or omit options for a free-form answer`);
     }
 
     const labels = new Set<string>();
@@ -61,9 +91,11 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
       const description = option.description === undefined ? undefined : safeDisplayLine(option.description);
       const normalized = normalizedLabel(label);
       if (!label) throw new Error(`Option ${optionIndex + 1} for ${id} requires a label`);
+      assertLength(label, ASK_LIMITS.label, `Option ${optionIndex + 1} label for ${id}`);
       if (option.description !== undefined && !description) {
         throw new Error(`Option ${optionIndex + 1} for ${id} has an empty description after sanitation`);
       }
+      if (description) assertLength(description, ASK_LIMITS.description, `Option ${optionIndex + 1} description for ${id}`);
       if (RESERVED_LABELS.has(normalized)) {
         throw new Error(`Option label "${label}" is reserved; the tool adds a custom-answer choice automatically`);
       }
@@ -92,11 +124,39 @@ function indent(value: string): string {
   return value.replace(/\r\n?/g, "\n").split("\n").join("\n    ");
 }
 
+function utf8Prefix(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let result = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    result += character;
+  }
+  return result;
+}
+
+export function boundCustomAnswer(value: string): string | undefined {
+  const sanitized = safeDisplayText(value).trim();
+  if (!sanitized) return undefined;
+  if (Buffer.byteLength(sanitized, "utf8") <= ASK_LIMITS.customAnswerBytes) return sanitized;
+
+  const notice = "\n\n[Custom answer truncated to fit the clarification tool output limit.]";
+  return `${utf8Prefix(sanitized, ASK_LIMITS.customAnswerBytes - Buffer.byteLength(notice, "utf8"))}${notice}`;
+}
+
 export function formatAnswers(answers: readonly AskAnswer[]): string {
   const lines = ["User answered the clarification questions:"];
   for (const answer of answers) {
     lines.push(`- ${safeDisplayLine(answer.id)}: ${safeDisplayLine(answer.question)}`);
     lines.push(`  Answer: ${indent(safeDisplayText(answer.answer))}`);
   }
-  return lines.join("\n");
+
+  const formatted = lines.join("\n");
+  const notice = "\n\n[Clarification answers truncated to stay within Pi's tool output limits.]";
+  const truncated = truncateHead(formatted, {
+    maxBytes: ASK_LIMITS.outputBytes - Buffer.byteLength(notice, "utf8"),
+    maxLines: DEFAULT_MAX_LINES - 2,
+  });
+  return truncated.truncated ? `${truncated.content}${notice}` : formatted;
 }
