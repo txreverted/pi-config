@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import goalExtension from "../extensions/goal.ts";
 import { UI_MODE_STATUS_EVENT } from "../extensions/ui-core.ts";
 
-function harness(branch = []) {
+function harness(branch = [], { model = { provider: "test", id: "model" }, authenticated = true } = {}) {
   const tools = new Map();
   const commands = new Map();
   const events = new Map();
@@ -32,6 +32,8 @@ function harness(branch = []) {
   goalExtension(pi);
   const context = {
     mode: "tui",
+    model: model ?? undefined,
+    modelRegistry: { hasConfiguredAuth: () => authenticated },
     isIdle: () => idle,
     hasPendingMessages: () => pending,
     abort: () => { aborts++; },
@@ -55,8 +57,14 @@ const assistant = (text, totalTokens = 10) => ({
   usage: { totalTokens },
 });
 
-async function response(h, text, { tokens = 10, tool = false, toolError = false } = {}) {
+async function startRun(h) {
+  const injected = await h.events.get("before_agent_start")({ prompt: h.messages.at(-1), systemPrompt: "BASE" }, h.context);
   await h.events.get("agent_start")({}, h.context);
+  return injected;
+}
+
+async function response(h, text, { tokens = 10, tool = false, toolError = false } = {}) {
+  await startRun(h);
   if (tool || toolError) await h.events.get("tool_execution_end")({ isError: toolError }, h.context);
   await h.events.get("message_end")({ message: assistant(text, tokens) }, h.context);
   await h.events.get("agent_settled")({}, h.context);
@@ -72,12 +80,37 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
   assert.deepEqual(h.active(), ["read"]);
 
   await h.commands.get("goal").handler("Implement safely", h.context);
-  assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => h.active().includes(name)));
+  assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => !h.active().includes(name)));
+  assert.match(h.statuses.at(-1).value, /goal: paused/);
   assert.match(h.messages[0], /untrusted task data/);
   assert.match(h.messages[0], /goal_id:/);
-  const injected = await h.events.get("before_agent_start")({ systemPrompt: "BASE" }, h.context);
+  const unrelated = await h.events.get("before_agent_start")({ prompt: "ordinary input", systemPrompt: "BASE" }, h.context);
+  assert.equal(unrelated, undefined);
+  assert.match(h.statuses.at(-1).value, /goal: paused/);
+  const injected = await h.events.get("before_agent_start")({ prompt: h.messages[0], systemPrompt: "BASE" }, h.context);
   assert.match(injected.systemPrompt, /JSON string/);
+  assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: active/);
+});
+
+test("goal dispatch fails closed before Pi confirms a turn", async () => {
+  for (const options of [{ model: null }, { authenticated: false }]) {
+    const unavailable = harness([], options);
+    await unavailable.events.get("session_start")({}, unavailable.context);
+    await unavailable.commands.get("goal").handler("Do not become active", unavailable.context);
+    assert.equal(unavailable.messages.length, 0);
+    assert.match(unavailable.entries.at(-1).data.goal.status, /paused/);
+    assert.ok(!unavailable.active().includes("goal_complete"));
+    assert.equal(unavailable.notices.at(-1).level, "error");
+  }
+
+  const swallowed = harness();
+  await swallowed.events.get("session_start")({}, swallowed.context);
+  await swallowed.commands.get("goal").handler("Wait for confirmation", swallowed.context);
+  await swallowed.events.get("before_agent_start")({ prompt: "unrelated input", systemPrompt: "BASE" }, swallowed.context);
+  await swallowed.events.get("agent_start")({}, swallowed.context);
+  assert.equal(swallowed.entries.at(-1).data.goal.status, "paused");
+  assert.ok(!swallowed.active().includes("goal_complete"));
 });
 
 test("goal activation waits for an idle boundary", async () => {
@@ -104,6 +137,7 @@ test("goal completion requires separate verification evidence", async () => {
   await h.events.get("session_start")({}, h.context);
   await h.commands.get("goal").handler("Finish verified work", h.context);
   const id = h.entries.at(-1).data.goal.id;
+  await startRun(h);
   await assert.rejects(
     () => h.tools.get("goal_complete").execute("x", { goal_id: id, summary: "done", evidence: "\u001b]0;title\u0007" }),
     /evidence is required/i,
@@ -138,13 +172,27 @@ test("aborted or failed turns pause instead of restarting autonomous work", asyn
     const h = harness();
     await h.events.get("session_start")({}, h.context);
     await h.commands.get("goal").handler(`Handle ${stopReason}`, h.context);
-    await h.events.get("agent_start")({}, h.context);
+    await startRun(h);
     await h.events.get("message_end")({ message: { ...assistant("stopped"), stopReason } }, h.context);
     await h.events.get("agent_settled")({}, h.context);
     assert.equal(h.messages.length, 1);
     assert.match(h.statuses.at(-1).value, /paused/);
     assert.ok(!h.active().includes("goal_complete"));
   }
+});
+
+test("provider retries preserve ownership of the current goal run", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("Survive a retry", h.context);
+  await startRun(h);
+  await h.events.get("message_end")({ message: { ...assistant("retrying"), stopReason: "error" } }, h.context);
+  await h.events.get("agent_start")({}, h.context);
+  await h.events.get("message_end")({ message: { ...assistant("recovered"), stopReason: "stop" } }, h.context);
+  await h.events.get("agent_settled")({}, h.context);
+  assert.equal(h.messages.length, 2);
+  assert.match(h.entries.at(-1).data.goal.status, /paused/);
+  assert.match(h.entries.at(-1).data.goal.note, /queued/);
 });
 
 test("failed tool calls do not bypass repeated automatic-run detection", async () => {
@@ -168,6 +216,8 @@ test("harmless successful-tool loops pause at the automatic ceiling and resume r
 
   await h.commands.get("goal").handler("resume", h.context);
   assert.equal(h.messages.length, 22);
+  assert.match(h.statuses.at(-1).value, /goal: paused · 0\/20 auto/);
+  await startRun(h);
   assert.match(h.statuses.at(-1).value, /goal: active · 0\/20 auto/);
 
   const rejected = harness();
@@ -182,6 +232,7 @@ test("blocker requires the same report on three separate automatic runs and reje
   await h.events.get("session_start")({}, h.context);
   await h.commands.get("goal").handler("Hard goal", h.context);
   const id = h.entries.at(-1).data.goal.id;
+  await h.events.get("before_agent_start")({ prompt: h.messages[0], systemPrompt: "BASE" }, h.context);
   const blockedTool = h.tools.get("goal_blocked");
   assert.equal("repeated_turns" in blockedTool.parameters.properties, false);
   assert.deepEqual(
@@ -203,7 +254,7 @@ test("blocker requires the same report on three separate automatic runs and reje
 
   await response(h, "initial", { tool: true });
   const report = async (reason, expected) => {
-    await h.events.get("agent_start")({}, h.context);
+    await startRun(h);
     const call = h.tools.get("goal_blocked").execute("x", {
       goal_id: id,
       reason,
@@ -240,7 +291,7 @@ test("paused tools cannot terminate a goal and external input wakes a waiting go
   await waiting.events.get("session_start")({}, waiting.context);
   await waiting.commands.get("goal").handler("Wait safely", waiting.context);
   const waitingId = waiting.entries.at(-1).data.goal.id;
-  await waiting.events.get("agent_start")({}, waiting.context);
+  await startRun(waiting);
   await waiting.tools.get("goal_wait").execute("x", { goal_id: waitingId, reason: "monitor" });
   await waiting.events.get("agent_settled")({}, waiting.context);
   assert.match(waiting.statuses.at(-1).value, /waiting/);
@@ -259,7 +310,7 @@ test("wait deadlines wake once and continue from the idle boundary", async (t) =
     await h.events.get("session_start")({}, h.context);
     await h.commands.get("goal").handler("Wake safely", h.context);
     const id = h.entries.at(-1).data.goal.id;
-    await h.events.get("agent_start")({}, h.context);
+    await startRun(h);
     await h.tools.get("goal_wait").execute("x", { goal_id: id, reason: "timer", resume_after_ms: 10 });
     await h.events.get("agent_settled")({}, h.context);
     assert.equal(h.messages.length, 1);
