@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import bridgeExtension from "../extensions/subagents-bridge.ts";
-import { AgentSupervisor, BROKER_BYTE_LIMIT, brokerRequest } from "../extensions/subagents-supervisor.ts";
+import { AgentSupervisor, BROKER_BYTE_LIMIT, MAX_AGENT_RECORDS, brokerRequest } from "../extensions/subagents-supervisor.ts";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalDepth = process.env.PI_CONFIG_MAX_AGENT_DEPTH;
@@ -179,6 +179,7 @@ test("permission broker preserves exact args and denies, times out, and disconne
 
 
 
+
 test("broker bounds aggregate requests, result DTOs, and descendant visibility", async () => {
   const { root, supervisor } = await isolatedSupervisor("pi-broker-bounds");
   const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };
@@ -220,6 +221,56 @@ test("broker bounds aggregate requests, result DTOs, and descendant visibility",
     if (previous.token === undefined) delete process.env.PI_CONFIG_BROKER_TOKEN; else process.env.PI_CONFIG_BROKER_TOKEN = previous.token;
     await clean(root, supervisor);
   }
+});
+
+test("terminal worktree-free records delete while sessions are retained", async () => {
+  const { root, supervisor } = await isolatedSupervisor("pi-record-delete");
+  const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };
+  try {
+    await supervisor.reserve(task("active", "Active record"));
+    await assert.rejects(() => supervisor.deleteRecord("active"), /still active/);
+
+    const worktree = join(root, "worktree");
+    await mkdir(worktree);
+    await supervisor.reserve({ ...task("writer", "Writer record", "worker"), cwd: worktree }, undefined, undefined, {
+      repoRoot: root, worktree, baseCommit: "0".repeat(40),
+    });
+    await supervisor.finish("writer", result("writer", "worker", { cwd: worktree }));
+    await assert.rejects(() => supervisor.deleteRecord("writer"), /managed worktree/);
+
+    await supervisor.reserve(task("deletable", "Deletable record"));
+    const session = join(supervisor.sessionsDirectory, "deletable.jsonl");
+    await writeFile(session, "{}\n");
+    supervisor.attach("deletable", session, { steer: async () => {} });
+    await supervisor.finish("deletable", result("deletable", "reviewer", { sessionFile: session }));
+    await supervisor.send("main", "deletable", "pending mail", "delete-mail");
+    await supervisor.startBroker();
+    Object.assign(process.env, supervisor.childEnvironment("deletable"));
+    await supervisor.deleteRecord("deletable");
+    assert.equal(supervisor.get("deletable"), undefined);
+    assert.deepEqual(supervisor.pendingMail("deletable"), []);
+    await access(session);
+    await assert.rejects(() => brokerRequest({ action: "list" }), /Unauthorized/);
+  } finally {
+    if (previous.socket === undefined) delete process.env.PI_CONFIG_BROKER_SOCKET; else process.env.PI_CONFIG_BROKER_SOCKET = previous.socket;
+    if (previous.token === undefined) delete process.env.PI_CONFIG_BROKER_TOKEN; else process.env.PI_CONFIG_BROKER_TOKEN = previous.token;
+    await clean(root, supervisor);
+  }
+});
+
+test("deleting an old record recovers the registry ceiling", async () => {
+  const { root, supervisor } = await isolatedSupervisor("pi-record-ceiling");
+  try {
+    for (let index = 0; index < MAX_AGENT_RECORDS; index++) {
+      const id = `record-${index}`;
+      await supervisor.reserve(task(id, `Record ${index}`));
+      await supervisor.finish(id, result(id));
+    }
+    await assert.rejects(() => supervisor.reserve(task("overflow", "Overflow")), /limited to 200/);
+    await supervisor.deleteRecord("record-0");
+    await supervisor.reserve(task("replacement", "Replacement"));
+    assert.ok(supervisor.get("replacement"));
+  } finally { await clean(root, supervisor); }
 });
 
 test("agents can send bounded untrusted messages to main", async () => {

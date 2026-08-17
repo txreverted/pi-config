@@ -50,6 +50,10 @@ test("agents view selection, active message editor, IME focus, and actions are d
   const idle = fixture([done]);
   idle.view.handleInput("r"); idle.view.handleInput("continue"); idle.view.handleInput("\r");
   assert.deepEqual(idle.action(), { type: "resume", id: "done", message: "continue" });
+
+  const deletable = fixture([done]);
+  deletable.view.handleInput("z");
+  assert.deepEqual(deletable.action(), { type: "delete", id: "done" });
 });
 
 test("native transcript formatting parses known text only and sanitizes terminal data", () => {

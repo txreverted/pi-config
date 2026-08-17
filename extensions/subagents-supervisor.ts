@@ -65,7 +65,7 @@ export interface BrokerAgentRecord {
 const ACTIVE = new Set<PersistentAgentStatus>(["queued", "starting", "running"]);
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 const MAX_FILE_BYTES = 20_000_000;
-const MAX_AGENTS = 200;
+export const MAX_AGENT_RECORDS = 200;
 const MAX_MAIL_BYTES = 16_000;
 const MAX_MAIL = 200;
 const MAX_HOPS = 8;
@@ -310,7 +310,7 @@ export class AgentSupervisor {
     const id = task.id?.trim() || `${task.agent}-${randomUUID().slice(0, 12)}`;
     if (!ID.test(id)) throw new Error("Invalid agent id");
     if (this.records.has(id)) throw new Error(`Agent '${id}' already exists; use resume_agent`);
-    if (this.records.size >= MAX_AGENTS) throw new Error(`Agent registry is limited to ${MAX_AGENTS} records`);
+    if (this.records.size >= MAX_AGENT_RECORDS) throw new Error(`Agent registry is limited to ${MAX_AGENT_RECORDS} records`);
     if ([...this.records.values()].some((record) => record.name === task.name)) throw new Error(`Agent name '${task.name}' already exists`);
     const parent = parentId ? this.records.get(parentId) : undefined;
     if (parentId && !parent) throw new Error("Unknown immutable parent identity");
@@ -386,6 +386,21 @@ export class AgentSupervisor {
     if (!record || record.status !== "queued" || this.clients.has(id)) throw new Error(`Agent '${id}' is not a removable reservation`);
     this.records.delete(id);
     this.tokens.delete(id);
+    await this.persist();
+  }
+
+  async deleteRecord(id: string): Promise<void> {
+    const record = this.records.get(id);
+    if (!record) throw new Error(`Unknown agent '${id}'`);
+    if (ACTIVE.has(record.status)) throw new Error(`Agent '${id}' is still active`);
+    if (record.worktree) throw new Error(`Agent '${id}' still has a managed worktree`);
+    if ([...this.records.values()].some((item) => item.parentId === id)) throw new Error(`Agent '${id}' still has child records`);
+    this.records.delete(id);
+    this.tokens.delete(id);
+    this.progressPersistedAt.delete(id);
+    for (let index = this.mail.length - 1; index >= 0; index--) {
+      if (this.mail[index].from === id || this.mail[index].to === id) this.mail.splice(index, 1);
+    }
     await this.persist();
   }
 
