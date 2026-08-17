@@ -1,14 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import https from "node:https";
+import { PassThrough } from "node:stream";
+import { syncBuiltinESMExports } from "node:module";
 import { gzipSync } from "node:zlib";
 import { pageContent } from "../extensions/web.ts";
 import {
   decompressBody,
+  fetchWebPage,
   htmlToMarkdown,
   isPublicIp,
   parseDuckDuckGoHtml,
   parseExaSearchText,
   resolvePublicUrl,
+  searchExa,
+  searchWeb,
   shouldUseReaderFallback,
   UnsafeUrlError,
 } from "../extensions/web-core.ts";
@@ -76,6 +83,117 @@ test("response decompression is bounded and rejects unsupported encodings", asyn
   await assert.rejects(() => decompressBody(gzipSync(Buffer.alloc(5 * 1024 * 1024 + 1)), "gzip"));
 });
 
+test("oversized search responses cancel their bodies", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    cancel() { cancelled = true; },
+  }), {
+    status: 200,
+    headers: { "content-length": String(3 * 1024 * 1024) },
+  });
+  try {
+    await assert.rejects(() => searchExa("bounded"), /exceeds 2MB limit/);
+    assert.equal(cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pinned HTTPS transport preserves Host and SNI and revalidates redirects", async () => {
+  const originalRequest = https.request;
+  const originalTimeout = AbortSignal.timeout;
+  const requests = [];
+  const timeouts = [];
+  let redirect = false;
+  let discardedResponse;
+  https.request = (options, callback) => {
+    requests.push(options);
+    const request = new EventEmitter();
+    request.end = () => {
+      const response = new PassThrough();
+      response.statusCode = redirect ? 302 : 200;
+      response.headers = redirect
+        ? { location: "http://localhost/private" }
+        : { "content-type": "text/plain; charset=utf-8" };
+      if (redirect) discardedResponse = response;
+      callback(response);
+      if (!redirect) response.end("pinned body");
+    };
+    return request;
+  };
+  AbortSignal.timeout = (milliseconds) => {
+    timeouts.push(milliseconds);
+    return new AbortController().signal;
+  };
+  syncBuiltinESMExports();
+
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+  try {
+    const page = await fetchWebPage("https://example.com:8443/path?q=1", { readerMode: "never", lookup });
+    assert.equal(page.content, "pinned body");
+    assert.equal(requests[0].hostname, "93.184.216.34");
+    assert.equal(requests[0].servername, "example.com");
+    assert.equal(requests[0].headers.Host, "example.com:8443");
+    assert.equal(requests[0].path, "/path?q=1");
+
+    requests.length = 0;
+    redirect = true;
+    await assert.rejects(
+      () => fetchWebPage("https://example.com/redirect", { readerMode: "never", lookup }),
+      UnsafeUrlError,
+    );
+    assert.equal(requests.length, 1, "unsafe redirect is rejected before another request");
+    assert.equal(discardedResponse.destroyed, true);
+    assert.deepEqual(timeouts, [30_000, 30_000], "the address deadline does not remain attached to response bodies");
+  } finally {
+    https.request = originalRequest;
+    AbortSignal.timeout = originalTimeout;
+    syncBuiltinESMExports();
+  }
+});
+
+test("pinned transport retries the next address after the connect timeout", { timeout: 1_000 }, async (t) => {
+  const originalRequest = https.request;
+  const requests = [];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  https.request = (options, callback) => {
+    requests.push(options);
+    const request = new EventEmitter();
+    options.signal.addEventListener("abort", () => request.emit("error", options.signal.reason), { once: true });
+    request.end = () => {
+      if (requests.length === 1) return;
+      const response = new PassThrough();
+      response.statusCode = 200;
+      response.headers = { "content-type": "text/plain" };
+      callback(response);
+      response.end("second address");
+    };
+    return request;
+  };
+  syncBuiltinESMExports();
+
+  try {
+    const running = fetchWebPage("https://example.com/", {
+      readerMode: "never",
+      lookup: async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "93.184.216.35", family: 4 },
+      ],
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(requests.length, 1);
+    t.mock.timers.tick(10_000);
+    const page = await running;
+    assert.equal(page.content, "second address");
+    assert.deepEqual(requests.map((request) => request.hostname), ["93.184.216.34", "93.184.216.35"]);
+  } finally {
+    https.request = originalRequest;
+    syncBuiltinESMExports();
+    t.mock.timers.reset();
+  }
+});
+
 test("DNS resolution obeys cancellation", async () => {
   const controller = new AbortController();
   const pending = resolvePublicUrl("https://example.com/", controller.signal, async () =>
@@ -110,15 +228,46 @@ Useful second snippet.
   ]);
 });
 
-test("Exa JSON results are parsed", () => {
+test("Exa JSON results are parsed and oversized normalized URLs are rejected", () => {
   const parsed = parseExaSearchText(JSON.stringify({
     results: [
       { title: "JSON result", url: "https://example.net/", highlights: ["One", "two"] },
+      { title: "Too long", url: `https://example.com/${"x".repeat(4_096)}` },
     ],
   }));
   assert.deepEqual(parsed.results, [
     { title: "JSON result", url: "https://example.net/", snippet: "One two" },
   ]);
+});
+
+test("web search falls back from Exa to DuckDuckGo and reports both failures", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) return new Response("unavailable", { status: 503 });
+    return new Response(`<div class="result">
+      <a class="result__a" href="https://example.com/fallback">Fallback result</a>
+      <a class="result__snippet">Fallback snippet.</a>
+    </div>`, { status: 200 });
+  };
+  try {
+    const result = await searchWeb("fallback", 1);
+    assert.equal(result.provider, "duckduckgo");
+    assert.deepEqual(result.results, [{
+      title: "Fallback result",
+      url: "https://example.com/fallback",
+      snippet: "Fallback snippet.",
+    }]);
+
+    globalThis.fetch = async () => new Response("unavailable", { status: 503 });
+    await assert.rejects(
+      () => searchWeb("failure", 1),
+      /Keyless web search failed \(Exa: Exa search failed with HTTP 503; DuckDuckGo: DuckDuckGo search failed with HTTP 503\)/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("DuckDuckGo HTML results and redirect URLs are parsed", () => {
@@ -132,6 +281,43 @@ test("DuckDuckGo HTML results and redirect URLs are parsed", () => {
   assert.deepEqual(parseDuckDuckGoHtml(html).results, [
     { title: "Example docs", url: "https://example.com/docs", snippet: "A useful result." },
   ]);
+});
+
+test("unsupported direct content falls back to Jina and reports dual failure", async () => {
+  const originalRequest = https.request;
+  let readerStatus = 200;
+  https.request = (options, callback) => {
+    const request = new EventEmitter();
+    request.end = () => {
+      const response = new PassThrough();
+      const reader = options.headers.Host === "r.jina.ai";
+      response.statusCode = reader ? readerStatus : 200;
+      response.headers = { "content-type": reader ? "text/plain" : "image/png" };
+      callback(response);
+      response.end(reader
+        ? "Title: Reader title\nMarkdown Content:\nReadable fallback content."
+        : "not readable");
+    };
+    return request;
+  };
+  syncBuiltinESMExports();
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+
+  try {
+    const page = await fetchWebPage("https://example.com/image", { lookup });
+    assert.equal(page.source, "jina-reader");
+    assert.equal(page.title, "Reader title");
+    assert.equal(page.content, "Readable fallback content.");
+
+    readerStatus = 503;
+    await assert.rejects(
+      () => fetchWebPage("https://example.com/image", { lookup }),
+      /Unable to fetch URL \(Unsupported content type: image\/png; HTTP 503 fetching r\.jina\.ai\)/,
+    );
+  } finally {
+    https.request = originalRequest;
+    syncBuiltinESMExports();
+  }
 });
 
 test("reader fallback does not disclose short but readable direct pages", () => {
@@ -166,4 +352,11 @@ test("HTML extraction keeps article content and links but removes active content
   assert.match(result.markdown, /https:\/\/example\.com\/docs/);
   assert.doesNotMatch(result.markdown, /reveal secrets|Navigation noise|Footer noise/i);
   assert.ok(result.title.length > 0);
+});
+
+test("HTML link normalization has a cumulative expansion bound", () => {
+  const base = new URL(`https://example.com/${"b".repeat(4_000)}/`);
+  const html = `<html><body><main>${'<a href="x">x</a>'.repeat(500)}</main></body></html>`;
+  const converted = htmlToMarkdown(html, base);
+  assert.ok(Buffer.byteLength(converted.markdown, "utf8") < 1.5 * 1024 * 1024);
 });
