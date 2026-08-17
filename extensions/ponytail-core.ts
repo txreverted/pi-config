@@ -213,5 +213,5 @@ export function buildPonytailInstructions(skillBody: string, mode: PonytailSessi
     : mode === "full"
       ? "FULL SCOPE: Skip speculative behavior and use the smallest safe interpretation that satisfies the concrete request."
       : "ULTRA SCOPE: Challenge speculative requirements, delete before adding, and implement only the narrowest safe behavior the concrete request needs.";
-  return `PONYTAIL MODE ACTIVE — level: ${mode}\n\n${scopeRule}\n\n${ponytailSkillCommonBody(skillBody)}`;
+  return `PONYTAIL MODE ACTIVE - level: ${mode}\n\n${scopeRule}\n\n${ponytailSkillCommonBody(skillBody)}`;
 }

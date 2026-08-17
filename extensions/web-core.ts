@@ -174,7 +174,9 @@ function normalizeHttpUrl(value: unknown): string | null {
 function cleanSnippet(value: unknown, maxLength = 1_000): string {
   if (typeof value !== "string") return "";
   const text = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+  return text.length > maxLength
+    ? maxLength <= 3 ? ".".repeat(maxLength) : `${text.slice(0, maxLength - 3)}...`
+    : text;
 }
 
 export function parseExaSearchText(text: string, limit = 5): SearchResponse {

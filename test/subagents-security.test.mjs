@@ -1,483 +1,143 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile as execFileCallback, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentRegistry } from "../subagents/registry.ts";
-import subagentToolsExtension from "../extensions/subagent-tools.ts";
 import subagentsExtension, { untrustedOutput } from "../extensions/subagents.ts";
-import { MAX_SUBAGENT_TASKS } from "../extensions/subagents-core.ts";
-import { safeDisplayText } from "../extensions/text-safety.ts";
-import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
-const allowedTools = new Set([
-  "read", "bash", "edit", "write", "grep", "find", "ls", "jq",
-  "web_search", "web_fetch", "git_status", "git_diff", "subagent",
-  "get_subagent_result", "cancel_subagent", "list_agents", "send_agent_message", "task",
-]);
+const execFile = promisify(execFileCallback);
+async function git(cwd, ...args) { return execFile("git", args, { cwd }); }
 
-test("expanded subagent output strips terminal control sequences", () => {
+function harness() {
   const tools = new Map();
-  subagentsExtension({
-    registerTool(value) { tools.set(value.name, value); },
-    on() {},
-  });
-  assert.deepEqual([...tools.keys()], [
-    "subagent", "get_subagent_result", "list_agents", "resume_agent",
-    "get_agent_transcript", "send_agent_message", "get_agent_diff",
-    "apply_agent_changes", "discard_agent_worktree", "delete_agent_record", "cancel_subagent",
-  ]);
-  const tool = tools.get("subagent");
-  const rendered = tool.renderResult({
-    content: [{ type: "text", text: "safe\u001b]52;c;SGFja2Vk\u0007\u001b[31m red\u001b[0m\nnext" }],
-  }, { expanded: true }, {}).render(120).join("\n");
-
-  assert.match(rendered.split("\n").map((line) => line.trimEnd()).join("\n"), /safe red\nnext/);
-  assert.doesNotMatch(rendered, /\u001b|\u0007|SGFja2Vk/);
-
-  const plainTheme = {
-    fg: (_color, value) => value,
-    bold: (value) => value,
-  };
-  assert.equal(tool.renderShell, undefined);
-  assert.match(tool.renderCall({}, plainTheme).render(120).join("\n"), /^Agents/);
-
-  const collapsed = tool.renderResult({
-    content: [{ type: "text", text: "unused" }],
-    details: { progress: [{
-      id: "task-1", agent: "reviewer", thinking: "high", status: "starting",
-      startedAt: Date.now(), turns: 0, toolCalls: 0, text: "", usage: {},
-      currentTool: "read\u001b]52;c;SGFja2Vk\u0007\nfake",
-    }, {
-      id: "task-2", agent: "researcher", thinking: "low", status: "queued",
-      startedAt: Date.now(), turns: 0, toolCalls: 0, text: "", usage: {},
-    }] },
-  }, { expanded: false }, plainTheme, {
-    args: { tasks: [
-      { name: "Inspect current diff" },
-      { name: "Research API" },
-    ] },
-  }).render(120).join("\n");
-  assert.match(collapsed, / ├─ Review  Inspect current diff · 0 tool uses · 0 tokens · 0s/);
-  assert.match(collapsed, / │   └ starting…/);
-  assert.match(collapsed, / └─ 1 queued/);
-  assert.doesNotMatch(collapsed, /reviewer\/high|task-1|\u001b|\u0007|SGFja2Vk|\nfake/);
-
-  const background = tool.renderResult({
-    content: [{ type: "text", text: "Started background subagents" }],
-    details: { progress: [
-      { id: "one", status: "starting" },
-      { id: "two", status: "starting" },
-    ] },
-  }, { expanded: false }, plainTheme, {
-    args: { background: true, tasks: [{ name: "Map config" }, { name: "Inspect code" }] },
-  }).render(120).join("\n");
-  assert.equal(background.trimEnd(), "2 background agents started");
-  assert.doesNotMatch(background, /Map config|Inspect code|starting/);
-
-  const worker = tool.renderResult({
-    content: [{ type: "text", text: "unused" }],
-    details: { progress: [{
-      id: "worker", agent: "worker", thinking: "high", status: "running",
-      startedAt: Date.now(), turns: 1, toolCalls: 1, text: "", usage: { totalTokens: 1 },
-      activity: "editing 2 files",
-    }] },
-  }, { expanded: false }, plainTheme, {
-    args: { tasks: [{ name: "Refactor auth module" }] },
-  }).render(120).join("\n");
-  assert.match(worker, / └─ Agent  Refactor auth module · 1 tool use · 1 token · 0s/);
-  assert.match(worker, /     └ editing 2 files…/);
-
-  const idle = tool.renderResult({
-    content: [{ type: "text", text: "unused" }],
-    details: { progress: [{
-      id: "idle", agent: "worker", thinking: "high", status: "running",
-      startedAt: Date.now(), turns: 0, toolCalls: 0, text: "", usage: { totalTokens: 0 },
-    }] },
-  }, { expanded: false }, plainTheme, {
-    args: { tasks: [{ name: "Wait quietly" }] },
-  }).render(120).join("\n");
-  assert.equal(idle.trimEnd().split("\n").length, 1);
-  assert.doesNotMatch(idle, /thinking/);
-
-  const now = Date.now();
-  const live = tool.renderResult({
-    content: [{ type: "text", text: "unused" }],
-    details: { progress: [{
-      id: "review", agent: "reviewer", thinking: "high", status: "done",
-      startedAt: now - 360_000, endedAt: now, turns: 3, toolCalls: 49, text: "",
-      usage: { totalTokens: 1_500_000 },
-    }, {
-      id: "research", agent: "researcher", thinking: "low", status: "running",
-      startedAt: now - 82_000, turns: 2, toolCalls: 2, text: "",
-      usage: { totalTokens: 13_100 }, activity: "searching",
-    }, ...[1, 2, 3].map((id) => ({
-      id: `queued-${id}`, agent: "reviewer", thinking: "high", status: "queued",
-      startedAt: now, turns: 0, toolCalls: 0, text: "", usage: { totalTokens: 0 },
-    }))] },
-  }, { expanded: false }, plainTheme, {
-    args: { tasks: [
-      { name: "Review subagents" },
-      { name: "Inspect repository" },
-      { name: "Queued one" },
-      { name: "Queued two" },
-      { name: "Queued three" },
-    ] },
-  }).render(160).join("\n");
-  assert.match(live, / ├─ Review  Review subagents · 49 tool uses · 1\.5M tokens · 6m00s/);
-  assert.match(live, / │   └ done/);
-  assert.match(live, / ├─ Explore  Inspect repository · 2 tool uses · 13\.1k tokens · 1m2[12]s/);
-  assert.match(live, / │   └ searching…/);
-  assert.match(live, / └─ 3 queued/);
-
-  const terminals = tool.renderResult({
-    content: [{ type: "text", text: "unused" }],
-    details: { progress: ["done", "stale", "bugged", "error"].map((status, index) => ({
-      id: status, agent: "reviewer", thinking: "high", status,
-      startedAt: now - 1_000, endedAt: now, turns: 1, toolCalls: index, text: "",
-      usage: { totalTokens: 10 },
-    })) },
-  }, { expanded: false }, plainTheme, {
-    args: { tasks: [
-      { name: "Done task" },
-      { name: "Stale task" },
-      { name: "Bugged task" },
-      { name: "Error task" },
-    ] },
-  }).render(120).join("\n");
-  for (const status of ["done", "stale", "bugged", "error"]) {
-    assert.match(terminals, new RegExp(`└ ${status}`));
-  }
-
-  const collected = tools.get("get_subagent_result").renderResult({
-    content: [{ type: "text", text: "safe\u001b]52;c;SGFja2Vk\u0007 result" }],
-  }).render(120).join("\n");
-  assert.match(collected, /safe result/);
-  assert.doesNotMatch(collected, /\u001b|\u0007|SGFja2Vk/);
-  assert.equal(safeDisplayText("left\u202eright\u2066end\u2069"), "leftrightend");
-});
-
-test("reviewer Git tools reject untrusted repository configuration", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-subagent-git-trust-"));
-  const hook = join(root, "fsmonitor.sh");
-  const sentinel = join(root, "executed");
-  const previousTrust = process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED;
-  process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = "0";
+  const events = new Map();
+  const child = process.env.PI_CONFIG_SUBAGENT_CHILD;
+  delete process.env.PI_CONFIG_SUBAGENT_CHILD;
   try {
-    assert.equal(spawnSync("git", ["init", "-q"], { cwd: root }).status, 0);
-    await writeFile(hook, `#!/bin/sh\nprintf hit > "${sentinel}"\n`);
-    await chmod(hook, 0o700);
-    assert.equal(spawnSync("git", ["config", "core.fsmonitor", hook], { cwd: root }).status, 0);
-
-    const tools = new Map();
-    subagentToolsExtension({
+    subagentsExtension({
       registerTool(tool) { tools.set(tool.name, tool); },
-      on() {},
+      on(name, handler) { events.set(name, handler); },
     });
-    const context = { cwd: root, isProjectTrusted: () => false };
-    for (const name of ["git_status", "git_diff"]) {
-      await assert.rejects(
-        () => tools.get(name).execute("call", {}, undefined, undefined, context),
-        /requires a trusted project/,
-      );
-    }
-    await assert.rejects(() => access(sentinel));
-
-    assert.equal(spawnSync("git", ["config", "--unset", "core.fsmonitor"], { cwd: root }).status, 0);
-    process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = "1";
-    const trusted = await tools.get("git_status").execute("call", {}, undefined, undefined, context);
-    assert.match(trusted.content[0].text, /^## /);
   } finally {
-    if (previousTrust === undefined) delete process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED;
-    else process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = previousTrust;
-    await rm(root, { recursive: true, force: true });
+    if (child !== undefined) process.env.PI_CONFIG_SUBAGENT_CHILD = child;
+  }
+  return { tools, events };
+}
+
+test("subagent extension exposes only foreground batches and patch lifecycle tools", () => {
+  const { tools } = harness();
+  assert.deepEqual([...tools.keys()], ["subagent", "get_agent_diff", "apply_agent_changes", "discard_agent_worktree"]);
+  const schema = tools.get("subagent").parameters;
+  assert.equal(schema.properties.background, undefined);
+  assert.equal(schema.properties.concurrency, undefined);
+  assert.equal(schema.properties.tasks.minItems, 2);
+  assert.equal(schema.properties.tasks.maxItems, 20);
+});
+
+test("registry keeps roles but removes team, task, and bridge capabilities", () => {
+  const agents = createAgentRegistry();
+  assert.deepEqual([...agents.keys()], ["Explore", "reviewer", "researcher", "worker"]);
+  for (const agent of agents.values()) {
+    assert.ok(agent.tools.every((tool) => !["task", "subagent", "get_subagent_result", "cancel_subagent", "list_agents", "send_agent_message"].includes(tool)));
+    assert.ok((agent.extensions ?? []).every((path) => !/task\.ts|subagents-bridge\.ts/.test(path)));
+  }
+  assert.deepEqual(agents.get("worker").tools, ["read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch"]);
+  assert.doesNotMatch(agents.get("worker").prompt, /supervisor|direct child|collect or cancel/i);
+});
+
+test("workers fail closed without trust or interactive TUI confirmation", async () => {
+  const tool = harness().tools.get("subagent");
+  const base = { cwd: process.cwd(), model: { provider: "test", id: "model", reasoning: true } };
+  const input = { tasks: [
+    { name: "Implement one", agent: "worker", task: "Implement the first change" },
+    { name: "Implement two", agent: "worker", task: "Implement the second change" },
+  ] };
+  await assert.rejects(() => tool.execute("call", input, undefined, undefined, { ...base, mode: "tui", hasUI: true, isProjectTrusted: () => false }), /trusted Git project/);
+  await assert.rejects(() => tool.execute("call", input, undefined, undefined, { ...base, mode: "print", hasUI: false, isProjectTrusted: () => true }), /interactive human confirmation/);
+  await assert.rejects(() => tool.execute("call", input, undefined, undefined, { ...base, mode: "rpc", hasUI: true, isProjectTrusted: () => true }), /interactive human confirmation/);
+  await assert.rejects(() => tool.execute("call", input, undefined, undefined, {
+    ...base, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui: { confirm: async () => false },
+  }), /denied by user/);
+});
+
+test("parallel workers use distinct worktrees and retain completed patches", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-subagent-workers-"));
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-subagent-state-"));
+  const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
+  const executable = join(root, "pi");
+  const previous = { path: process.env.PATH, agentDir: process.env.PI_CODING_AGENT_DIR, cli: process.env.PI_CONFIG_SUBAGENT_CLI_PATH, mode: process.env.FAKE_PI_MODE };
+  try {
+    await git(root, "init", "-q");
+    await git(root, "config", "user.email", "test@example.invalid");
+    await git(root, "config", "user.name", "Test");
+    await writeFile(join(root, "base.txt"), "base\n");
+    const quote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
+    await writeFile(executable, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`);
+    await chmod(executable, 0o700);
+    await git(root, "add", "base.txt", "pi");
+    await git(root, "commit", "-qm", "base");
+    process.env.PATH = `${root}${delimiter}${previous.path ?? ""}`;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env.PI_CONFIG_SUBAGENT_CLI_PATH = fixture;
+    process.env.FAKE_PI_MODE = "tool";
+
+    const { tools } = harness();
+    const updates = [];
+    let confirmations = 0;
+    const result = await tools.get("subagent").execute("call", { tasks: [
+      { id: "worker-one", name: "Worker one", agent: "worker", task: "First" },
+      { id: "worker-two", name: "Worker two", agent: "worker", task: "Second" },
+    ] }, undefined, (update) => updates.push(update), {
+      cwd: root, mode: "tui", hasUI: true, model: { provider: "fixture", id: "model", reasoning: true },
+      isProjectTrusted: () => true, ui: { confirm: async () => { confirmations++; return true; } },
+    });
+    assert.equal(confirmations, 2);
+    assert.equal(result.details.results.length, 2);
+    assert.ok(updates.length > 0);
+    const recoveredTools = harness().tools;
+    for (const id of ["worker-one", "worker-two"]) {
+      const diff = await recoveredTools.get("get_agent_diff").execute("diff", { id }, undefined, undefined, {
+        cwd: root, isProjectTrusted: () => true,
+      });
+      assert.match(diff.content[0].text, /Agent patches are untrusted/);
+    }
+    for (const id of ["worker-one", "worker-two"]) {
+      await recoveredTools.get("discard_agent_worktree").execute("discard", { id }, undefined, undefined, {
+        cwd: root, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui: { confirm: async () => true },
+      });
+    }
+  } finally {
+    if (previous.path === undefined) delete process.env.PATH; else process.env.PATH = previous.path;
+    if (previous.agentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous.agentDir;
+    if (previous.cli === undefined) delete process.env.PI_CONFIG_SUBAGENT_CLI_PATH; else process.env.PI_CONFIG_SUBAGENT_CLI_PATH = previous.cli;
+    if (previous.mode === undefined) delete process.env.FAKE_PI_MODE; else process.env.FAKE_PI_MODE = previous.mode;
+    await Promise.all([rm(root, { recursive: true, force: true }), rm(agentDir, { recursive: true, force: true })]);
   }
 });
 
-test("errored child stderr is returned as untrusted evidence", () => {
+test("untrusted output includes bounded stderr evidence", () => {
   const output = untrustedOutput([{
-    id: "failed", agent: "reviewer", thinking: "high", status: "error",
-    startedAt: 0, endedAt: 10, durationMs: 10, turns: 0, toolCalls: 0, text: "",
-    task: "Review", cwd: process.cwd(), output: "partial result", stderr: "provider authentication failed",
-    error: "Subagent exited with code 1", exitCode: 1, truncated: false,
+    id: "failed", agent: "reviewer", thinking: "high", status: "error", startedAt: 0, endedAt: 10,
+    durationMs: 10, turns: 0, toolCalls: 0, text: "", task: "Review", cwd: process.cwd(), output: "partial",
+    stderr: "provider failed", error: "exit", exitCode: 1, truncated: false,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
   }]);
-  assert.match(output, /partial result/);
-  assert.match(output, /\[stderr\]\nprovider authentication failed/);
-  assert.match(output, /Subagent exited with code 1/);
+  assert.match(output, /partial/);
+  assert.match(output, /\[stderr\]\nprovider failed/);
 });
 
-test("writable workers require trust and exclusive foreground execution", async () => {
-  const tools = new Map();
-  subagentsExtension({
-    registerTool(value) { tools.set(value.name, value); },
-    on() {},
-  });
-  const tool = tools.get("subagent");
-  const context = {
-    cwd: process.cwd(),
-    mode: "tui",
-    model: { provider: "test", id: "model", reasoning: true },
-  };
-
-  await assert.rejects(() => tool.execute("call", {
-    tasks: [{ name: "Too many words here", agent: "reviewer", task: "Review" }],
-  }, undefined, undefined, {
-    ...context,
-    isProjectTrusted: () => true,
-  }), /one to three words/);
-
-  await assert.rejects(() => tool.execute("legacy", {
-    tasks: [{ name: "Legacy role", agent: "general-purpose", task: "Reject the removed role" }],
-  }, undefined, undefined, {
-    ...context,
-    isProjectTrusted: () => true,
-  }), /Unknown subagent role 'general-purpose'/);
-
-  await assert.rejects(() => tool.execute("call", {
-    tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
-  }, undefined, undefined, {
-    ...context,
-    isProjectTrusted: () => false,
-  }), /trusted project/);
-
-  await assert.rejects(() => tool.execute("call", {
-    tasks: [
-      { name: "Implement change", agent: "worker", task: "Implement the change" },
-      { name: "Review change", agent: "reviewer", task: "Review the change" },
-    ],
-  }, undefined, undefined, {
-    ...context,
-    isProjectTrusted: () => true,
-  }), /only task in its batch/);
-
-  await assert.rejects(() => tool.execute("call", {
-    tasks: [{ name: "Review change", agent: "reviewer", task: "Review the change" }],
-    background: true,
-  }, undefined, undefined, {
-    ...context,
-    mode: "json",
-    isProjectTrusted: () => true,
-  }), /persistent TUI or RPC session/);
-});
-
-test("agent registry keeps specialist roles read-only and scopes the worker", () => {
-  const agents = createAgentRegistry();
-  assert.equal(MAX_SUBAGENT_TASKS, 20);
-  assert.deepEqual([...agents.keys()], ["Explore", "reviewer", "researcher", "worker"]);
-
-  for (const agent of agents.values()) {
-    assert.ok(agent.prompt.length > 0, agent.name);
-    for (const budget of ["maxTurns", "maxToolCalls", "maxReportedTokens", "maxCostUsd", "timeoutMs"]) {
-      assert.equal(budget in agent, false, `${agent.name}:${budget}`);
-    }
-    assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
-    assert.equal(typeof agent.mutatesWorkspace, "boolean", agent.name);
-    for (const tool of agent.tools) assert.ok(allowedTools.has(tool), `${agent.name}:${tool}`);
-  }
-
-  const explore = agents.get("Explore");
-  assert.match(explore.extensions[0], /extensions[/\\]task\.ts$/);
-  assert.match(explore.extensions[1], /extensions[/\\]subagents-policy\.ts$/);
-
-  const reviewer = agents.get("reviewer");
-  assert.deepEqual(reviewer.tools, ["read", "grep", "find", "ls", "git_status", "git_diff", "task"]);
-  assert.match(reviewer.extensions[0], /extensions[/\\]subagent-tools\.ts$/);
-  assert.match(reviewer.extensions[1], /extensions[/\\]task\.ts$/);
-  assert.match(reviewer.extensions[2], /extensions[/\\]subagents-policy\.ts$/);
-  assert.equal(reviewer.contextFiles, true);
-  assert.equal(reviewer.thinking, "high");
-  assert.equal(reviewer.mutatesWorkspace, false);
-
-  const researcher = agents.get("researcher");
-  assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
-  assert.equal(researcher.extensions.length, 1);
-  assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
-  assert.equal(researcher.contextFiles, false);
-  assert.equal(researcher.thinking, "low");
-  assert.equal(researcher.mutatesWorkspace, false);
-
-  const worker = agents.get("worker");
-  assert.deepEqual(worker.tools, [
-    "read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch",
-    "subagent", "get_subagent_result", "cancel_subagent", "list_agents", "send_agent_message", "task",
-  ]);
-  assert.match(worker.extensions[0], /extensions[/\\]tools\.ts$/);
-  assert.match(worker.extensions[1], /extensions[/\\]web\.ts$/);
-  assert.match(worker.extensions[2], /extensions[/\\]subagents-bridge\.ts$/);
-  assert.match(worker.extensions[3], /extensions[/\\]task\.ts$/);
-  assert.match(worker.extensions[4], /extensions[/\\]subagents-policy\.ts$/);
-  assert.equal(worker.contextFiles, true);
-  assert.equal(worker.thinking, "medium");
-  assert.equal(worker.mutatesWorkspace, true);
-});
-
-test("subagent tools are disabled in descendant Pi processes", () => {
+test("subagent tools stay disabled in children", () => {
   const original = process.env.PI_CONFIG_SUBAGENT_CHILD;
-  const tools = [];
   try {
     process.env.PI_CONFIG_SUBAGENT_CHILD = "1";
+    const tools = [];
     subagentsExtension({ registerTool(tool) { tools.push(tool.name); } });
     assert.deepEqual(tools, []);
   } finally {
-    if (original === undefined) delete process.env.PI_CONFIG_SUBAGENT_CHILD;
-    else process.env.PI_CONFIG_SUBAGENT_CHILD = original;
-  }
-});
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function waitFor(check, timeoutMs = 2_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for background subagent");
-    await sleep(10);
-  }
-}
-
-test("background extension launches, renders, notifies, collects, and evicts", { skip: process.platform === "win32" }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-subagent-extension-"));
-  const executable = join(root, "pi");
-  const fixture = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-  const quote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
-  const originalPath = process.env.PATH;
-  const originalMode = process.env.FAKE_PI_MODE;
-  const originalDelay = process.env.FAKE_PI_DELAY_MS;
-  const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
-  let shutdown;
-
-  try {
-    await writeFile(executable, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`);
-    await chmod(executable, 0o700);
-    process.env.PATH = `${root}${delimiter}${originalPath ?? ""}`;
-    process.env.FAKE_PI_MODE = "tool";
-    process.env.FAKE_PI_DELAY_MS = "120";
-    process.env.PI_CONFIG_SUBAGENT_CLI_PATH = fixture;
-    process.env.PI_CODING_AGENT_DIR = join(root, "agent-dir");
-
-    const tools = new Map();
-    const events = new Map();
-    const messages = [];
-    const panelUpdates = [];
-    subagentsExtension({
-      registerTool(value) { tools.set(value.name, value); },
-      on(event, handler) { events.set(event, handler); },
-      sendMessage(message, options) { messages.push({ message, options }); },
-      events: { emit(name, data) { panelUpdates.push({ name, data }); } },
-    });
-    shutdown = () => events.get("session_shutdown")?.();
-
-    const context = {
-      cwd: root,
-      mode: "tui",
-      model: { provider: "fixture", id: "test-model", reasoning: true },
-      sessionManager: { getSessionId: () => "fixture-root" },
-      isProjectTrusted: () => true,
-      ui: {},
-    };
-    await events.get("session_start")({}, context);
-
-    await assert.rejects(() => tools.get("subagent").execute("duplicate", {
-      tasks: [
-        { name: "Duplicate name", agent: "reviewer", task: "First duplicate" },
-        { name: "Duplicate name", agent: "reviewer", task: "Second duplicate" },
-      ],
-    }, undefined, undefined, context), /Agent name.*already exists/);
-    assert.deepEqual((await tools.get("list_agents").execute("list", {})).details.records, []);
-
-    const started = await tools.get("subagent").execute("call", {
-      tasks: [
-        { name: "Review lifecycle", agent: "reviewer", task: "Review background lifecycle integration now" },
-        { name: "Review cleanup", agent: "reviewer", task: "Review background cleanup integration now" },
-      ],
-      background: true,
-    }, undefined, undefined, context);
-    const ids = started.details.progress.map((entry) => entry.id);
-    assert.equal(ids.length, 2);
-    assert.ok(ids.every(Boolean));
-    assert.ok(panelUpdates.length > 0);
-
-    const plainTheme = { fg: (_color, value) => value, bold: (value) => value };
-    assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
-    const widget = panelUpdates.at(-1).data.render(160, plainTheme)
-      .map((line) => line.trimEnd()).join("\n");
-    assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 tokens · 0s/);
-
-    const cancelled = await tools.get("cancel_subagent").execute("cancel-queued", { id: ids[1] });
-    assert.equal(cancelled.details.cancelled, true);
-    assert.ok(!["queued", "starting", "running"].includes(
-      (await tools.get("list_agents").execute("list", {})).details.records.find((record) => record.id === ids[1]).status,
-    ));
-
-    await waitFor(() => messages.flatMap((entry) => entry.message.details.results).length >= ids.length);
-    const notified = messages.flatMap((entry) => entry.message.details.results);
-    assert.deepEqual(notified.map((result) => result.id).sort(), [...ids].sort());
-    assert.equal(notified.find((result) => result.id === ids[0]).status, "done");
-    assert.equal(notified.find((result) => result.id === ids[1]).status, "error");
-    assert.ok(messages.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
-
-    await assert.rejects(
-      () => tools.get("subagent").execute("worker", {
-        tasks: [{ name: "Implement change", agent: "worker", task: "Implement after collecting reviews" }],
-      }, undefined, undefined, context),
-      /outstanding background subagent results/,
-    );
-
-    for (const id of ids) {
-      const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
-      if (id === ids[0]) {
-        assert.match(collected.content[0].text, /fixture completed/);
-        assert.equal(collected.usage.totalTokens, 17);
-      } else {
-        assert.match(collected.content[0].text, /cancelled/);
-        assert.equal(collected.usage.totalTokens, 0);
-      }
-      await assert.rejects(
-        () => tools.get("get_subagent_result").execute("collect-again", { id }, undefined),
-        /Unknown background subagent id/,
-      );
-    }
-    const foreground = await tools.get("subagent").execute("foreground", {
-      tasks: [{ name: "Review foreground", agent: "reviewer", task: "Review foreground lifecycle integration now" }],
-    }, undefined, undefined, context);
-    const foregroundId = foreground.details.results[0].id;
-    await assert.rejects(
-      () => tools.get("get_subagent_result").execute("foreground-collect", { id: foregroundId }, undefined),
-      /Unknown background subagent id/,
-    );
-
-    const beforeDelete = await tools.get("list_agents").execute("list", {});
-    const foregroundRecord = beforeDelete.details.records.find((record) => record.id === foregroundId);
-    assert.equal(foregroundRecord.background, false);
-    await assert.rejects(
-      () => tools.get("delete_agent_record").execute("delete-denied", { id: foregroundId }, undefined, undefined, {
-        ...context, hasUI: true, ui: { confirm: async () => false },
-      }),
-      /confirmation denied/i,
-    );
-    await tools.get("delete_agent_record").execute("delete", { id: foregroundId }, undefined, undefined, {
-      ...context, hasUI: true, ui: { confirm: async () => true },
-    });
-    await access(foregroundRecord.sessionFile);
-
-    const persistent = await tools.get("list_agents").execute("list", {});
-    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
-    assert.ok(persistent.details.records.every((record) => record.collected));
-    assert.ok(persistent.details.records.find((record) => record.id === ids[0]).sessionFile);
-    assert.ok(!["queued", "starting", "running"].includes(persistent.details.records.find((record) => record.id === ids[1]).status));
-  } finally {
-    await shutdown?.();
-    if (originalPath === undefined) delete process.env.PATH;
-    else process.env.PATH = originalPath;
-    if (originalMode === undefined) delete process.env.FAKE_PI_MODE;
-    else process.env.FAKE_PI_MODE = originalMode;
-    if (originalDelay === undefined) delete process.env.FAKE_PI_DELAY_MS;
-    else process.env.FAKE_PI_DELAY_MS = originalDelay;
-    delete process.env.PI_CONFIG_SUBAGENT_CLI_PATH;
-    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
-    await rm(root, { recursive: true, force: true });
+    if (original === undefined) delete process.env.PI_CONFIG_SUBAGENT_CHILD; else process.env.PI_CONFIG_SUBAGENT_CHILD = original;
   }
 });

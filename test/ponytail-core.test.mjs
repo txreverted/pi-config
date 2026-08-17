@@ -130,7 +130,7 @@ test("common skill extraction removes the complete intensity section without par
   assert.match(common, /# Ponytail\nShared/);
   assert.doesNotMatch(common, /Intensity|format this section|full.*row/i);
   assert.match(common, /   ## Safety floor\nKeep safety/);
-  assert.match(buildPonytailInstructions(body, "full"), /^PONYTAIL MODE ACTIVE — level: full/);
+  assert.match(buildPonytailInstructions(body, "full"), /^PONYTAIL MODE ACTIVE - level: full/);
   assert.equal(buildPonytailInstructions(body, "off"), "");
 });
 
