@@ -24,7 +24,7 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     {
       name: "Explore",
       tools: ["read", "grep", "find", "ls", "task"],
-      extensions: [taskExtension],
+      extensions: [taskExtension, policyExtension],
       prompt: prompt("Explore"),
       thinking: "low",
       contextFiles: true,
@@ -33,7 +33,7 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     {
       name: "reviewer",
       tools: ["read", "grep", "find", "ls", "git_status", "git_diff", "task"],
-      extensions: [gitExtension, taskExtension],
+      extensions: [gitExtension, taskExtension, policyExtension],
       prompt: prompt("reviewer"),
       thinking: "high",
       contextFiles: true,

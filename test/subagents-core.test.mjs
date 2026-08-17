@@ -46,8 +46,6 @@ test("Pi child arguments remove ambient resources and fix role capabilities", ()
   const args = buildPiArgs({
     definition: { ...definition, contextFiles: false, extensions: ["/safe/web.ts"] },
     promptPath: "/tmp/role.md",
-    taskPath: "/tmp/task.md",
-    model: "provider/model",
   });
   for (const flag of [
     "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",

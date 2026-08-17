@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import bridgeExtension from "../extensions/subagents-bridge.ts";
 import { AgentSupervisor, BROKER_BYTE_LIMIT, MAX_AGENT_RECORDS, brokerRequest } from "../extensions/subagents-supervisor.ts";
@@ -63,6 +63,8 @@ test("supervisor change subscriptions persist bounded interrupted progress", asy
     await supervisor.update("watch", { id: "watch", agent: "reviewer", thinking: "high", status: "running", startedAt: 1, turns: 1, toolCalls: 2, text: "", activity: "Reading", usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: .01 } } });
     assert.ok(changes >= 2);
     assert.equal(supervisor.get("watch").progress.activity, "Reading");
+    await assert.rejects(() => AgentSupervisor.create(rootId), /already open/);
+    await supervisor.shutdown();
     const restored = await AgentSupervisor.create(rootId);
     try {
       assert.equal(restored.get("watch").status, "interrupted");
@@ -70,6 +72,60 @@ test("supervisor change subscriptions persist bounded interrupted progress", asy
     } finally { await restored.shutdown(); }
     unsubscribe();
   } finally { await clean(root, supervisor); }
+});
+
+test("concurrent stale-lock recovery admits only one supervisor", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-supervisor-lock-"));
+  const rootId = `stale-${randomUUID()}`;
+  process.env.PI_CODING_AGENT_DIR = root;
+  const directory = join(root, "pi-config", "agents", rootId);
+  const lock = join(directory, ".supervisor.lock");
+  try {
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await writeFile(lock, `${JSON.stringify({ host: hostname(), pid: 2_147_483_647, token: "stale" })}\n`);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    const attempts = await Promise.allSettled([AgentSupervisor.create(rootId), AgentSupervisor.create(rootId)]);
+    const opened = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+    assert.equal(opened.length, 1);
+    assert.equal(rejected.length, 1);
+    await opened[0].value.shutdown();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  }
+});
+
+test("closed supervisors cannot persist late run mutations", async () => {
+  const { root, supervisor } = await isolatedSupervisor("pi-closed-supervisor");
+  try {
+    await supervisor.reserve(task("late", "Late result"), undefined, undefined, undefined, true);
+    await supervisor.shutdown();
+    const path = join(supervisor.directory, "agents.json");
+    const before = await readFile(path, "utf8");
+    await supervisor.finish("late", result("late"));
+    await supervisor.collect("late");
+    await assert.rejects(() => supervisor.beginResume("late"), /shutting down/);
+    await assert.rejects(() => supervisor.deleteRecord("late"), /shutting down/);
+    assert.equal(await readFile(path, "utf8"), before);
+  } finally { await clean(root, supervisor); }
+});
+
+test("unsafe root ids use collision-resistant storage paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-root-id-"));
+  process.env.PI_CODING_AGENT_DIR = root;
+  const first = await AgentSupervisor.create("a/b");
+  const second = await AgentSupervisor.create("a?b");
+  try {
+    assert.notEqual(first.directory, second.directory);
+  } finally {
+    await Promise.all([first.shutdown(), second.shutdown()]);
+    await rm(root, { recursive: true, force: true });
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  }
 });
 
 test("resume clears the previous terminal result before exposing the new run", async () => {
@@ -335,6 +391,57 @@ test("pending main mail replays when the root handler is restored", async () => 
       while ((!received.length || restored.pendingMail("main").length) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
       assert.equal(received[0].body, "replayed status");
       assert.deepEqual(restored.pendingMail("main"), []);
+    } finally { await restored.shutdown(); }
+  } finally { await clean(root, supervisor); }
+});
+
+test("missing managed artifacts quarantine only the damaged record", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-missing-managed");
+  const worktree = join(root, "pi-config", "worktrees", "repo", "managed-worktree");
+  try {
+    await mkdir(worktree, { recursive: true });
+    const repoRoot = await realpath(root);
+    const managedWorktree = await realpath(worktree);
+    await supervisor.reserve({ ...task("damaged", "Damaged worker", "worker"), cwd: managedWorktree }, undefined, undefined, {
+      repoRoot, worktree: managedWorktree, baseCommit: "0".repeat(40),
+    });
+    await supervisor.finish("damaged", result("damaged", "worker", { cwd: managedWorktree }));
+    await supervisor.reserve(task("healthy", "Healthy record"));
+    await supervisor.finish("healthy", result("healthy"));
+    await supervisor.shutdown();
+    await rm(worktree, { recursive: true, force: true });
+
+    const restored = await AgentSupervisor.create(rootId);
+    try {
+      assert.equal(restored.get("healthy").status, "done");
+      assert.equal(restored.get("damaged").worktree, undefined);
+      assert.equal(restored.get("damaged").worktreeDiscarded, true);
+      await assert.rejects(() => restored.beginResume("damaged"), /discarded/);
+    } finally { await restored.shutdown(); }
+  } finally { await clean(root, supervisor); }
+});
+
+test("a removed delegated cwd falls back to its valid managed worktree", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-missing-cwd");
+  const worktree = join(root, "pi-config", "worktrees", "repo", "managed-worktree");
+  const cwd = join(worktree, "deleted-child");
+  try {
+    await mkdir(cwd, { recursive: true });
+    const repoRoot = await realpath(root);
+    const managedWorktree = await realpath(worktree);
+    const managedCwd = await realpath(cwd);
+    await supervisor.reserve({ ...task("fallback", "Fallback worker", "worker"), cwd: managedCwd }, undefined, undefined, {
+      repoRoot, worktree: managedWorktree, baseCommit: "0".repeat(40),
+    });
+    await supervisor.finish("fallback", result("fallback", "worker", { cwd: managedCwd }));
+    await supervisor.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+
+    const restored = await AgentSupervisor.create(rootId);
+    try {
+      assert.equal(restored.get("fallback").worktree, managedWorktree);
+      assert.equal(restored.get("fallback").cwd, managedWorktree);
+      assert.equal(restored.get("fallback").worktreeDiscarded, undefined);
     } finally { await restored.shutdown(); }
   } finally { await clean(root, supervisor); }
 });
