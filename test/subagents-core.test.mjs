@@ -570,7 +570,9 @@ test("cancellation kills descendants that ignore graceful termination", { skip: 
     const pidDeadline = Date.now() + 1_000;
     while (descendantPid === undefined && Date.now() < pidDeadline) {
       try {
-        descendantPid = Number(await readFile(pidFile, "utf8"));
+        const parsed = Number((await readFile(pidFile, "utf8")).trim());
+        if (Number.isSafeInteger(parsed) && parsed > 0) descendantPid = parsed;
+        else await sleep(10);
       } catch {
         await sleep(10);
       }
