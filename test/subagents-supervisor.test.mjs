@@ -87,6 +87,32 @@ test("resume clears the previous terminal result before exposing the new run", a
   } finally { await clean(root, supervisor); }
 });
 
+test("legacy general-purpose records migrate to worker", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-legacy-role");
+  try {
+    await supervisor.reserve(task("legacy", "Legacy role", "worker"));
+    await supervisor.finish("legacy", result("legacy", "worker"));
+    await supervisor.shutdown();
+    const path = join(supervisor.directory, "agents.json");
+    const data = JSON.parse(await readFile(path, "utf8"));
+    data.records[0].agent = "general-purpose";
+    data.records[0].result.agent = "general-purpose";
+    data.records[0].progress = {
+      id: "legacy", agent: "general-purpose", thinking: "medium", status: "done", startedAt: 1,
+      turns: 1, toolCalls: 0, text: "done", usage: result("legacy", "worker").usage,
+    };
+    await writeFile(path, JSON.stringify(data));
+
+    const restored = await AgentSupervisor.create(rootId);
+    try {
+      const migrated = restored.get("legacy");
+      assert.equal(migrated.agent, "worker");
+      assert.equal(migrated.result.agent, "worker");
+      assert.equal(migrated.progress.agent, "worker");
+    } finally { await restored.shutdown(); }
+  } finally { await clean(root, supervisor); }
+});
+
 test("depth never exceeds three even when the environment requests more", async () => {
   process.env.PI_CONFIG_MAX_AGENT_DEPTH = "20";
   const { root, supervisor } = await isolatedSupervisor("pi-depth-ceiling");
@@ -176,6 +202,7 @@ test("permission broker preserves exact args and denies, times out, and disconne
     await clean(root, supervisor);
   }
 });
+
 
 
 

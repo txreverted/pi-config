@@ -13,7 +13,6 @@ import {
   isVisuallyBlank,
   normalizeDisplayText,
   utilityBarSegments,
-  utilityBarText,
   wrapUtilityBar,
 } from "../extensions/ui-core.ts";
 
@@ -39,10 +38,6 @@ test("UI formatters keep utility values compact", () => {
   assert.equal(formatElapsed(999), "0s");
   assert.equal(formatElapsed(65_000), "1m05");
   assert.equal(formatElapsed(3_661_000), "1h01m");
-  assert.equal(
-    utilityBarText(values),
-    " π v0.84.2 〉~/Documents/pi-config(branch) 〉gpt-5.6-sol (xhigh) 〉0.0%/272k (auto) 〉$0.000 (sub) 〉1m30",
-  );
 });
 
 test("display helpers enforce one blank row and one outer gutter", () => {

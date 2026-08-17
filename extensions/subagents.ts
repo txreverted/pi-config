@@ -88,16 +88,8 @@ function duration(ms: number): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-function safeStatusText(value: string): string {
-  return safeDisplayLine(value);
-}
-
-function shortStatusText(value: string, maxChars = 64): string {
-  return safeDisplayLine(value, maxChars);
-}
-
 function cleanTaskName(value: string): string {
-  const name = safeStatusText(value);
+  const name = safeDisplayLine(value);
   if (!name || name.length > 80 || name.split(" ").length > 3) {
     throw new Error("Subagent task names must contain one to three words");
   }
@@ -127,7 +119,7 @@ function progressActivity(entry: ChildRunProgress): string {
   if (entry.status === "error") return "error";
   if (entry.status === "starting") return "starting…";
   const activity = entry.activity ?? entry.currentTool;
-  return activity ? `${shortStatusText(activity)}…` : "thinking…";
+  return activity ? `${safeDisplayLine(activity, 64)}…` : "thinking…";
 }
 
 interface AgentDisplayEntry {
@@ -151,7 +143,7 @@ function agentTreeLines(entries: readonly AgentDisplayEntry[], theme: Theme, inc
     const tokens = Math.round(progress.usage.totalTokens);
     const stats = `${toolUses} · ${tokenCount(tokens)} token${tokens === 1 ? "" : "s"} · ${duration(elapsed)}`;
     lines.push(
-      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", shortStatusText(name || progress.id))} ${theme.fg("dim", `· ${stats}`)}`,
+      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", safeDisplayLine(name || progress.id, 64))} ${theme.fg("dim", `· ${stats}`)}`,
       `${continuation} ${theme.fg("dim", progressActivity(progress))}`,
     );
   });
@@ -325,7 +317,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         const rawDetail = JSON.stringify({ tool: request.toolName, args: request.args, workspace: request.workspace });
         if (Buffer.byteLength(rawDetail) > 50_000) return false;
         const detail = safeDisplayText(rawDetail);
-        return current.ui.confirm(`Approve ${safeStatusText(String(request.toolName))} for ${safeStatusText(record.name)}?`, detail, {
+        return current.ui.confirm(`Approve ${safeDisplayLine(String(request.toolName))} for ${safeDisplayLine(record.name)}?`, detail, {
           timeout: 30_000,
           signal: permissionAbort.signal,
         });
@@ -337,7 +329,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     supervisor.setMainMessageHandler(async (message) => {
       pi.sendMessage({
         customType: "agent-message",
-        content: `Untrusted message from agent ${safeStatusText(message.from)} (${safeStatusText(message.id)}):\n\n${safeDisplayText(message.body)}`,
+        content: `Untrusted message from agent ${safeDisplayLine(message.from)} (${safeDisplayLine(message.id)}):\n\n${safeDisplayText(message.body)}`,
         display: true,
         details: { id: message.id, from: message.from },
       }, { deliverAs: "followUp", triggerTurn: true });
@@ -349,7 +341,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
       if (request.action !== "spawn" || !Array.isArray(request.tasks)) throw new Error("Unsupported broker request");
       const parent = supervisor.get(senderId);
-      if (!parent || (parent.agent !== "worker" && parent.agent !== "general-purpose")) throw new Error("This agent role is a leaf");
+      if (!parent || parent.agent !== "worker") throw new Error("This agent role is a leaf");
       if (!rootContext?.model) throw new Error("Root model is unavailable");
       if (request.tasks.length < 1 || request.tasks.length > MAX_SUBAGENT_TASKS) throw new Error("Invalid descendant task count");
       const seenIds = new Set<string>();
@@ -657,7 +649,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const state: AgentsUiState = {};
       for (;;) {
         const tasks = await taskStoreForContext(ctx).read().catch(() => undefined);
-        state.claimedTasks = new Map(tasks?.tasks.filter((task) => task.owner && task.status === "in_progress").map((task) => [task.owner!, `${task.id} ${safeStatusText(task.activeForm || task.subject)}`]) ?? []);
+        state.claimedTasks = new Map(tasks?.tasks.filter((task) => task.owner && task.status === "in_progress").map((task) => [task.owner!, `${task.id} ${safeDisplayLine(task.activeForm || task.subject)}`]) ?? []);
         if (state.selectedId && state.transcript === undefined) state.transcript = formatRecentTranscript(await supervisor.transcriptTail(state.selectedId).catch(() => ""));
         const action = await ctx.ui.custom<AgentsUiAction>((tui, theme, _keys, done) => {
           let unsubscribe = () => {};

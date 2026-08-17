@@ -97,12 +97,21 @@ function validResult(value: unknown, id: string, agent: string): boolean {
     (result.stderr === undefined || (typeof result.stderr === "string" && Buffer.byteLength(result.stderr) <= 64_000));
 }
 
+function migrateLegacyRecord(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const record = value as { agent?: unknown; result?: { agent?: unknown }; progress?: { agent?: unknown } };
+  if (record.agent !== "general-purpose") return;
+  record.agent = "worker";
+  if (record.result?.agent === "general-purpose") record.result.agent = "worker";
+  if (record.progress?.agent === "general-purpose") record.progress.agent = "worker";
+}
+
 function validRecord(value: unknown, sessionsDirectory: string): value is PersistentAgentRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return typeof record.id === "string" && ID.test(record.id) &&
     typeof record.name === "string" && record.name.length > 0 && record.name.length <= 80 &&
-    typeof record.agent === "string" && ["Explore", "general-purpose", "reviewer", "researcher", "worker"].includes(record.agent) &&
+    typeof record.agent === "string" && ["Explore", "reviewer", "researcher", "worker"].includes(record.agent) &&
     typeof record.task === "string" && record.task.length <= 50_000 && typeof record.cwd === "string" && isAbsolute(record.cwd) &&
     (record.parentId === undefined || typeof record.parentId === "string") && Number.isInteger(record.depth) && (record.depth as number) >= 1 &&
     typeof record.status === "string" && ["queued", "starting", "running", "done", "stale", "bugged", "error", "interrupted"].includes(record.status) &&
@@ -237,6 +246,7 @@ export class AgentSupervisor {
       if (data.version !== 1 || !Array.isArray(data.records) || !Array.isArray(data.mail ?? [])) throw new Error("Invalid persisted agent records");
       const ids = new Set<string>();
       const names = new Set<string>();
+      for (const value of data.records) migrateLegacyRecord(value);
       for (const value of data.records) {
         if (!validRecord(value, supervisor.sessionsDirectory) || ids.has(value.id) || names.has(value.name)) throw new Error("Invalid persisted agent record");
         const parent = value.parentId ? data.records.find((candidate) => validRecord(candidate, supervisor.sessionsDirectory) && candidate.id === value.parentId) as PersistentAgentRecord | undefined : undefined;
@@ -318,7 +328,7 @@ export class AgentSupervisor {
     if (actualDepth !== (parent ? parent.depth + 1 : 1)) throw new Error("Invalid agent ancestry depth");
     if (actualDepth > maxAgentDepth()) throw new Error(`Maximum agent depth is ${maxAgentDepth()}`);
     if (this.activeCount() >= maxAgentConcurrency()) throw new Error(`At most ${maxAgentConcurrency()} agents may be active globally`);
-    const writable = task.agent === "worker" || task.agent === "general-purpose";
+    const writable = task.agent === "worker";
     const active = [...this.records.values()].filter((record) => ACTIVE.has(record.status));
     if (writable && !workspace && active.length > 0) throw new Error("Writable agents require exclusive execution");
     const now = Date.now();
@@ -339,7 +349,7 @@ export class AgentSupervisor {
     if (record.worktreeDiscarded) throw new Error(`Agent '${id}' cannot be resumed after its worktree was discarded`);
     if (this.activeCount() >= maxAgentConcurrency()) throw new Error(`At most ${maxAgentConcurrency()} agents may be active globally`);
     const active = [...this.records.values()].filter((item) => ACTIVE.has(item.status));
-    const writable = record.agent === "worker" || record.agent === "general-purpose";
+    const writable = record.agent === "worker";
     if (writable && !record.worktree && active.length > 0) throw new Error("Writable agents require exclusive execution");
     record.status = "queued";
     record.background = false;
