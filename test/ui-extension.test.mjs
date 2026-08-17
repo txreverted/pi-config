@@ -182,6 +182,7 @@ test("one composite above-editor widget orders panels and modes with one blank r
 
   h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: "○ ponytail\u001b]52;c;bad\u0007" });
   h.pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render: () => ["Agents", "  └─ Review"] });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "task", render: () => ["Tasks", " └─ Shared"] });
   h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal", text: "goal: active · 3 auto" });
   h.pi.events.emit(UI_PANEL_EVENT, { id: "todo", render: () => ["Todos", "", "", " └─ Task"] });
 
@@ -197,6 +198,9 @@ test("one composite above-editor widget orders panels and modes with one blank r
     " ",
     "  └─ Task",
     " ",
+    " Tasks",
+    "  └─ Shared",
+    " ",
     " Agents",
     "   └─ Review",
     " ",
@@ -210,6 +214,7 @@ test("one composite above-editor widget orders panels and modes with one blank r
   }
 
   h.pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "task" });
   h.pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
   h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
   h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
