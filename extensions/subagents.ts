@@ -235,8 +235,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let background: BackgroundRunManager;
   let supervisorPromise: Promise<AgentSupervisor> | undefined;
   let rootContext: ExtensionContext | undefined;
-  let confirmationChain = Promise.resolve();
-  let permissionAbort = new AbortController();
   let unsubscribeSupervisor = () => {};
   let supervisorPanelVisible = false;
   const refreshWidget = () => {
@@ -303,29 +301,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     widgetContext = ctx;
     rootContext = ctx;
     const rootId = process.env.PI_CONFIG_ROOT_AGENT_SESSION ?? ctx.sessionManager.getSessionId();
-    permissionAbort.abort();
-    permissionAbort = new AbortController();
     const supervisor = await (supervisorPromise = AgentSupervisor.create(rootId));
     unsubscribeSupervisor();
     unsubscribeSupervisor = supervisor.subscribe(refreshWidget);
-    supervisor.setPermissionHandler(async (senderId, request) => {
-      const decide = async () => {
-        const current = rootContext;
-        if (!current?.hasUI || !current.ui?.confirm) return false;
-        const record = supervisor.get(senderId);
-        if (!record?.worktree || request.workspace !== record.worktree) return false;
-        const rawDetail = JSON.stringify({ tool: request.toolName, args: request.args, workspace: request.workspace });
-        if (Buffer.byteLength(rawDetail) > 50_000) return false;
-        const detail = safeDisplayText(rawDetail);
-        return current.ui.confirm(`Approve ${safeDisplayLine(String(request.toolName))} for ${safeDisplayLine(record.name)}?`, detail, {
-          timeout: 30_000,
-          signal: permissionAbort.signal,
-        });
-      };
-      const approval = confirmationChain.then(decide, () => false);
-      confirmationChain = approval.then(() => undefined, () => undefined);
-      return approval.catch(() => false);
-    });
     supervisor.setMainMessageHandler(async (message) => {
       pi.sendMessage({
         customType: "agent-message",
@@ -414,7 +392,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "subagent",
-    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only; reviewer Git inspection requires a trusted project. Foreground workers retain local checkout compatibility. Background writable agents use detached persistent worktrees and parent-routed approval. Children use separate processes and contexts and load only static tools and extensions; writable roles receive a supervisor-proxied delegation tool. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background results are session-scoped and bounded.",
+    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only; reviewer Git inspection requires a trusted project. Foreground workers retain local checkout compatibility. Background writable agents use detached persistent worktrees without per-tool confirmation. Children use separate processes and contexts and load only static tools and extensions; writable roles receive a supervisor-proxied delegation tool. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background results are session-scoped and bounded.",
     promptSnippet: "Delegate implementation, independent review, or public-web research to isolated child contexts",
     promptGuidelines: [
       "Give every subagent task a descriptive name of at most three words.",
@@ -910,7 +888,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     completionTimer = undefined;
     pendingCompletions.clear();
     if (ctx?.mode === "tui") pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
-    permissionAbort.abort();
     unsubscribeSupervisor();
     unsubscribeSupervisor = () => {};
     const supervisor = await supervisorPromise;
