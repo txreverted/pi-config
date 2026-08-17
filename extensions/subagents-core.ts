@@ -1,25 +1,37 @@
-import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Usage } from "@earendil-works/pi-ai";
-import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
-import { access, chmod, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { DEFAULT_MAX_LINES, RpcClient, truncateHead } from "@earendil-works/pi-coding-agent";
+import { access, chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath } from "node:url";
 
-export const MAX_SUBAGENT_TASKS = 3;
-export const MAX_SUBAGENT_CONCURRENCY = 3;
+export const MAX_SUBAGENT_TASKS = 20;
+export const MAX_SUBAGENT_CONCURRENCY = 20;
+export const DEFAULT_MAX_AGENT_DEPTH = 3;
+
+function boundedEnvironmentInteger(name: string, fallback: number, maximum: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value >= 1 && value <= maximum ? value : fallback;
+}
+
+export function maxAgentConcurrency(): number {
+  return boundedEnvironmentInteger("PI_CONFIG_MAX_CONCURRENT_AGENTS", MAX_SUBAGENT_CONCURRENCY, 20);
+}
+
+export function maxAgentDepth(): number {
+  return boundedEnvironmentInteger("PI_CONFIG_MAX_AGENT_DEPTH", DEFAULT_MAX_AGENT_DEPTH, DEFAULT_MAX_AGENT_DEPTH);
+}
 export const SUBAGENT_STALE_TIMEOUT_MS = 2 * 60_000 + 30_000;
 export const MAX_RESULT_BYTES = 16_000;
 const TRUNCATION_NOTICE_BYTES = 160;
 const STARTUP_TIMEOUT_MS = 20_000;
 const SUBAGENT_PROGRESS_INTERVAL_MS = 1_000;
-const MAX_JSON_LINE_CHARS = 8 * 1024 * 1024;
-const MAX_STDERR_CHARS = 64 * 1024;
-const KILL_GRACE_MS = 2_000;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
-export const AGENT_NAMES = ["reviewer", "researcher", "worker"] as const;
+export const AGENT_NAMES = ["Explore", "general-purpose", "reviewer", "researcher", "worker"] as const;
 export type AgentName = typeof AGENT_NAMES[number];
 export type ChildStatus = "queued" | "starting" | "running" | "done" | "stale" | "bugged" | "error";
 
@@ -66,6 +78,7 @@ export interface ChildRunResult extends ChildRunProgress {
   exitCode: number | null;
   signal?: NodeJS.Signals;
   model?: string;
+  sessionFile?: string;
   stopReason?: string;
   endedAt: number;
   durationMs: number;
@@ -86,6 +99,9 @@ export interface RunChildOptions {
   invocation?: PiInvocation;
   env?: NodeJS.ProcessEnv;
   startupTimeoutMs?: number;
+  sessionDir?: string;
+  sessionPath?: string;
+  onSession?: (sessionFile: string, client: RpcClient) => void;
   onUpdate?: (progress: ChildRunProgress) => void;
 }
 
@@ -280,8 +296,7 @@ export function buildPiArgs(input: {
   model?: string;
 }): string[] {
   const args = [
-    "--mode", "json", "--print", "--no-session", "--no-approve", "--no-extensions",
-    "--no-skills", "--no-prompt-templates", "--no-themes",
+    "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
   ];
   if (!input.definition.contextFiles) args.push("--no-context-files");
   for (const extension of input.definition.extensions ?? []) args.push("--extension", extension);
@@ -289,7 +304,6 @@ export function buildPiArgs(input: {
   if (input.model) args.push("--model", input.model);
   args.push("--thinking", input.definition.thinking);
   args.push("--append-system-prompt", input.promptPath);
-  args.push(`@${input.taskPath}`, "Complete the task described in the attached task file.");
   return args;
 }
 
@@ -341,11 +355,13 @@ async function createRunFiles(definition: AgentDefinition, task: ChildTask) {
     await chmod(dir, 0o700);
     const promptPath = join(dir, "role.md");
     const taskPath = join(dir, "task.md");
+    const stderrPath = join(dir, "stderr.log");
     await Promise.all([
       writeFile(promptPath, definition.prompt, { encoding: "utf8", mode: 0o600 }),
       writeFile(taskPath, `# Delegated task\n\n${task.task.trim()}\n`, { encoding: "utf8", mode: 0o600 }),
+      writeFile(stderrPath, "", { encoding: "utf8", mode: 0o600 }),
     ]);
-    return { dir, promptPath, taskPath };
+    return { dir, promptPath, taskPath, stderrPath };
   } catch (error) {
     try {
       await removeRunFiles(dir);
@@ -356,33 +372,6 @@ async function createRunFiles(definition: AgentDefinition, task: ChildTask) {
   }
 }
 
-function terminate(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (!pid) return;
-  if (process.platform === "win32") {
-    try {
-      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      killer.on("error", () => {});
-      killer.unref();
-    } catch {
-      // The process may already have exited.
-    }
-    return;
-  }
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // The process may already have exited.
-  }
-}
-
-function appendTail(current: string, chunk: string, limit: number): string {
-  const next = current + chunk;
-  return next.length <= limit ? next : next.slice(-limit);
-}
-
 interface ActiveTool {
   name: string;
   args?: Record<string, unknown>;
@@ -391,6 +380,46 @@ interface ActiveTool {
 function editedPath(args: Record<string, unknown> | undefined): string | undefined {
   const value = args?.path ?? args?.file_path;
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+const execFileAsync = promisify(execFile);
+
+async function descendantPids(pid: number): Promise<number[]> {
+  if (process.platform === "win32") return [];
+  try {
+    const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8", timeout: 1_000 });
+    const children = new Map<number, number[]>();
+    for (const line of stdout.split("\n")) {
+      const [child, parent] = line.trim().split(/\s+/).map(Number);
+      if (!Number.isSafeInteger(child) || !Number.isSafeInteger(parent)) continue;
+      children.set(parent, [...(children.get(parent) ?? []), child]);
+    }
+    const result: number[] = [];
+    const visit = (parent: number) => {
+      for (const child of children.get(parent) ?? []) { visit(child); result.push(child); }
+    };
+    visit(pid);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+export async function stopRpcClient(client: RpcClient): Promise<void> {
+  const child = (client as unknown as { process?: { pid?: number; kill: (signal?: NodeJS.Signals) => boolean } }).process;
+  const pid = child?.pid;
+  if (process.platform === "win32" && pid) {
+    await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 1_500 }).catch(() => undefined);
+  }
+  const descendants = pid ? await descendantPids(pid) : [];
+  for (const descendant of descendants) { try { process.kill(descendant, "SIGTERM"); } catch {} }
+  void client.abort().catch(() => {});
+  await Promise.race([
+    client.stop().catch(() => {}),
+    new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+  ]);
+  try { child?.kill("SIGKILL"); } catch {}
+  for (const descendant of descendants) { try { process.kill(descendant, "SIGKILL"); } catch {} }
 }
 
 function summarizeActivity(activeTools: Iterable<ActiveTool>, editedFiles: ReadonlySet<string>): string | undefined {
@@ -445,27 +474,37 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     return finishEarly("error", `Subagent preflight failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const args = buildPiArgs({ definition, promptPath: files.promptPath, taskPath: files.taskPath, model: options.model });
+  const args = buildPiArgs({ definition, promptPath: files.promptPath, taskPath: files.taskPath, model: undefined });
+  if (options.sessionDir) args.push("--session-dir", options.sessionDir);
   const invocation = options.invocation
-    ? { command: options.invocation.command, args: [...options.invocation.argsPrefix, ...args] }
-    : resolvePiInvocation(args);
+    ? { command: options.invocation.command, args: [...options.invocation.argsPrefix] }
+    : resolvePiInvocation([]);
+  const realCliPath = invocation.command === process.execPath || /(?:^|[/\\])node(?:\.exe)?$/i.test(invocation.command)
+    ? invocation.args.shift()
+    : options.env?.PI_CONFIG_SUBAGENT_CLI_PATH ?? process.env.PI_CONFIG_SUBAGENT_CLI_PATH ?? fileURLToPath(new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
+  if (!realCliPath) {
+    await removeRunFiles(files.dir).catch(() => undefined);
+    return finishEarly("error", "Subagent Pi CLI path is unavailable");
+  }
+  const cliPath = fileURLToPath(new URL("./subagents-launcher.mjs", import.meta.url));
+
+  const model = options.model?.split("/");
   const state: ProtocolState = { output: "", usage: emptyUsage(), turns: 0, toolCalls: 0 };
   let progress: ChildRunProgress = { ...base, status: "starting" };
-  let stderr = "";
-  let protocolBuffer = "";
-  let protocolSeen = false;
-  let protocolError: string | undefined;
-  let spawnError: string | undefined;
-  let stop: "aborted" | "stale" | "startup" | "protocol" | undefined;
-  let exitCode: number | null = null;
-  let exitSignal: NodeJS.Signals | undefined;
   const activeTools = new Map<string, ActiveTool>();
   const editedFiles = new Set<string>();
-  let killTimer: NodeJS.Timeout | undefined;
+  let stop: "aborted" | "stale" | "startup" | undefined;
+  let stderr = "";
+  let sessionFile: string | undefined;
+  let client: RpcClient | undefined;
+  let staleTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
   let progressTimer: NodeJS.Timeout | undefined;
-  let staleTimer: NodeJS.Timeout | undefined;
-  let cleanupError: string | undefined;
+  let settled = false;
+  let resolveStopped!: () => void;
+  let resolveIdle!: () => void;
+  const stopped = new Promise<void>((resolve) => { resolveStopped = resolve; });
+  const idle = new Promise<void>((resolve) => { resolveIdle = resolve; });
 
   const emit = () => {
     const visible = state.partialText === undefined
@@ -473,75 +512,46 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
       : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
     progress = {
       ...progress,
-      status: progress.status === "starting" && protocolSeen ? "running" : progress.status,
       turns: state.turns,
       toolCalls: state.toolCalls,
       text: visible.text,
       usage: reportedUsage(state),
+      currentTool: [...activeTools.values()].at(-1)?.name,
+      activity: summarizeActivity(activeTools.values(), editedFiles),
     };
-    try {
-      options.onUpdate?.({ ...progress, usage: { ...progress.usage, cost: { ...progress.usage.cost } } });
-    } catch {
-      // UI updates do not own the child process.
-    }
+    try { options.onUpdate?.({ ...progress, usage: { ...progress.usage, cost: { ...progress.usage.cost } } }); } catch {}
+  };
+  const requestStop = (reason: NonNullable<typeof stop>) => {
+    if (stop || settled) return;
+    stop = reason;
+    if (client) void stopRpcClient(client).finally(resolveStopped);
+    else resolveStopped();
+  };
+  const activity = () => {
+    if (staleTimer) clearTimeout(staleTimer);
+    staleTimer = setTimeout(() => requestStop("stale"), options.staleTimeoutMs ?? SUBAGENT_STALE_TIMEOUT_MS);
+    staleTimer.unref?.();
   };
 
   try {
-    const child = spawn(invocation.command, invocation.args, {
+    client = new RpcClient({
+      cliPath,
       cwd: options.task.cwd,
-      env: { ...process.env, ...options.env, PI_CONFIG_SUBAGENT_CHILD: "1" },
-      shell: false,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...options.env,
+        PI_CONFIG_SUBAGENT_CHILD: "1",
+        PI_CONFIG_SUBAGENT_REAL_CLI: realCliPath,
+        PI_CONFIG_SUBAGENT_STDERR_PATH: files.stderrPath,
+      } as Record<string, string>,
+      ...(model && model.length > 1 ? { provider: model.shift(), model: model.join("/") } : {}),
+      args: [...invocation.args, ...args],
     });
-    const decoder = new StringDecoder("utf8");
-    const requestStop = (reason: NonNullable<typeof stop>) => {
-      if (stop) return;
-      stop = reason;
-      terminate(child.pid, "SIGTERM");
-      killTimer = setTimeout(() => terminate(child.pid, "SIGKILL"), KILL_GRACE_MS);
-      killTimer.unref?.();
-    };
-    const recordActivity = () => {
-      if (staleTimer) clearTimeout(staleTimer);
-      staleTimer = setTimeout(() => requestStop("stale"), options.staleTimeoutMs ?? SUBAGENT_STALE_TIMEOUT_MS);
-      staleTimer.unref?.();
-    };
-    child.once("spawn", () => {
-      startupTimer = setTimeout(() => requestStop("startup"), options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
-      startupTimer.unref?.();
-      recordActivity();
-      emit();
-      if (options.onUpdate) {
-        progressTimer = setInterval(emit, SUBAGENT_PROGRESS_INTERVAL_MS);
-        progressTimer.unref?.();
-      }
-    });
-    child.once("error", (error) => {
-      spawnError = error.message;
-    });
-
-    const processLine = (line: string) => {
-      if (line.length > MAX_JSON_LINE_CHARS) {
-        protocolError = `Child JSON event exceeded ${MAX_JSON_LINE_CHARS} characters`;
-        requestStop("protocol");
-        return;
-      }
-      const summary = consumeProtocolEvent(line, state);
-      if (!summary) {
-        if (line.trim()) {
-          protocolError = "Child emitted malformed JSON output";
-          requestStop("protocol");
-        }
-        return;
-      }
-      recordActivity();
-      if (!protocolSeen) {
-        protocolSeen = true;
-        if (startupTimer) clearTimeout(startupTimer);
-      }
-      progress.status = "running";
-      if (summary.type === "tool_execution_start") {
+    const unsubscribe = client.onEvent((event) => {
+      activity();
+      if (progress.status === "starting") progress = { ...progress, status: "running" };
+      const summary = consumeProtocolEvent(JSON.stringify(event), state);
+      if (summary?.type === "agent_settled") resolveIdle();
+      if (summary?.type === "tool_execution_start") {
         state.toolCalls++;
         const id = summary.toolCallId ?? `tool-${state.toolCalls}`;
         const name = summary.toolName ?? "tool";
@@ -550,106 +560,84 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
           const path = editedPath(summary.args);
           if (path) editedFiles.add(path);
         }
-      } else if (summary.type === "tool_execution_end") {
+      } else if (summary?.type === "tool_execution_end") {
         if (summary.toolCallId) activeTools.delete(summary.toolCallId);
         else activeTools.clear();
       }
-      progress.currentTool = [...activeTools.values()].at(-1)?.name;
-      progress.activity = summarizeActivity(activeTools.values(), editedFiles);
       emit();
+    });
+    startupTimer = setTimeout(() => requestStop("startup"), options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
+    startupTimer.unref?.();
+    await client.start();
+    const childProcess = (client as unknown as { process?: {
+      once: (event: string, listener: (code: number | null, signal: NodeJS.Signals | null) => void) => void;
+      exitCode: number | null;
+      stderr?: { removeAllListeners: (event: string) => void; on: (event: string, listener: (chunk: Buffer) => void) => void };
+    } }).process;
+    childProcess?.stderr?.removeAllListeners("data");
+    childProcess?.stderr?.on("data", () => {});
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (!settled && !stop) state.assistantError = `Subagent RPC process exited with code ${code ?? "unknown"}${signal ? ` (${signal})` : ""}`;
+      resolveStopped();
     };
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      protocolBuffer += decoder.write(chunk);
-      if (protocolBuffer.length > MAX_JSON_LINE_CHARS && !protocolBuffer.includes("\n")) {
-        protocolError = `Child JSON event exceeded ${MAX_JSON_LINE_CHARS} characters`;
-        requestStop("protocol");
-        return;
-      }
-      const lines = protocolBuffer.split("\n");
-      protocolBuffer = lines.pop() ?? "";
-      for (const line of lines) processLine(line);
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr = appendTail(stderr, chunk.toString("utf8"), MAX_STDERR_CHARS);
-      recordActivity();
-    });
+    childProcess?.once("exit", onExit);
+    if (childProcess?.exitCode !== null && childProcess?.exitCode !== undefined) onExit(childProcess.exitCode, null);
+    if (startupTimer) clearTimeout(startupTimer);
+    activity();
+    if (options.sessionPath) await client.switchSession(options.sessionPath);
+    await client.setAutoCompaction(true);
+    await client.setThinkingLevel(definition.thinking);
+    const rpcState = await client.getState();
+    sessionFile = rpcState.sessionFile;
+    if (sessionFile) options.onSession?.(sessionFile, client);
+    progressTimer = setInterval(emit, SUBAGENT_PROGRESS_INTERVAL_MS);
+    progressTimer.unref?.();
     const onAbort = () => requestStop("aborted");
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener("abort", onAbort, { once: true });
-    await new Promise<void>((resolveClose) => child.once("close", (code, signal) => {
-      exitCode = code;
-      exitSignal = signal ?? undefined;
-      resolveClose();
-    }));
-    if (stop) terminate(child.pid, "SIGKILL");
+    await client.prompt(`@${files.taskPath} Complete the task described in the attached task file.`);
+    await Promise.race([idle, stopped]);
+    settled = true;
     options.signal?.removeEventListener("abort", onAbort);
-    protocolBuffer += decoder.end();
-    if (protocolBuffer.trim() && !stop) processLine(protocolBuffer);
+    unsubscribe();
+    if (!stop && !state.assistantError) {
+      sessionFile = (await client.getState()).sessionFile ?? sessionFile;
+      const last = await client.getLastAssistantText();
+      if (last !== null) state.output = last;
+    }
+    stderr = (await readFile(files.stderrPath, "utf8")).slice(0, 64 * 1024);
   } catch (error) {
-    spawnError = error instanceof Error ? error.message : String(error);
+    stderr = (await readFile(files.stderrPath, "utf8").catch(() => "")).slice(0, 64 * 1024);
+    if (!stop) state.assistantError = error instanceof Error ? error.message : String(error);
   } finally {
-    for (const timer of [killTimer, startupTimer, staleTimer]) if (timer) clearTimeout(timer);
+    settled = true;
+    for (const timer of [startupTimer, staleTimer]) if (timer) clearTimeout(timer);
     if (progressTimer) clearInterval(progressTimer);
-    try {
-      await removeRunFiles(files.dir);
-    } catch (error) {
-      cleanupError = `Failed to remove subagent run files at ${files.dir}: ${error instanceof Error ? error.message : String(error)}`;
+    if (client) await stopRpcClient(client);
+    try { await removeRunFiles(files.dir); } catch (error) {
+      state.assistantError = `Failed to remove subagent run files at ${files.dir}: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
-  const bounded = state.partialText === undefined
-    ? truncateText(state.output)
-    : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
+  const bounded = state.partialText === undefined ? truncateText(state.output) : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
   let status: ChildStatus = "done";
   let error: string | undefined;
-  if (stop === "aborted") {
-    status = "error";
-    error = "Subagent was cancelled";
-  } else if (stop === "stale") {
-    status = "stale";
-    error = "Subagent became stale after no observable activity";
-  } else if (stop === "startup") {
-    status = "bugged";
-    error = "Subagent emitted no Pi protocol event before the startup deadline";
-  } else if (stop === "protocol" || protocolError) {
-    status = "bugged";
-    error = protocolError ?? "Subagent protocol failed";
-  } else if (spawnError) {
-    status = "error";
-    error = `Failed to start subagent: ${spawnError}`;
-  } else if (exitCode !== 0) {
-    status = "error";
-    error = `Subagent exited with code ${exitCode ?? "unknown"}`;
-  } else if (state.assistantError || state.stopReason === "error" || state.stopReason === "aborted" || state.stopReason === "length") {
+  if (stop === "aborted") { status = "error"; error = "Subagent was cancelled"; }
+  else if (stop === "stale") { status = "stale"; error = "Subagent became stale after no observable activity"; }
+  else if (stop === "startup") { status = "bugged"; error = "Subagent emitted no Pi protocol event before the startup deadline"; }
+  else if (state.assistantError || state.stopReason === "error" || state.stopReason === "aborted" || state.stopReason === "length") {
     status = "error";
     error = state.assistantError ?? `Subagent stopped with reason ${state.stopReason}`;
-  } else if (!state.output.trim()) {
-    status = "bugged";
-    error = "Subagent produced no final text response";
-  }
-  if (cleanupError) {
-    status = "error";
-    error = error ? `${error}; ${cleanupError}` : cleanupError;
-  }
-
+  } else if (!state.output.trim()) { status = "bugged"; error = "Subagent produced no final text response"; }
   const endedAt = Date.now();
   progress = { ...progress, status, text: bounded.text, turns: state.turns, toolCalls: state.toolCalls, usage: reportedUsage(state) };
   emit();
   return {
-    ...progress,
-    task: options.task.task,
-    cwd: options.task.cwd,
-    output: bounded.text,
-    ...(error ? { error } : {}),
-    ...(stderr.trim() ? { stderr: stderr.trim() } : {}),
-    exitCode,
-    ...(exitSignal ? { signal: exitSignal } : {}),
-    model: state.model ?? options.model,
-    ...(state.stopReason ? { stopReason: state.stopReason } : {}),
-    endedAt,
-    durationMs: endedAt - startedAt,
-    truncated: bounded.truncated,
+    ...progress, task: options.task.task, cwd: options.task.cwd, output: bounded.text,
+    ...(error ? { error } : {}), ...(stderr.trim() ? { stderr: stderr.trim() } : {}),
+    exitCode: status === "done" ? 0 : null, model: state.model ?? options.model,
+    ...(sessionFile ? { sessionFile } : {}), ...(state.stopReason ? { stopReason: state.stopReason } : {}),
+    endedAt, durationMs: endedAt - startedAt, truncated: bounded.truncated,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   type SharedTask, type TaskAction, type TaskCaller, type TaskChange,
 } from "./task-core.ts";
 import { taskStoreForContext } from "./task-store.ts";
+import { brokerRequest } from "./subagents-supervisor.ts";
 import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
 
 const ACTIONS = ["create", "update", "list", "get", "claim", "release", "delete", "clear"] as const;
@@ -106,6 +107,9 @@ export default function taskExtension(pi: ExtensionAPI): void {
         snapshot = copyTaskSnapshot(change.snapshot);
       }
       syncPanel(ctx);
+      if (!caller.main && input.action !== "list" && input.action !== "get" && process.env.PI_CONFIG_BROKER_SOCKET) {
+        await brokerRequest({ action: "tasks_changed" }).catch(() => undefined);
+      }
       return {
         content: [{ type: "text", text: formatTaskOutput(input.action, change) }],
         details: { action: input.action, snapshot: copyTaskSnapshot(snapshot) },
