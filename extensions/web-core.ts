@@ -37,8 +37,11 @@ export interface SearchResponse {
   rawText?: string;
 }
 
+export type SearchProvider = "exa-mcp" | "duckduckgo";
+
 export interface WebSearchResponse extends SearchResponse {
-  provider: "exa-mcp" | "duckduckgo";
+  provider: SearchProvider;
+  attemptedProviders: SearchProvider[];
 }
 
 export interface FetchedPage {
@@ -326,11 +329,15 @@ function shortError(error: unknown): string {
 
 export async function searchWeb(query: string, limit = 5, signal?: AbortSignal): Promise<WebSearchResponse> {
   try {
-    return { ...(await searchExa(query, limit, signal)), provider: "exa-mcp" };
+    return { ...(await searchExa(query, limit, signal)), provider: "exa-mcp", attemptedProviders: ["exa-mcp"] };
   } catch (exaError) {
     if (signal?.aborted) throw abortError(signal);
     try {
-      return { ...(await searchDuckDuckGo(query, limit, signal)), provider: "duckduckgo" };
+      return {
+        ...(await searchDuckDuckGo(query, limit, signal)),
+        provider: "duckduckgo",
+        attemptedProviders: ["exa-mcp", "duckduckgo"],
+      };
     } catch (duckDuckGoError) {
       if (signal?.aborted) throw abortError(signal);
       throw new Error(`Keyless web search failed (Exa: ${shortError(exaError)}; DuckDuckGo: ${shortError(duckDuckGoError)})`);

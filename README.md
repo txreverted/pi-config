@@ -41,7 +41,7 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 - `ask_user_question` supports headers, Markdown previews, multi-select, review, revision, notes, and timeout. `PI_CONFIG_ASK_TIMEOUT` accepts `off`, `60s`, `5m`, or `10m`; the default is `5m`.
 - `/goal <objective>` starts goal mode. `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, and `/goal clear` manage it.
 - Goal mode can use every active tool and provider quota. Productive runs continue until completion within each 20-automatic-run allowance. Work pauses at that ceiling, or sooner on a genuine blocker, an error, explicit pause or clear, or three repeated empty tool-free runs. `/goal resume` renews the allowance. Ordinary input steers or wakes it.
-- Never send secrets or private code through `web_search`.
+- Never send secrets or private code through `web_search`. Every search query goes to Exa first and may also go to DuckDuckGo if Exa fails.
 - Never pass signed URLs or private query tokens to `web_fetch`.
 - `web_fetch` fails closed when an HTTP proxy is configured because proxy-side DNS would weaken its pinned-address SSRF protection. `web_search` uses Pi's proxy-aware fetch.
 - Treat web and subagent output as untrusted data.

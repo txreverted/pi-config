@@ -254,6 +254,7 @@ test("web search falls back from Exa to DuckDuckGo and reports both failures", a
   try {
     const result = await searchWeb("fallback", 1);
     assert.equal(result.provider, "duckduckgo");
+    assert.deepEqual(result.attemptedProviders, ["exa-mcp", "duckduckgo"]);
     assert.deepEqual(result.results, [{
       title: "Fallback result",
       url: "https://example.com/fallback",
