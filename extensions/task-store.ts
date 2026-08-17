@@ -66,8 +66,35 @@ export class TaskStore {
     }
   }
 
-  private async readLockOwner(directory = this.lock): Promise<{ host: string; pid: number; token: string }> {
-    const ownerPath = join(directory, "owner.json");
+  private async createOwnedLock(path: string): Promise<string | undefined> {
+    const token = randomUUID();
+    let handle;
+    try {
+      handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return undefined;
+      throw error;
+    }
+    let failure: unknown;
+    try {
+      await handle.writeFile(`${JSON.stringify({ host: hostname(), pid: process.pid, token })}\n`, "utf8");
+      await handle.sync();
+    } catch (error) {
+      failure = error;
+    } finally {
+      await handle.close();
+    }
+    if (failure) {
+      await rm(path, { force: true });
+      throw failure;
+    }
+    return token;
+  }
+
+  private async readLockOwner(path = this.lock): Promise<{ host: string; pid: number; token: string }> {
+    const info = await lstat(path);
+    if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory())) throw new Error("Invalid shared task lock owner");
+    const ownerPath = info.isDirectory() ? join(path, "owner.json") : path;
     let handle;
     try {
       handle = await open(ownerPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -86,23 +113,24 @@ export class TaskStore {
     }
   }
 
-  private async recoverStale(expected: { host: string; pid: number; token: string }): Promise<void> {
-    const token = randomUUID();
+  private async recoverStale(expected?: { host: string; pid: number; token: string }, expectedMtime?: number): Promise<void> {
+    const recoveryToken = await this.createOwnedLock(this.recoveryLock);
+    if (!recoveryToken) return;
     try {
-      await mkdir(this.recoveryLock, { mode: 0o700 });
-      const owner = await open(join(this.recoveryLock, "owner.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
-      try {
-        await owner.writeFile(`${JSON.stringify({ host: hostname(), pid: process.pid, token })}\n`, "utf8");
-        await owner.sync();
-      } finally {
-        await owner.close();
+      let currentInfo;
+      try { currentInfo = await lstat(this.lock); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-      await rm(this.recoveryLock, { recursive: true, force: true });
-      throw error;
-    }
-    try {
+      if (expectedMtime !== undefined && currentInfo.mtimeMs !== expectedMtime) return;
+      if (!expected) {
+        try { await this.readLockOwner(); return; } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code && code !== "ENOENT") throw error;
+        }
+        await rm(this.lock, { recursive: true, force: true });
+        return;
+      }
       let current;
       try { current = await this.readLockOwner(); } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
@@ -115,7 +143,8 @@ export class TaskStore {
       }
       if (!alive) await rm(this.lock, { recursive: true, force: true });
     } finally {
-      await rm(this.recoveryLock, { recursive: true, force: true });
+      const owner = await this.readLockOwner(this.recoveryLock).catch(() => undefined);
+      if (owner?.token === recoveryToken) await rm(this.recoveryLock, { recursive: true, force: true });
     }
   }
 
@@ -125,7 +154,7 @@ export class TaskStore {
     for (;;) {
       try {
         const recovery = await lstat(this.recoveryLock);
-        if (!recovery.isDirectory() || recovery.isSymbolicLink()) throw new Error("Shared task recovery lock is invalid");
+        if ((!recovery.isFile() && !recovery.isDirectory()) || recovery.isSymbolicLink()) throw new Error("Shared task recovery lock is invalid");
         if (Date.now() - recovery.mtimeMs > LOCK_STALE_MS) {
           let owner;
           try { owner = await this.readLockOwner(this.recoveryLock); } catch {
@@ -144,33 +173,21 @@ export class TaskStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const token = randomUUID();
-      try {
-        await mkdir(this.lock, { mode: 0o700 });
-        const owner = await open(join(this.lock, "owner.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
-        try {
-          await owner.writeFile(`${JSON.stringify({ host: hostname(), pid: process.pid, token })}\n`, "utf8");
-          await owner.sync();
-        } finally {
-          await owner.close();
-        }
-        return token;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-          await rm(this.lock, { recursive: true, force: true });
-          throw error;
-        }
-      }
+      const token = await this.createOwnedLock(this.lock);
+      if (token) return token;
       let info;
       try { info = await lstat(this.lock); } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Shared task lock is not a directory");
+      if ((!info.isFile() && !info.isDirectory()) || info.isSymbolicLink()) throw new Error("Shared task lock is invalid");
       if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
         let owner;
-        try { owner = await this.readLockOwner(); } catch {
-          throw new Error("Cannot safely recover stale shared task lock");
+        try { owner = await this.readLockOwner(); } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code && code !== "ENOENT") throw error;
+          await this.recoverStale(undefined, info.mtimeMs);
+          continue;
         }
         if (owner.host !== hostname()) throw new Error("Cannot safely recover stale shared task lock from another host");
         let alive = true;
@@ -178,7 +195,7 @@ export class TaskStore {
           if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
         }
         if (!alive) {
-          await this.recoverStale(owner);
+          await this.recoverStale(owner, info.mtimeMs);
           continue;
         }
       }
@@ -216,8 +233,12 @@ export class TaskStore {
     await handle.close();
     try {
       await rename(temporary, this.file);
-      const directory = await open(this.directory, constants.O_RDONLY);
-      try { await directory.sync(); } finally { await directory.close(); }
+      if (process.platform !== "win32") {
+        const directory = await open(this.directory, constants.O_RDONLY);
+        try { await directory.sync(); } catch (error) {
+          throw new Error(`Shared task transaction committed but directory sync failed; inspect the task list before retrying: ${error instanceof Error ? error.message : String(error)}`);
+        } finally { await directory.close(); }
+      }
     } catch (error) {
       await rm(temporary, { force: true });
       throw error;
@@ -226,13 +247,20 @@ export class TaskStore {
 
   async transact<T>(change: (snapshot: TaskSnapshot) => { snapshot: TaskSnapshot; result: T }): Promise<T> {
     const token = await this.acquire();
+    let committed = false;
     try {
       const current = await this.read();
       const next = change(current);
       await this.write(next.snapshot);
+      committed = true;
       return next.result;
     } finally {
-      await this.release(token);
+      try { await this.release(token); } catch (error) {
+        if (committed) {
+          throw new Error(`Shared task transaction committed but lock cleanup failed; inspect the task list before retrying: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        throw error;
+      }
     }
   }
 }
