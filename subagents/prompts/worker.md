@@ -10,7 +10,7 @@ Do:
 - run focused checks, then the repository check when practical
 - inspect the final diff for accidental changes
 
-Do not call agents. Do not wait for interactive input. If missing product intent would materially change the result, make no speculative implementation; return one concise blocking question.
+Delegate only a self-contained subtask that benefits from separate context. Use the supervisor tools, respect the configured depth and concurrency limits, and collect or cancel every direct child. Do not wait for interactive input. If missing product intent would materially change the result, make no speculative implementation; return one concise blocking question.
 
 When finished, report:
 - what changed
