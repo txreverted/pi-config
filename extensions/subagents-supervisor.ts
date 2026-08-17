@@ -24,6 +24,7 @@ export interface PersistentAgentRecord {
   updatedAt: number;
   result?: ChildRunResult;
   collected?: boolean;
+  background?: boolean;
   repoRoot?: string;
   worktree?: string;
   baseCommit?: string;
@@ -111,6 +112,7 @@ function validRecord(value: unknown, sessionsDirectory: string): value is Persis
       (typeof record.repoRoot === "string" && isAbsolute(record.repoRoot) && typeof record.worktree === "string" && isAbsolute(record.worktree) &&
         typeof record.baseCommit === "string" && /^[0-9a-f]{40,64}$/i.test(record.baseCommit))) &&
     (record.worktreeDiscarded === undefined || typeof record.worktreeDiscarded === "boolean") &&
+    (record.background === undefined || typeof record.background === "boolean") &&
     validResult(record.result, record.id as string, record.agent as string) &&
     (record.progress === undefined || (typeof record.progress === "object" && record.progress !== null &&
       (record.progress as ChildRunProgress).id === record.id && (record.progress as ChildRunProgress).agent === record.agent &&
@@ -252,7 +254,11 @@ export class AgentSupervisor {
           const sessions = await realpath(supervisor.sessionsDirectory);
           if (!resolved || !inside(sessions, resolved) || !(await stat(resolved)).isFile()) throw new Error("Invalid persisted agent session path");
         }
-        if (ACTIVE.has(value.status)) value.status = "interrupted";
+        if (ACTIVE.has(value.status)) {
+          value.status = "interrupted";
+          value.updatedAt = Date.now();
+          delete value.progress;
+        }
         ids.add(value.id); names.add(value.name); supervisor.records.set(value.id, value);
       }
       for (const value of (data.mail ?? []) as unknown[]) {
@@ -299,7 +305,7 @@ export class AgentSupervisor {
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   activeCount(): number { return [...this.records.values()].filter((record) => ACTIVE.has(record.status)).length; }
 
-  async reserve(task: ChildTask, parentId?: string, depth?: number, workspace?: AgentWorkspace): Promise<PersistentAgentRecord> {
+  async reserve(task: ChildTask, parentId?: string, depth?: number, workspace?: AgentWorkspace, background = false): Promise<PersistentAgentRecord> {
     if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     const id = task.id?.trim() || `${task.agent}-${randomUUID().slice(0, 12)}`;
     if (!ID.test(id)) throw new Error("Invalid agent id");
@@ -316,7 +322,7 @@ export class AgentSupervisor {
     const active = [...this.records.values()].filter((record) => ACTIVE.has(record.status));
     if (writable && !workspace && active.length > 0) throw new Error("Writable agents require exclusive execution");
     const now = Date.now();
-    const record: PersistentAgentRecord = { ...task, id, parentId, depth: actualDepth, status: "queued", createdAt: now, updatedAt: now, ...workspace };
+    const record: PersistentAgentRecord = { ...task, id, parentId, depth: actualDepth, status: "queued", createdAt: now, updatedAt: now, background, ...workspace };
     this.records.set(id, record);
     try { await this.persist(); } catch (error) { this.records.delete(id); throw error; }
     return structuredClone(record);
@@ -335,7 +341,13 @@ export class AgentSupervisor {
     const active = [...this.records.values()].filter((item) => ACTIVE.has(item.status));
     const writable = record.agent === "worker" || record.agent === "general-purpose";
     if (writable && !record.worktree && active.length > 0) throw new Error("Writable agents require exclusive execution");
-    record.status = "queued"; record.updatedAt = Date.now(); await this.persist();
+    record.status = "queued";
+    record.background = false;
+    delete record.result;
+    delete record.collected;
+    delete record.progress;
+    record.updatedAt = Date.now();
+    await this.persist();
     return structuredClone(record);
   }
 
@@ -399,7 +411,7 @@ export class AgentSupervisor {
   async send(from: string, to: string, body: string, id: string = randomUUID(), hops = 0): Promise<AgentMail> {
     if (from !== "main" && !this.records.has(from)) throw new Error("Unknown sender identity");
     if (to !== "main" && !this.records.has(to)) throw new Error("Unknown target identity");
-    if (!ID.test(id) || hops < 0 || hops > MAX_HOPS) throw new Error("Invalid message id or hop count");
+    if (!ID.test(id) || !Number.isSafeInteger(hops) || hops < 0 || hops > MAX_HOPS) throw new Error("Invalid message id or hop count");
     if (!body.trim() || Buffer.byteLength(body) > MAX_MAIL_BYTES) throw new Error(`Agent messages are limited to ${MAX_MAIL_BYTES} bytes`);
     const duplicate = this.mail.find((item) => item.id === id);
     if (duplicate) {

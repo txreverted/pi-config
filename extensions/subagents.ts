@@ -169,7 +169,7 @@ async function prepareAgentBatch(
   definitions: readonly { mutatesWorkspace: boolean }[],
   parentId: string | undefined,
   depth: number,
-  isolateWriters: boolean,
+  background: boolean,
 ): Promise<Array<Awaited<ReturnType<typeof createAgentWorktree>> | undefined>> {
   const existing = supervisor.list();
   const ids = new Set<string>();
@@ -188,14 +188,14 @@ async function prepareAgentBatch(
   const reserved: string[] = [];
   try {
     for (let index = 0; index < tasks.length; index++) {
-      const workspace = isolateWriters && definitions[index].mutatesWorkspace
+      const workspace = background && definitions[index].mutatesWorkspace
         ? await createAgentWorktree(tasks[index].cwd, tasks[index].id)
         : undefined;
       workspaces.push(workspace);
       if (workspace) tasks[index] = { ...tasks[index], cwd: workspace.cwd };
     }
     for (let index = 0; index < tasks.length; index++) {
-      await supervisor.reserve(tasks[index], parentId, depth, workspaces[index]);
+      await supervisor.reserve(tasks[index], parentId, depth, workspaces[index], background);
       reserved.push(tasks[index].id);
     }
     return workspaces;
@@ -567,6 +567,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           },
         });
         await supervisor.finish(task.id, result);
+        await supervisor.collect(task.id);
         progress[index] = result;
         results[index] = result;
         publish();
@@ -611,8 +612,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal) {
       const supervisor = await supervisorPromise;
       const persisted = supervisor?.get(params.id);
-      const current = background.progress(params.id) ?? persisted?.progress ?? persisted?.result;
-      if (!current || persisted?.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
+      if (!persisted?.background) throw new Error(`Unknown background subagent id '${params.id}'`);
+      const current = background.progress(params.id) ?? persisted.progress ?? persisted.result;
+      if (!current || persisted.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
       let result = background.result(params.id) ?? persisted?.result;
       if (!result && params.wait) result = await background.wait(params.id, signal);
       if (!result) {
@@ -697,7 +699,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
               sessionDir: supervisor.sessionsDirectory, sessionPath: record.sessionFile,
               env: { PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0", PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? ctx.sessionManager.getSessionId(), PI_CONFIG_TASK_OWNER: record.id, ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree, PI_CONFIG_AGENT_CWD: record.cwd } : {}), ...supervisor.childEnvironment(record.id) },
               onSession: (sessionFile, client) => supervisor.attach(record.id, sessionFile, client, controller), onUpdate: (progress) => { void supervisor.update(record.id, progress).catch(() => {}); },
-            }).then((result) => supervisor.finish(record.id, result)).catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
+            }).then(async (result) => { await supervisor.finish(record.id, result); await supervisor.collect(record.id); })
+              .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
           }
           if (action.type !== "diff") state.transcript = undefined;
         } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
@@ -759,6 +762,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         },
       });
       await supervisor.finish(record.id, result);
+      await supervisor.collect(record.id);
       return { content: [{ type: "text", text: untrustedOutput([result]) }], details: { progress: [result], results: [result], usage: result.usage }, usage: result.usage as Usage };
     },
   });
