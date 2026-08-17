@@ -12,7 +12,6 @@ const goal = (overrides = {}) => ({
   id: "goal-1",
   objective: "Ship the fix",
   status: "active",
-  automaticResponses: 0,
   automaticRuns: 0,
   repeatedToolFreeRuns: 0,
   ...overrides,
@@ -32,31 +31,34 @@ test("goal parser accepts bounded objectives, rejects legacy token caps, and san
 });
 
 test("automatic safety counts only identical or empty tool-free runs", () => {
-  let state = recordAutomaticRun(goal(), "same output", false, 1, 10);
+  let state = recordAutomaticRun(goal(), "same output", false);
   assert.equal(state.repeatedToolFreeRuns, 1);
-  state = recordAutomaticRun(state, " same   output ", false, 1, 10);
-  state = recordAutomaticRun(state, "same output", false, 1, 10);
+  state = recordAutomaticRun(state, " same   output ", false);
+  state = recordAutomaticRun(state, "same output", false);
   assert.match(automaticStopReason(state), /repeated or empty/);
 
-  state = recordAutomaticRun(state, "same output", true, 1, 10);
+  state = recordAutomaticRun(state, "same output", true);
   assert.equal(state.repeatedToolFreeRuns, 0);
   assert.equal(automaticStopReason(state), undefined);
 });
 
-test("productive runs have no response ceiling", () => {
-  assert.equal(automaticStopReason(goal({ automaticResponses: 1_000_000 })), undefined);
+test("automatic safety stops at the fixed run ceiling", () => {
+  assert.equal(automaticStopReason(goal({ automaticRuns: GOAL_LIMITS.automaticRuns - 1 })), undefined);
+  assert.match(automaticStopReason(goal({ automaticRuns: GOAL_LIMITS.automaticRuns })), /20 automatic runs/);
 });
 
 test("snapshot validation rejects malformed persisted state", () => {
   assert.deepEqual(validateGoalSnapshot(goal()), goal());
   assert.equal(validateGoalSnapshot(goal({ objective: "" })), undefined);
+  assert.equal(validateGoalSnapshot(goal({ automaticRuns: -1 })), undefined);
   assert.equal(validateGoalSnapshot(goal({ automaticResponses: -1 })), undefined);
   assert.equal(validateGoalSnapshot(goal({ status: "invented" })), undefined);
 });
 
-test("legacy quota fields are accepted and discarded", () => {
-  const restored = validateGoalSnapshot(goal({ tokenBudget: 100, tokensUsed: 120 }));
+test("legacy quota and response fields are accepted and discarded", () => {
+  const restored = validateGoalSnapshot(goal({ tokenBudget: 100, tokensUsed: 120, automaticResponses: 4 }));
   assert.deepEqual(restored, goal());
   assert.equal("tokenBudget" in restored, false);
   assert.equal("tokensUsed" in restored, false);
+  assert.equal("automaticResponses" in restored, false);
 });

@@ -39,7 +39,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   let quietStartup = false;
   let hideStatus = true;
 
-  const syncStatus = (_context?: ExtensionContext) => {
+  const syncStatus = () => {
     if (hideStatus || currentMode === "off") {
       pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
       return;
@@ -63,18 +63,19 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   const restoreMode = (ctx: ExtensionContext) => {
     currentMode = resolvePonytailSessionMode(ctx.sessionManager.getBranch(), configuredDefault);
     active = false;
-    syncStatus(ctx);
+    syncStatus();
   };
 
   const setMode = (mode: PonytailSessionMode, ctx?: ExtensionContext) => {
     currentMode = mode;
     pi.appendEntry("ponytail-mode", { mode });
-    syncStatus(ctx);
+    syncStatus();
     ctx?.ui.notify(normalizeDisplayText(`Ponytail mode set to ${mode}.`), "info");
   };
 
-  const runSkill = (name: string, ctx: ExtensionContext) => {
-    const message = `/skill:${name}`;
+  const runSkill = (name: string, args: string, ctx: ExtensionContext) => {
+    const argument = args.trim();
+    const message = `/skill:${name}${argument ? ` ${argument}` : ""}`;
     if (!ctx.isIdle()) {
       pi.sendUserMessage(message, { deliverAs: "followUp", expandPromptTemplates: true });
       ctx.ui.notify(normalizeDisplayText(`${name} queued as a follow-up.`), "info");
@@ -96,15 +97,21 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
         return;
       }
       if (command.type === "set-default") {
+        let saved: PonytailMode | undefined;
         try {
-          const saved = writePonytailDefaultMode(command.mode);
+          saved = writePonytailDefaultMode(command.mode);
+        } catch (error) {
+          ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Could not save Ponytail default: ${error instanceof Error ? error.message : String(error)}`, 500)), "error");
+          return;
+        }
+        try {
           configuredDefault = readPonytailDefaultMode();
           const message = configuredDefault === saved
             ? `Default Ponytail mode set to ${saved}.`
             : `Saved ${saved}; PONYTAIL_DEFAULT_MODE keeps the effective default at ${configuredDefault}.`;
           ctx.ui.notify(normalizeDisplayText(message), "info");
         } catch (error) {
-          ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Could not save Ponytail default: ${error instanceof Error ? error.message : String(error)}`, 500)), "error");
+          ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Default Ponytail mode saved as ${saved}, but the effective default is invalid: ${error instanceof Error ? error.message : String(error)}`, 500)), "warning");
         }
         return;
       }
@@ -115,7 +122,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   for (const name of ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"] as const) {
     pi.registerCommand(name, {
       description: `Run /skill:${name}`,
-      handler: async (_args, ctx) => runSkill(name, ctx),
+      handler: async (args, ctx) => runSkill(name, args, ctx),
     });
   }
 
@@ -134,14 +141,14 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("agent_start", (_event, ctx) => {
+  pi.on("agent_start", () => {
     active = true;
-    syncStatus(ctx);
+    syncStatus();
   });
 
-  pi.on("agent_settled", (_event, ctx) => {
+  pi.on("agent_settled", () => {
     active = false;
-    syncStatus(ctx);
+    syncStatus();
   });
 
   pi.on("tool_call", (event) => {

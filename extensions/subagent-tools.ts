@@ -22,7 +22,8 @@ function resultText(result: BoundedProcessResult): string {
   return text;
 }
 
-async function runGit(args: string[], cwd: string, signal?: AbortSignal): Promise<BoundedProcessResult> {
+async function runGit(args: string[], cwd: string, trusted: boolean, signal?: AbortSignal): Promise<BoundedProcessResult> {
+  if (!trusted) throw new Error("Git inspection requires a trusted project because repository Git configuration can execute commands");
   const result = await runBoundedProcess("git", ["--no-optional-locks", ...args], {
     cwd,
     signal,
@@ -53,7 +54,8 @@ export default function subagentToolsExtension(pi: ExtensionAPI) {
     description: `Show the current repository branch and concise working-tree status without modifying the repository. Output is capped at ${formatSize(DEFAULT_PROCESS_MAX_OUTPUT_BYTES)}.`,
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
-      const result = retain(await runGit(["status", "--short", "--branch"], ctx.cwd, signal));
+      const trusted = ctx.isProjectTrusted() || process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED === "1";
+      const result = retain(await runGit(["status", "--short", "--branch"], ctx.cwd, trusted, signal));
       return {
         content: [{ type: "text", text: resultText(result) }],
         details: { exitCode: result.code, truncation: result.truncation, fullOutputPath: result.fullOutputPath },
@@ -76,7 +78,8 @@ export default function subagentToolsExtension(pi: ExtensionAPI) {
       const args = ["diff", "--no-ext-diff", "--no-textconv"];
       if (params.staged) args.push("--cached");
       if (params.paths?.length) args.push("--", ...params.paths);
-      const result = retain(await runGit(args, ctx.cwd, signal));
+      const trusted = ctx.isProjectTrusted() || process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED === "1";
+      const result = retain(await runGit(args, ctx.cwd, trusted, signal));
       return {
         content: [{ type: "text", text: resultText(result) }],
         details: { exitCode: result.code, truncation: result.truncation, fullOutputPath: result.fullOutputPath },

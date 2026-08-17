@@ -5,14 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import {
   buildPonytailInstructions,
-  filterPonytailSkillForMode,
+  ponytailSkillCommonBody,
   isPonytailDeactivationCommand,
   loadPonytailSettings,
   parsePonytailCommand,
   ponytailConfigPath,
   readPonytailDefaultMode,
-  readPonytailHideStatus,
-  readPonytailQuietStartup,
   resolvePonytailSessionMode,
   writePonytailDefaultMode,
 } from "../extensions/ponytail-core.ts";
@@ -68,8 +66,6 @@ test("default and booleans resolve from environment before the preserved config"
   writeFileSync(path, JSON.stringify({ defaultMode: "lite", quietStartup: true, hideStatus: true, other: 7 }));
 
   assert.equal(readPonytailDefaultMode(), "lite");
-  assert.equal(readPonytailQuietStartup(), true);
-  assert.equal(readPonytailHideStatus(), true);
   assert.deepEqual(loadPonytailSettings(), {
     defaultMode: "lite",
     quietStartup: true,
@@ -81,8 +77,6 @@ test("default and booleans resolve from environment before the preserved config"
   process.env.PONYTAIL_QUIET_STARTUP = "false";
   process.env.PONYTAIL_HIDE_STATUS = "0";
   assert.equal(readPonytailDefaultMode(), "ultra");
-  assert.equal(readPonytailQuietStartup(), false);
-  assert.equal(readPonytailHideStatus(), false);
   assert.deepEqual(loadPonytailSettings(), {
     defaultMode: "ultra",
     quietStartup: false,
@@ -91,7 +85,7 @@ test("default and booleans resolve from environment before the preserved config"
   });
 
   process.env.PONYTAIL_HIDE_STATUS = "flase";
-  assert.throws(() => readPonytailHideStatus(), /must be one of/);
+  assert.match(loadPonytailSettings().errors.join("; "), /must be one of/);
   process.env.PONYTAIL_HIDE_STATUS = "0";
 
   assert.equal(writePonytailDefaultMode("full"), "full");
@@ -104,7 +98,6 @@ test("default and booleans resolve from environment before the preserved config"
 }));
 
 test("Ponytail hides its persistent status unless explicitly enabled", () => withConfigEnvironment(() => {
-  assert.equal(readPonytailHideStatus(), true);
   assert.deepEqual(loadPonytailSettings(), {
     defaultMode: "full",
     quietStartup: false,
@@ -113,7 +106,7 @@ test("Ponytail hides its persistent status unless explicitly enabled", () => wit
   });
 
   process.env.PONYTAIL_HIDE_STATUS = "0";
-  assert.equal(readPonytailHideStatus(), false);
+  assert.equal(loadPonytailSettings().hideStatus, false);
 }));
 
 test("saving a default refuses to destroy malformed configuration", () => withConfigEnvironment(() => {
@@ -130,23 +123,31 @@ test("saving a default refuses to destroy malformed configuration", () => withCo
   assert.throws(() => readPonytailDefaultMode(), /defaultMode must be one of/);
 }));
 
-test("mode filtering keeps shared rules and only the selected intensity example", () => {
-  const body = `---\nname: ponytail\n---\n| **lite** | lite row |\n| **full** | full row |\n| **ultra** | ultra row |\n- lite: "lite example"\n- full: "full example"\n- ultra: "ultra example"\n- Full: ordinary unquoted rule\nShared`;
-  const filtered = filterPonytailSkillForMode(body, "full");
-  assert.doesNotMatch(filtered, /lite row|ultra row|lite example|ultra example/);
-  assert.match(filtered, /full row/);
-  assert.match(filtered, /full example/);
-  assert.match(filtered, /Full: ordinary unquoted rule/);
+test("common skill extraction removes the complete intensity section without parsing its formatting", () => {
+  const body = `---\nname: ponytail\n---\n# Ponytail\nShared\n## Intensity\nformat this section however needed\n| **full** | row |\n   ## Safety floor\nKeep safety`;
+  const common = ponytailSkillCommonBody(body);
+  assert.match(common, /# Ponytail\nShared/);
+  assert.doesNotMatch(common, /Intensity|format this section|full.*row/i);
+  assert.match(common, /   ## Safety floor\nKeep safety/);
   assert.match(buildPonytailInstructions(body, "full"), /^PONYTAIL MODE ACTIVE — level: full/);
   assert.equal(buildPonytailInstructions(body, "off"), "");
 });
 
-test("real instructions preserve coding scope and distinct intensity semantics", () => {
+test("real instructions keep common safety rules and isolate every mode scope", () => {
   const body = readFileSync(new URL("../skills/ponytail/SKILL.md", import.meta.url), "utf8");
-  const lite = buildPonytailInstructions(body, "lite");
-  const full = buildPonytailInstructions(body, "full");
-  assert.match(lite, /LITE SCOPE: Build all explicitly requested behavior/);
-  assert.doesNotMatch(lite, /Skip speculative behavior/);
-  assert.match(full, /FULL SCOPE: Skip speculative behavior/);
-  assert.match(lite, /Do not apply Ponytail's implementation or output restrictions to non-coding requests/);
+  const scopes = {
+    lite: "LITE SCOPE: Build all explicitly requested behavior",
+    full: "FULL SCOPE: Skip speculative behavior",
+    ultra: "ULTRA SCOPE: Challenge speculative requirements",
+  };
+  for (const [mode, selected] of Object.entries(scopes)) {
+    const instructions = buildPonytailInstructions(body, mode);
+    assert.match(instructions, new RegExp(selected));
+    for (const other of Object.values(scopes).filter((scope) => scope !== selected)) {
+      assert.doesNotMatch(instructions, new RegExp(other));
+    }
+    assert.doesNotMatch(instructions, /## Intensity|add a response cache/i);
+    assert.match(instructions, /## Safety floor/);
+    assert.match(instructions, /Do not apply Ponytail's implementation or output restrictions to non-coding requests/);
+  }
 });

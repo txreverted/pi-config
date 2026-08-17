@@ -67,6 +67,7 @@ test("background manager bounds concurrency and drains FIFO", async () => {
   await Promise.all([manager.wait("job-2"), manager.wait("job-3")]);
   assert.deepEqual(completed, ["job-1", "job-2", "job-3"]);
   assert.deepEqual(manager.active(), []);
+  assert.equal(manager.hasOutstanding(), true);
   assert.equal(manager.availableSlots(), 0);
   assert.throws(
     () => manager.enqueue(task("job-4"), "medium", async () => resultFor(task("job-4"))),
@@ -77,6 +78,7 @@ test("background manager bounds concurrency and drains FIFO", async () => {
   assert.equal(collected.usage.totalTokens, 1);
   assert.equal(manager.progress("job-1"), undefined);
   assert.equal(manager.collect("job-1"), undefined);
+  assert.equal(manager.hasOutstanding(), true);
   assert.equal(manager.availableSlots(), 1);
 });
 
