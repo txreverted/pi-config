@@ -48,6 +48,9 @@ test("agents view selection, active message editor, IME focus, and actions are d
 
   const done = { ...record("done"), status: "done", result: { ...record("done").progress, status: "done", task: "test", cwd: process.cwd(), output: "", exitCode: 0, endedAt: 3_000, durationMs: 2_000, truncated: false } };
   const idle = fixture([done]);
+  idle.view.handleInput("m");
+  assert.equal(idle.action(), undefined);
+  assert.doesNotMatch(idle.view.render(80).join("\n"), new RegExp(CURSOR_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   idle.view.handleInput("r"); idle.view.handleInput("continue"); idle.view.handleInput("\r");
   assert.deepEqual(idle.action(), { type: "resume", id: "done", message: "continue" });
 
