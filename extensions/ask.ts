@@ -2,22 +2,24 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+  ASK_LIMITS,
   CUSTOM_CHOICE,
+  boundCustomAnswer,
   formatAnswers,
+  normalizeContext,
   normalizeQuestions,
   optionDisplay,
   type AskAnswer,
   type AskQuestion,
 } from "./ask-core.ts";
-import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import { normalizeDisplayText } from "./ui-core.ts";
 
 const TOOL_NAME = "ask_user_question";
 
 const OptionSchema = Type.Object({
-  label: Type.String({ minLength: 1, maxLength: 80, description: "Concise option label" }),
+  label: Type.String({ minLength: 1, maxLength: ASK_LIMITS.label, description: "Concise option label" }),
   description: Type.Optional(
-    Type.String({ minLength: 1, maxLength: 240, description: "What this choice means or its main trade-off" }),
+    Type.String({ minLength: 1, maxLength: ASK_LIMITS.description, description: "What this choice means or its main trade-off" }),
   ),
   recommended: Type.Optional(Type.Boolean({ description: "Mark this as the recommended choice; at most one per question" })),
 });
@@ -25,15 +27,15 @@ const OptionSchema = Type.Object({
 const QuestionSchema = Type.Object({
   id: Type.String({
     minLength: 1,
-    maxLength: 50,
+    maxLength: ASK_LIMITS.id,
     pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
     description: "Short unique identifier, such as scope or storage",
   }),
-  question: Type.String({ minLength: 1, maxLength: 500, description: "Clear question for the user" }),
+  question: Type.String({ minLength: 1, maxLength: ASK_LIMITS.question, description: "Clear question for the user" }),
   options: Type.Optional(
     Type.Array(OptionSchema, {
-      minItems: 2,
-      maxItems: 5,
+      minItems: ASK_LIMITS.options.min,
+      maxItems: ASK_LIMITS.options.max,
       description: "Choices to present. Omit for a free-form question; a custom-answer choice is always added.",
     }),
   ),
@@ -51,12 +53,6 @@ function questionTitle(context: string | undefined, question: AskQuestion, index
   return `${prefix}${index + 1}/${total} · ${question.question}`;
 }
 
-function customAnswer(value: string): string {
-  const sanitized = safeDisplayText(value).trim();
-  if (!sanitized) throw new Error("Custom answer cannot be empty after sanitation");
-  return Array.from(sanitized).slice(0, 10_000).join("");
-}
-
 export default function askExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_NAME,
@@ -72,11 +68,11 @@ export default function askExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       context: Type.Optional(
-        Type.String({ minLength: 1, maxLength: 500, description: "Brief explanation of why these decisions are needed" }),
+        Type.String({ minLength: 1, maxLength: ASK_LIMITS.context, description: "Brief explanation of why these decisions are needed" }),
       ),
       questions: Type.Array(QuestionSchema, {
-        minItems: 1,
-        maxItems: 4,
+        minItems: ASK_LIMITS.questions.min,
+        maxItems: ASK_LIMITS.questions.max,
         description: "Related questions to ask in one interaction",
       }),
     }),
@@ -85,18 +81,24 @@ export default function askExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (!ctx.hasUI) throw new Error("ask_user_question requires an interactive TUI or RPC client");
 
-      const context = params.context === undefined ? undefined : safeDisplayLine(params.context);
-      if (params.context !== undefined && !context) throw new Error("Question context cannot be empty after sanitation");
+      const context = params.context === undefined ? undefined : normalizeContext(params.context);
       const questions = normalizeQuestions(params.questions as AskQuestion[]);
       const answers: AskAnswer[] = [];
+      const askCustomAnswer = async (title: string): Promise<string | undefined> => {
+        if (signal?.aborted) return undefined;
+        const written = ctx.mode === "rpc"
+          ? await ctx.ui.input(title, "", { signal })
+          : await ctx.ui.editor(title, "");
+        return written === undefined || signal?.aborted ? undefined : boundCustomAnswer(written);
+      };
 
       for (let index = 0; index < questions.length; index++) {
         const question = questions[index];
         const title = questionTitle(context, question, index, questions.length);
 
         if (!question.options) {
-          const written = await ctx.ui.editor(title, "");
-          if (written === undefined) {
+          const answer = await askCustomAnswer(title);
+          if (answer === undefined) {
             return {
               content: [{ type: "text", text: "User cancelled the clarification questionnaire. Do not infer answers from the cancellation." }],
               details: { context, questions, answers: [], cancelled: true } satisfies AskDetails,
@@ -105,7 +107,7 @@ export default function askExtension(pi: ExtensionAPI) {
           answers.push({
             id: question.id,
             question: question.question,
-            answer: customAnswer(written),
+            answer,
             kind: "custom",
           });
           continue;
@@ -123,8 +125,8 @@ export default function askExtension(pi: ExtensionAPI) {
         }
 
         if (selected === customChoice) {
-          const written = await ctx.ui.editor(`${index + 1}/${questions.length} · Write your answer`, "");
-          if (written === undefined) {
+          const answer = await askCustomAnswer(`${index + 1}/${questions.length} · Write your answer`);
+          if (answer === undefined) {
             return {
               content: [{ type: "text", text: "User cancelled the clarification questionnaire. Do not infer answers from the cancellation." }],
               details: { context, questions, answers: [], cancelled: true } satisfies AskDetails,
@@ -133,7 +135,7 @@ export default function askExtension(pi: ExtensionAPI) {
           answers.push({
             id: question.id,
             question: question.question,
-            answer: customAnswer(written),
+            answer,
             kind: "custom",
           });
           continue;

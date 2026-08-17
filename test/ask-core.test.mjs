@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ASK_LIMITS,
   CUSTOM_CHOICE,
+  boundCustomAnswer,
   formatAnswers,
+  normalizeContext,
   normalizeQuestions,
   optionDisplay,
 } from "../extensions/ask-core.ts";
@@ -91,6 +94,47 @@ test("invalid questionnaires are rejected", () => {
   );
 });
 
+test("shared questionnaire limits are enforced after sanitation", () => {
+  assert.equal(normalizeContext("x".repeat(ASK_LIMITS.context)), "x".repeat(ASK_LIMITS.context));
+  assert.throws(() => normalizeContext("x".repeat(ASK_LIMITS.context + 1)), /at most 500/);
+
+  assert.doesNotThrow(() => normalizeQuestions([{
+    id: "i".repeat(ASK_LIMITS.id),
+    question: "q".repeat(ASK_LIMITS.question),
+    options: Array.from({ length: ASK_LIMITS.options.max }, (_, index) => ({
+      label: `${index}${"l".repeat(ASK_LIMITS.label - 1)}`,
+      description: "d".repeat(ASK_LIMITS.description),
+    })),
+  }]));
+  assert.throws(
+    () => normalizeQuestions([{ id: "id", question: "q".repeat(ASK_LIMITS.question + 1) }]),
+    /at most 500/,
+  );
+  assert.doesNotThrow(() => normalizeQuestions([{
+    id: "graphemes",
+    question: "e\u0301".repeat(ASK_LIMITS.question),
+  }]));
+  assert.throws(() => normalizeQuestions([{
+    id: "graphemes",
+    question: "e\u0301".repeat(ASK_LIMITS.question + 1),
+  }]), /at most 500/);
+  assert.throws(
+    () => normalizeQuestions([{
+      id: "id",
+      question: "Question?",
+      options: [{ label: "l".repeat(ASK_LIMITS.label + 1) }, { label: "Two" }],
+    }]),
+    /at most 80/,
+  );
+  assert.throws(
+    () => normalizeQuestions(Array.from({ length: ASK_LIMITS.questions.max + 1 }, (_, index) => ({
+      id: `q${index}`,
+      question: "Question?",
+    }))),
+    /between 1 and 4/,
+  );
+});
+
 test("question text is safe before it reaches the terminal", () => {
   const [question] = normalizeQuestions([{
     id: "safe",
@@ -103,6 +147,27 @@ test("question text is safe before it reaches the terminal", () => {
   assert.equal(question.question, "Choose now?");
   assert.equal(question.options[0].label, "One");
   assert.equal(question.options[1].description, "line wrapped");
+});
+
+test("emoji-heavy custom answers are byte bounded with visible truncation", () => {
+  const answers = Array.from({ length: ASK_LIMITS.questions.max }, (_, index) => ({
+    id: `q${index}`,
+    question: "😀".repeat(ASK_LIMITS.question),
+    answer: boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes)),
+    kind: "custom",
+  }));
+
+  assert.ok(answers.every((answer) => Buffer.byteLength(answer.answer, "utf8") <= ASK_LIMITS.customAnswerBytes));
+  assert.ok(answers.every((answer) => answer.answer.includes("[Custom answer truncated")));
+  assert.ok(Buffer.byteLength(formatAnswers(answers), "utf8") <= ASK_LIMITS.outputBytes);
+
+  const forced = formatAnswers([{ id: "large", question: "Large?", answer: "😀".repeat(20_000), kind: "custom" }]);
+  assert.ok(Buffer.byteLength(forced, "utf8") <= ASK_LIMITS.outputBytes);
+  assert.match(forced, /Clarification answers truncated/);
+
+  const manyLines = formatAnswers([{ id: "lines", question: "Lines?", answer: "x\n".repeat(10_000), kind: "custom" }]);
+  assert.ok(manyLines.split("\n").length <= 2_000);
+  assert.match(manyLines, /Clarification answers truncated/);
 });
 
 test("answers are formatted clearly, including multiline custom text", () => {

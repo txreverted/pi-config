@@ -40,6 +40,7 @@ test("dependencies must exist, differ from the task, and remain acyclic", () => 
   snapshot = apply(snapshot, { action: "create", subject: "B", blockedBy: [1] });
 
   assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [99] }), /dangling blocker/);
+  assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [1, 1] }), /must be unique/);
   assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [1] }), /block itself/);
   assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [2] }), /cycle/);
   assert.throws(() => apply(snapshot, { action: "delete", id: 1 }), /dangling blocker/);
@@ -56,6 +57,7 @@ test("only one task may be active and work waits for blockers", () => {
   snapshot = apply(snapshot, { action: "update", id: 1, status: "completed" });
   snapshot = apply(snapshot, { action: "update", id: 2, status: "completed" });
   assert.equal(snapshot.tasks.every((task) => task.status === "completed"), true);
+  assert.throws(() => apply(snapshot, { action: "update", id: 1, status: "pending" }), /until blocker/);
 });
 
 test("all declared bounds are enforced at the core boundary", () => {
@@ -72,4 +74,11 @@ test("all declared bounds are enforced at the core boundary", () => {
 test("snapshot validation rejects malformed persisted state", () => {
   assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "unknown", blockedBy: [] }], nextId: 2 }), /status/);
   assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "pending", blockedBy: [] }], nextId: 1 }), /nextId/);
+});
+
+test("creation fails without mutation when the id space is exhausted", () => {
+  const exhausted = { tasks: [], nextId: Number.MAX_SAFE_INTEGER };
+  assert.throws(() => applyTodoAction(exhausted, { action: "create", subject: "Overflow" }), /id space is exhausted/);
+  assert.deepEqual(exhausted, { tasks: [], nextId: Number.MAX_SAFE_INTEGER });
+  assert.deepEqual(applyTodoAction(exhausted, { action: "list" }).snapshot, exhausted);
 });
