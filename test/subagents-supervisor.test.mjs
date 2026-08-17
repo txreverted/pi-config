@@ -66,10 +66,24 @@ test("supervisor change subscriptions persist bounded interrupted progress", asy
     const restored = await AgentSupervisor.create(rootId);
     try {
       assert.equal(restored.get("watch").status, "interrupted");
-      assert.equal(restored.get("watch").progress.activity, "Reading");
-      assert.equal(restored.get("watch").progress.toolCalls, 2);
+      assert.equal(restored.get("watch").progress, undefined);
     } finally { await restored.shutdown(); }
     unsubscribe();
+  } finally { await clean(root, supervisor); }
+});
+
+test("resume clears the previous terminal result before exposing the new run", async () => {
+  const { root, supervisor } = await isolatedSupervisor("pi-resume-state");
+  try {
+    await supervisor.reserve(task("resume", "Resume state"), undefined, undefined, undefined, true);
+    await supervisor.finish("resume", result("resume"));
+    await supervisor.collect("resume");
+    const resumed = await supervisor.beginResume("resume");
+    assert.equal(resumed.status, "queued");
+    assert.equal(resumed.result, undefined);
+    assert.equal(resumed.collected, undefined);
+    assert.equal(resumed.progress, undefined);
+    assert.equal(resumed.background, false);
   } finally { await clean(root, supervisor); }
 });
 
@@ -164,6 +178,7 @@ test("permission broker preserves exact args and denies, times out, and disconne
 });
 
 
+
 test("broker bounds aggregate requests, result DTOs, and descendant visibility", async () => {
   const { root, supervisor } = await isolatedSupervisor("pi-broker-bounds");
   const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };
@@ -243,6 +258,22 @@ test("mail is bounded, deduplicated, and delivered when an idle agent resumes", 
     assert.match(delivered[0], /BEGIN UNTRUSTED AGENT MESSAGE/);
     assert.match(delivered[0], /From: alice/);
     assert.equal(supervisor.pendingMail("bob").length, 0);
+  } finally { await clean(root, supervisor); }
+});
+
+test("malformed hop counts cannot mutate storage or break reload", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-hop-validation");
+  try {
+    await supervisor.reserve(task("alice", "Hop Alice"));
+    await supervisor.reserve(task("bob", "Hop Bob"));
+    for (const hops of [Number.NaN, 1.5, -1, 9]) {
+      await assert.rejects(() => supervisor.send("alice", "bob", "invalid", `hop-${String(hops)}`, hops), /hop count/);
+    }
+    assert.deepEqual(supervisor.pendingMail("bob"), []);
+    await supervisor.shutdown();
+    const restored = await AgentSupervisor.create(rootId);
+    try { assert.deepEqual(restored.pendingMail("bob"), []); }
+    finally { await restored.shutdown(); }
   } finally { await clean(root, supervisor); }
 });
 

@@ -403,9 +403,19 @@ test("background extension launches, renders, notifies, collects, and evicts", {
         /Unknown background subagent id/,
       );
     }
+    const foreground = await tools.get("subagent").execute("foreground", {
+      tasks: [{ name: "Review foreground", agent: "reviewer", task: "Review foreground lifecycle integration now" }],
+    }, undefined, undefined, context);
+    const foregroundId = foreground.details.results[0].id;
+    await assert.rejects(
+      () => tools.get("get_subagent_result").execute("foreground-collect", { id: foregroundId }, undefined),
+      /Unknown background subagent id/,
+    );
+
     const persistent = await tools.get("list_agents").execute("list", {});
-    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
+    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids, foregroundId].sort());
     assert.ok(persistent.details.records.every((record) => record.collected && record.sessionFile));
+    assert.equal(persistent.details.records.find((record) => record.id === foregroundId).background, false);
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;
