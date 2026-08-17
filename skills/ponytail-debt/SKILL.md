@@ -1,6 +1,6 @@
 ---
 name: ponytail-debt
-description: Find deliberate `ponytail:` shortcut comments and turn them into a read-only debt ledger with ceilings, revisit triggers, and missing-trigger warnings. Use for deferred Ponytail work, shortcut inventories, debt ledgers, or /ponytail-debt.
+description: Find deliberate `ponytail:` shortcut comments and turn them into a read-only debt ledger with ceilings, revisit triggers, and missing-trigger warnings. Use for deferred Ponytail work, shortcut inventories, debt ledgers, or /skill:ponytail-debt.
 ---
 
 # Ponytail Debt

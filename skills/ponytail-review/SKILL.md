@@ -1,6 +1,6 @@
 ---
 name: ponytail-review
-description: Review a diff only for unnecessary complexity and identify code, dependencies, abstractions, or flexibility that can be deleted or replaced by existing, standard-library, or native features. Use for over-engineering reviews, simplification reviews, or /ponytail-review. Read-only.
+description: Review a diff only for unnecessary complexity and identify code, dependencies, abstractions, or flexibility that can be deleted or replaced by existing, standard-library, or native features. Use for over-engineering reviews, simplification reviews, or /skill:ponytail-review. Read-only.
 ---
 
 # Ponytail Review
