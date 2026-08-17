@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import askExtension from "../extensions/ask.ts";
 import goalExtension from "../extensions/goal.ts";
 import subagentsExtension from "../extensions/subagents.ts";
 import todoExtension from "../extensions/todo.ts";
@@ -31,6 +32,7 @@ function rendererHarness(load) {
 
 test("config tool renderers collapse repeated display-only blank rows without adding a gutter", () => {
   const cases = [
+    [askExtension, ["ask_user_question"]],
     [toolsExtension, ["jq"]],
     [webExtension, ["web_search", "web_fetch"]],
     [subagentsExtension, ["subagent"]],
