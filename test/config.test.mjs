@@ -28,6 +28,12 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
     "./extensions/concise.ts",
     "./extensions/ponytail.ts",
   ]);
+  assert.deepEqual(packageJson.peerDependencies, {
+    "@earendil-works/pi-ai": ">=0.84.2",
+    "@earendil-works/pi-coding-agent": ">=0.84.2",
+    "@earendil-works/pi-tui": ">=0.84.2",
+    typebox: ">=1.3.14",
+  });
   assert.deepEqual(packageJson.pi.skills, ["./skills"]);
   assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
   assert.deepEqual(packageJson.pi.themes, themeNames.map((name) => `./themes/${name}.json`));
@@ -162,6 +168,9 @@ test("CI checks pushes and the human guide keeps operational safety facts", () =
   assert.match(workflow, /^on:\n  push:\n  pull_request:/m);
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
+  assert.match(workflow, /node: \["22\.19\.0", "22\.x"\]/);
+  assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
+  assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
   for (const pattern of [

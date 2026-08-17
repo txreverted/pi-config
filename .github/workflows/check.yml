@@ -15,16 +15,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        node: ["22.19.0", "22.x"]
         pi: [pinned, latest]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.20.0"
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
       - if: matrix.pi == 'pinned'
         run: npm audit --omit=dev
       - if: matrix.pi == 'latest'
-        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest
+        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
       - run: npm run check
