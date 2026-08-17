@@ -222,6 +222,22 @@ test("one composite above-editor widget orders panels and modes with one blank r
   h.emit("session_shutdown");
 });
 
+test("composite panel preserves headings within a 24-row terminal budget", () => {
+  const h = createHarness();
+  uiExtension(h.pi);
+  h.start();
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "todo", render: () => ["Todos", ...Array.from({ length: 10 }, (_, index) => `Todo ${index}`)] });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "task", render: () => ["Tasks", ...Array.from({ length: 10 }, (_, index) => `Task ${index}`)] });
+  h.pi.events.emit(UI_PANEL_EVENT, { id: "subagents", render: () => ["Agents", ...Array.from({ length: 40 }, (_, index) => `Agent ${index}`)] });
+  h.pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal", text: "goal: active" });
+
+  const lines = h.widgets.get(UI_WIDGET_NAME).factory(h.tui, plainTheme).render(100);
+  assert.ok(lines.length <= 16, `panel used ${lines.length} rows`);
+  const text = lines.join("\n");
+  for (const heading of ["Todos", "Tasks", "Agents", "goal: active"]) assert.match(text, new RegExp(heading));
+  assert.match(text, /… \d+ more/);
+});
+
 test("custom editor delegates input, history, paste, shortcuts, IME cursor, and autocomplete", async () => {
   const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} };
   const editor = new UtilityEditor(

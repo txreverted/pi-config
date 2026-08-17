@@ -106,6 +106,39 @@ export function applyUiGutter(lines: readonly string[], width: number): string[]
   });
 }
 
+export function budgetUiBlocks(
+  blocks: readonly (readonly string[])[],
+  maxRows: number,
+  trailingBlank = false,
+): string[][] {
+  const normalized = blocks.map((block) => trimBlankEdges(collapseBlankLines(block))).filter((block) => block.length > 0);
+  if (normalized.length === 0) return [];
+  const fixedRows = Math.max(0, normalized.length - 1) + (trailingBlank ? 1 : 0);
+  const available = Math.max(normalized.length, Math.floor(maxRows) - fixedRows);
+  if (normalized.reduce((total, block) => total + block.length, fixedRows) <= maxRows) return normalized;
+
+  const slots = normalized.map(() => 0);
+  let remaining = available - normalized.length;
+  for (let changed = true; remaining > 0 && changed;) {
+    changed = false;
+    for (let index = 0; index < normalized.length && remaining > 0; index++) {
+      const bodyRows = normalized[index].length - 1;
+      if (slots[index] >= bodyRows) continue;
+      slots[index]++;
+      remaining--;
+      changed = true;
+    }
+  }
+  return normalized.map((block, index) => {
+    const body = block.slice(1);
+    const slotCount = slots[index];
+    if (body.length <= slotCount) return [...block];
+    if (slotCount === 0) return [`${block[0]} · … ${body.length} more`];
+    const shown = Math.max(0, slotCount - 1);
+    return [block[0], ...body.slice(0, shown), `… ${body.length - shown} more`];
+  });
+}
+
 export function composeUiBlocks(blocks: readonly (readonly string[])[], width: number, trailingBlank = false): string[] {
   const logical: string[] = [];
   for (const block of blocks) {

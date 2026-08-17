@@ -14,6 +14,7 @@ import {
   UI_PANEL_EVENT,
   UI_WIDGET_NAME,
   applyUiGutter,
+  budgetUiBlocks,
   composeUiBlocks,
   formatCwd,
   utilityBarSegments,
@@ -166,7 +167,8 @@ export default function uiExtension(pi: ExtensionAPI) {
             return text ? [text] : [];
           }).join(" · ");
           if (modeText) blocks.push([theme.fg("customMessageLabel", modeText)]);
-          return composeUiBlocks(blocks, width, true);
+          const maxRows = Math.max(1, (tui.terminal?.rows ?? 30) - 8);
+          return composeUiBlocks(budgetUiBlocks(blocks, maxRows, true), width, true);
         },
       };
     }, { placement: "aboveEditor" });

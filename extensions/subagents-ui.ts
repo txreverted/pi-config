@@ -139,7 +139,7 @@ export class AgentsView implements Focusable {
     else if (data === "f") return this.finish({ type: "refresh" });
     else {
       const current = this.current(); if (!current) return;
-      if (data === "m") this.inputMode = ACTIVE.has(current.status) ? "message" : "resume";
+      if (data === "m" && ACTIVE.has(current.status)) this.inputMode = "message";
       else if (data === "i" && ACTIVE.has(current.status)) return this.finish({ type: "interrupt", id: current.id });
       else if (data === "r" && !ACTIVE.has(current.status)) this.inputMode = "resume";
       else if (data === "d" && current.worktree) return this.finish({ type: "diff", id: current.id });
