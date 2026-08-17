@@ -128,10 +128,18 @@ export function createAskComponent(
   const refresh = () => tui.requestRender();
   editor.onSubmit = (value) => {
     const trimmed = value.trim();
+    const question = state.question;
     if (editing === "notes") state.notes = boundCustomAnswer(trimmed);
     else state.write(trimmed);
     editing = undefined;
     editor.setText("");
+    if (question && state.isAnswered(question)) {
+      if (state.allAnswered) {
+        done({ answers: state.answers(), notes: state.notes, cancelled: false, timedOut: false });
+        return;
+      }
+      state.movePage(1);
+    }
     refresh();
   };
 
@@ -183,8 +191,12 @@ export function createAskComponent(
         refresh();
         return;
       }
-      state.choose(state.cursor);
-      if (!question.multiSelect) state.movePage(1);
+      if (!question.multiSelect || !state.isAnswered(question)) state.choose(state.cursor);
+      if (state.allAnswered) {
+        done({ answers: state.answers(), notes: state.notes, cancelled: false, timedOut: false });
+        return;
+      }
+      state.movePage(1);
       refresh();
     },
     render(width: number): string[] {
@@ -192,8 +204,8 @@ export function createAskComponent(
       const lines: string[] = [theme.fg("accent", "─".repeat(renderWidth))];
       const tabs = questions.map((question, index) => {
         const label = question.header ?? `Q${index + 1}`;
-        const mark = state.isAnswered(question) ? "●" : "○";
-        return index === state.page ? theme.fg("accent", `[${mark} ${label}]`) : theme.fg("muted", `${mark} ${label}`);
+        const tab = `${state.isAnswered(question) ? "[x]" : "[ ]"} ${label}`;
+        return theme.fg(index === state.page ? "accent" : "muted", tab);
       });
       tabs.push(state.review ? theme.fg("accent", "[Review]") : theme.fg("muted", "Review"));
       addWrapped(lines, " ", tabs.join("  "), renderWidth);
@@ -222,13 +234,13 @@ export function createAskComponent(
           question.options.forEach((option, index) => {
             const selected = state.selectedIndexes.includes(index);
             const cursor = state.cursor === index;
-            const marker = question.multiSelect ? (selected ? "[x]" : "[ ]") : (selected ? "●" : "○");
+            const marker = selected ? "[x]" : "[ ]";
             const description = option.description ? ` — ${theme.fg("muted", option.description)}` : "";
             addWrapped(lines, cursor ? theme.fg("accent", "> ") : "  ", `${marker} ${option.label}${option.recommended ? " (recommended)" : ""}${description}`, renderWidth);
           });
         }
         const customIndex = question.options?.length ?? 0;
-        addWrapped(lines, state.cursor === customIndex ? theme.fg("accent", "> ") : "  ", `${state.customAnswer ? "●" : "○"} ${question.options ? "Write a different answer…" : "Write answer…"}`, renderWidth);
+        addWrapped(lines, state.cursor === customIndex ? theme.fg("accent", "> ") : "  ", `${state.customAnswer ? "[x]" : "[ ]"} ${question.options ? "Write a different answer…" : "Write answer…"}`, renderWidth);
         const preview = question.options?.[state.cursor]?.preview;
         if (preview) {
           lines.push("");
