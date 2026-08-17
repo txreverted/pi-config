@@ -165,11 +165,6 @@ export function utilityBarSegments(values: UtilityBarValues): { head: string; fi
   };
 }
 
-export function utilityBarText(values: UtilityBarValues): string {
-  const { head, fields } = utilityBarSegments(values);
-  return ` ${head}${fields.map((field) => ` 〉${field}`).join("")}`;
-}
-
 /** Wrap a utility bar only between fields. Oversized individual fields are clipped. */
 export function wrapUtilityBar(head: string, fields: readonly string[], width: number): string[] {
   const safeWidth = Math.max(1, Math.floor(width));

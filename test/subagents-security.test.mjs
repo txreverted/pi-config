@@ -217,6 +217,13 @@ test("writable workers require trust and exclusive foreground execution", async 
     isProjectTrusted: () => true,
   }), /one to three words/);
 
+  await assert.rejects(() => tool.execute("legacy", {
+    tasks: [{ name: "Legacy role", agent: "general-purpose", task: "Reject the removed role" }],
+  }, undefined, undefined, {
+    ...context,
+    isProjectTrusted: () => true,
+  }), /Unknown subagent role 'general-purpose'/);
+
   await assert.rejects(() => tool.execute("call", {
     tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
   }, undefined, undefined, {
@@ -247,7 +254,7 @@ test("writable workers require trust and exclusive foreground execution", async 
 test("agent registry keeps specialist roles read-only and scopes the worker", () => {
   const agents = createAgentRegistry();
   assert.equal(MAX_SUBAGENT_TASKS, 20);
-  assert.deepEqual([...agents.keys()], ["Explore", "general-purpose", "reviewer", "researcher", "worker"]);
+  assert.deepEqual([...agents.keys()], ["Explore", "reviewer", "researcher", "worker"]);
 
   for (const agent of agents.values()) {
     assert.ok(agent.prompt.length > 0, agent.name);
