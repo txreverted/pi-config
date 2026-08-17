@@ -8,7 +8,7 @@ export const UI_PANEL_EVENT = "ui:panel-update";
 export const UI_MODE_STATUS_EVENT = "ui:mode-status-update";
 export const UI_WIDGET_NAME = "pi-config-panels";
 
-export type UiPanelId = "todo" | "subagents";
+export type UiPanelId = "todo" | "task" | "subagents";
 export type UiModeStatusId = "goal" | "ponytail";
 export type UiPanelRenderer = (width: number, theme: Theme) => string[];
 
