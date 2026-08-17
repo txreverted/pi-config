@@ -26,6 +26,7 @@ test("only frozen-scope extensions and the Ponytail skill are enabled", async ()
     "./extensions/ui.ts",
     "./extensions/tools.ts",
     "./extensions/web.ts",
+    "./extensions/ask.ts",
     "./extensions/subagents.ts",
     "./extensions/todo.ts",
     "./extensions/goal.ts",
@@ -53,7 +54,7 @@ test("only frozen-scope extensions and the Ponytail skill are enabled", async ()
 });
 
 test("extension source uses only approved special UI glyphs", async () => {
-  const approved = new Set(Array.from("□■☒⎿├─│"));
+  const approved = new Set(Array.from("□■☒⎿├─│└"));
   const files = (await readdir(new URL("../extensions/", import.meta.url))).filter((name) => name.endsWith(".ts"));
   for (const file of files) {
     const source = await readFile(new URL(`../extensions/${file}`, import.meta.url), "utf8");
