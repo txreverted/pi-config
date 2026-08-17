@@ -1,19 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  automaticStopReason,
-  GOAL_LIMITS,
-  parseGoalCommand,
-  recordAutomaticRun,
-  validateGoalSnapshot,
-} from "../extensions/goal-core.ts";
+import { GOAL_LIMITS, parseGoalCommand, validateGoalSnapshot } from "../extensions/goal-core.ts";
 
 const goal = (overrides = {}) => ({
   id: "goal-1",
   objective: "Ship the fix",
   status: "active",
-  automaticRuns: 0,
-  repeatedToolFreeRuns: 0,
   ...overrides,
 });
 
@@ -30,35 +22,10 @@ test("goal parser accepts bounded objectives, rejects legacy token caps, and san
   assert.equal(parseGoalCommand("work --tokens nope").type, "invalid");
 });
 
-test("automatic safety counts only identical or empty tool-free runs", () => {
-  let state = recordAutomaticRun(goal(), "same output", false);
-  assert.equal(state.repeatedToolFreeRuns, 1);
-  state = recordAutomaticRun(state, " same   output ", false);
-  state = recordAutomaticRun(state, "same output", false);
-  assert.match(automaticStopReason(state), /repeated or empty/);
-
-  state = recordAutomaticRun(state, "same output", true);
-  assert.equal(state.repeatedToolFreeRuns, 0);
-  assert.equal(automaticStopReason(state), undefined);
-});
-
-test("automatic safety stops at the fixed run ceiling", () => {
-  assert.equal(automaticStopReason(goal({ automaticRuns: GOAL_LIMITS.automaticRuns - 1 })), undefined);
-  assert.match(automaticStopReason(goal({ automaticRuns: GOAL_LIMITS.automaticRuns })), /20 automatic runs/);
-});
-
 test("snapshot validation rejects malformed persisted state", () => {
   assert.deepEqual(validateGoalSnapshot(goal()), goal());
   assert.equal(validateGoalSnapshot(goal({ objective: "" })), undefined);
-  assert.equal(validateGoalSnapshot(goal({ automaticRuns: -1 })), undefined);
-  assert.equal(validateGoalSnapshot(goal({ automaticResponses: -1 })), undefined);
+  assert.equal(validateGoalSnapshot(goal({ waitingUntil: -1 })), undefined);
   assert.equal(validateGoalSnapshot(goal({ status: "invented" })), undefined);
-});
-
-test("legacy quota and response fields are accepted and discarded", () => {
-  const restored = validateGoalSnapshot(goal({ tokenBudget: 100, tokensUsed: 120, automaticResponses: 4 }));
-  assert.deepEqual(restored, goal());
-  assert.equal("tokenBudget" in restored, false);
-  assert.equal("tokensUsed" in restored, false);
-  assert.equal("automaticResponses" in restored, false);
+  assert.equal(validateGoalSnapshot(goal({ status: "blocked" })), undefined);
 });

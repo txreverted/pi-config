@@ -4,12 +4,12 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { DEFAULT_MAX_LINES, RpcClient, truncateHead } from "@earendil-works/pi-coding-agent";
 import { access, chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isPathInside } from "./path-safety.ts";
 
 export const MAX_SUBAGENT_TASKS = 20;
 export const MAX_SUBAGENT_CONCURRENCY = 20;
-export const DEFAULT_MAX_AGENT_DEPTH = 3;
 
 function boundedEnvironmentInteger(name: string, fallback: number, maximum: number): number {
   const value = Number(process.env[name]);
@@ -19,12 +19,9 @@ function boundedEnvironmentInteger(name: string, fallback: number, maximum: numb
 export function maxAgentConcurrency(): number {
   return boundedEnvironmentInteger("PI_CONFIG_MAX_CONCURRENT_AGENTS", MAX_SUBAGENT_CONCURRENCY, 20);
 }
-
-export function maxAgentDepth(): number {
-  return boundedEnvironmentInteger("PI_CONFIG_MAX_AGENT_DEPTH", DEFAULT_MAX_AGENT_DEPTH, DEFAULT_MAX_AGENT_DEPTH);
-}
 export const SUBAGENT_STALE_TIMEOUT_MS = 2 * 60_000 + 30_000;
 export const MAX_RESULT_BYTES = 16_000;
+export const MAX_AGENT_ERROR_BYTES = 64_000;
 const TRUNCATION_NOTICE_BYTES = 160;
 const STARTUP_TIMEOUT_MS = 20_000;
 const SUBAGENT_PROGRESS_INTERVAL_MS = 1_000;
@@ -78,7 +75,6 @@ export interface ChildRunResult extends ChildRunProgress {
   exitCode: number | null;
   signal?: NodeJS.Signals;
   model?: string;
-  sessionFile?: string;
   stopReason?: string;
   endedAt: number;
   durationMs: number;
@@ -99,9 +95,6 @@ export interface RunChildOptions {
   invocation?: PiInvocation;
   env?: NodeJS.ProcessEnv;
   startupTimeoutMs?: number;
-  sessionDir?: string;
-  sessionPath?: string;
-  onSession?: (sessionFile: string, client: RpcClient) => void;
   onUpdate?: (progress: ChildRunProgress) => void;
 }
 
@@ -284,7 +277,7 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
   else if (typeof message.model === "string") state.model = message.model;
   if (typeof message.stopReason === "string") state.stopReason = message.stopReason;
   state.assistantError = typeof message.errorMessage === "string" && message.errorMessage.trim()
-    ? message.errorMessage.trim()
+    ? truncateText(message.errorMessage.trim(), MAX_AGENT_ERROR_BYTES).text
     : undefined;
   return summary;
 }
@@ -294,7 +287,7 @@ export function buildPiArgs(input: {
   promptPath: string;
 }): string[] {
   const args = [
-    "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
+    "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-session",
   ];
   if (!input.definition.contextFiles) args.push("--no-context-files");
   for (const extension of input.definition.extensions ?? []) args.push("--extension", extension);
@@ -318,16 +311,11 @@ export function resolvePiInvocation(args: string[]): { command: string; args: st
     : { command: process.execPath, args };
 }
 
-function inside(root: string, candidate: string): boolean {
-  const path = relative(root, candidate);
-  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
-}
-
 export async function resolveWorkspaceCwd(workspace: string, requested?: string): Promise<string> {
   const root = await realpath(resolve(workspace));
   const candidate = await realpath(resolve(root, requested ?? "."));
   if (!(await stat(candidate)).isDirectory()) throw new Error(`Subagent cwd is not a directory: ${candidate}`);
-  if (!inside(root, candidate)) throw new Error("Subagent cwd must remain inside the current workspace");
+  if (!isPathInside(root, candidate)) throw new Error("Subagent cwd must remain inside the current workspace");
   return candidate;
 }
 
@@ -346,19 +334,17 @@ async function removeRunFiles(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 });
 }
 
-async function createRunFiles(definition: AgentDefinition, task: ChildTask) {
+async function createRunFiles(definition: AgentDefinition) {
   const dir = await mkdtemp(join(tmpdir(), "pi-config-subagent-"));
   try {
     await chmod(dir, 0o700);
     const promptPath = join(dir, "role.md");
-    const taskPath = join(dir, "task.md");
     const stderrPath = join(dir, "stderr.log");
     await Promise.all([
       writeFile(promptPath, definition.prompt, { encoding: "utf8", mode: 0o600 }),
-      writeFile(taskPath, `# Delegated task\n\n${task.task.trim()}\n`, { encoding: "utf8", mode: 0o600 }),
       writeFile(stderrPath, "", { encoding: "utf8", mode: 0o600 }),
     ]);
-    return { dir, promptPath, taskPath, stderrPath };
+    return { dir, promptPath, stderrPath };
   } catch (error) {
     try {
       await removeRunFiles(dir);
@@ -457,7 +443,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   const finishEarly = (status: "bugged" | "error", error: string): ChildRunResult => {
     const endedAt = Date.now();
     return {
-      ...base, status, task: options.task.task, cwd: options.task.cwd, output: "", error,
+      ...base, status, task: options.task.task, cwd: options.task.cwd, output: "", error: truncateText(error, MAX_AGENT_ERROR_BYTES).text,
       exitCode: null, endedAt, durationMs: endedAt - startedAt, truncated: false,
     };
   };
@@ -466,13 +452,12 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   let files: Awaited<ReturnType<typeof createRunFiles>>;
   try {
     await validatePreflight(definition, options.task);
-    files = await createRunFiles(definition, options.task);
+    files = await createRunFiles(definition);
   } catch (error) {
     return finishEarly("error", `Subagent preflight failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const args = buildPiArgs({ definition, promptPath: files.promptPath });
-  if (options.sessionDir) args.push("--session-dir", options.sessionDir);
   const invocation = options.invocation
     ? { command: options.invocation.command, args: [...options.invocation.argsPrefix] }
     : resolvePiInvocation([]);
@@ -492,7 +477,6 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   const editedFiles = new Set<string>();
   let stop: "aborted" | "stale" | "startup" | undefined;
   let stderr = "";
-  let sessionFile: string | undefined;
   let client: RpcClient | undefined;
   let staleTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
@@ -581,38 +565,33 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     if (childProcess?.exitCode !== null && childProcess?.exitCode !== undefined) onExit(childProcess.exitCode, null);
     if (startupTimer) clearTimeout(startupTimer);
     activity();
-    if (options.sessionPath) await client.switchSession(options.sessionPath);
     await client.setAutoCompaction(true);
     await client.setThinkingLevel(definition.thinking);
-    const rpcState = await client.getState();
-    sessionFile = rpcState.sessionFile;
-    if (sessionFile) options.onSession?.(sessionFile, client);
     progressTimer = setInterval(emit, SUBAGENT_PROGRESS_INTERVAL_MS);
     progressTimer.unref?.();
     const onAbort = () => requestStop("aborted");
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener("abort", onAbort, { once: true });
-    await client.prompt(`@${files.taskPath} Complete the task described in the attached task file.`);
+    await client.prompt(`Complete the delegated task below.\n\n--- BEGIN DELEGATED TASK ---\n${options.task.task.trim()}\n--- END DELEGATED TASK ---`);
     await Promise.race([idle, stopped]);
     settled = true;
     options.signal?.removeEventListener("abort", onAbort);
     unsubscribe();
     if (!stop && !state.assistantError) {
-      sessionFile = (await client.getState()).sessionFile ?? sessionFile;
       const last = await client.getLastAssistantText();
       if (last !== null) state.output = last;
     }
-    stderr = (await readFile(files.stderrPath, "utf8")).slice(0, 64 * 1024);
+    stderr = utf8Prefix(await readFile(files.stderrPath, "utf8"), MAX_AGENT_ERROR_BYTES);
   } catch (error) {
-    stderr = (await readFile(files.stderrPath, "utf8").catch(() => "")).slice(0, 64 * 1024);
-    if (!stop) state.assistantError = error instanceof Error ? error.message : String(error);
+    stderr = utf8Prefix(await readFile(files.stderrPath, "utf8").catch(() => ""), MAX_AGENT_ERROR_BYTES);
+    if (!stop) state.assistantError = truncateText(error instanceof Error ? error.message : String(error), MAX_AGENT_ERROR_BYTES).text;
   } finally {
     settled = true;
     for (const timer of [startupTimer, staleTimer]) if (timer) clearTimeout(timer);
     if (progressTimer) clearInterval(progressTimer);
     if (client) await stopRpcClient(client);
     try { await removeRunFiles(files.dir); } catch (error) {
-      state.assistantError = `Failed to remove subagent run files at ${files.dir}: ${error instanceof Error ? error.message : String(error)}`;
+      state.assistantError = truncateText(`Failed to remove subagent run files at ${files.dir}: ${error instanceof Error ? error.message : String(error)}`, MAX_AGENT_ERROR_BYTES).text;
     }
   }
 
@@ -633,7 +612,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     ...progress, task: options.task.task, cwd: options.task.cwd, output: bounded.text,
     ...(error ? { error } : {}), ...(stderr.trim() ? { stderr: stderr.trim() } : {}),
     exitCode: status === "done" ? 0 : null, model: state.model ?? options.model,
-    ...(sessionFile ? { sessionFile } : {}), ...(state.stopReason ? { stopReason: state.stopReason } : {}),
+    ...(state.stopReason ? { stopReason: state.stopReason } : {}),
     endedAt, durationMs: endedAt - startedAt, truncated: bounded.truncated,
   };
 }
