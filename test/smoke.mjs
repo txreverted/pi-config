@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 const manifestExtensions = packageJson.pi.extensions.map((path) => resolve(root, path));
 const internalExtensions = [resolve(root, "extensions/subagent-tools.ts")];
-const skillNames = ["ponytail"];
+const promptNames = ["r-docs", "r-impl", "r-git"];
 const extensions = [...manifestExtensions, ...internalExtensions];
 assert.equal(new Set(extensions).size, extensions.length, "Smoke extension paths must be unique");
 assert.ok(manifestExtensions.every((path) => extensions.includes(path)), "Every manifest extension must load directly");
@@ -19,9 +19,7 @@ const args = [
   "--no-themes",
 ];
 for (const extension of extensions) args.push("--extension", extension);
-for (const skill of skillNames) {
-  args.push("--skill", resolve(root, "skills", skill, "SKILL.md"));
-}
+for (const prompt of promptNames) args.push("--prompt-template", resolve(root, "prompts", `${prompt}.md`));
 args.push("--theme", resolve(root, "themes", "neutral.json"));
 args.push("--use-theme", "neutral");
 args.push("--list-models", "__pi_config_smoke_no_such_model__");

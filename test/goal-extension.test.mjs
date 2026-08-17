@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import goalExtension from "../extensions/goal.ts";
-import { UI_MODE_STATUS_EVENT } from "../extensions/ui-core.ts";
 
 function harness(branch = [], { model = { provider: "test", id: "model" }, authenticated = true } = {}) {
   const tools = new Map();
@@ -23,11 +22,6 @@ function harness(branch = [], { model = { provider: "test", id: "model" }, authe
     getActiveTools() { return [...active]; },
     setActiveTools(names) { active = [...names]; },
     sendUserMessage(text) { messages.push(text); },
-    events: {
-      emit(name, data) {
-        if (name === UI_MODE_STATUS_EVENT) statuses.push({ name: data.id, value: data.text });
-      },
-    },
   };
   goalExtension(pi);
   const context = {
@@ -40,6 +34,7 @@ function harness(branch = [], { model = { provider: "test", id: "model" }, authe
     sessionManager: { getBranch: () => branch },
     ui: {
       notify: (message, level) => notices.push({ message, level }),
+      setStatus: (name, value) => statuses.push({ name, value }),
     },
   };
   return {
@@ -137,6 +132,8 @@ test("goal notifications collapse repeated display-only blank rows", async () =>
 
 test("goal completion requires separate verification evidence", async () => {
   const h = harness();
+  assert.equal(h.tools.get("goal_complete").parameters.additionalProperties, false);
+  assert.equal(h.tools.get("goal_wait").parameters.additionalProperties, false);
   await h.events.get("session_start")({}, h.context);
   await h.commands.get("goal").handler("Finish verified work", h.context);
   const id = h.entries.at(-1).data.goal.id;
@@ -153,6 +150,20 @@ test("goal completion requires separate verification evidence", async () => {
   assert.equal(completed.terminate, true);
   assert.match(completed.details.goal.note, /Implemented safely Evidence: npm test passed/);
   assert.doesNotMatch(completed.details.goal.note, /\u202e/);
+
+  const bounded = harness();
+  await bounded.events.get("session_start")({}, bounded.context);
+  await bounded.commands.get("goal").handler("Keep complete evidence", bounded.context);
+  const boundedId = bounded.entries.at(-1).data.goal.id;
+  await startRun(bounded);
+  await bounded.tools.get("goal_complete").execute("x", {
+    goal_id: boundedId,
+    summary: "Done",
+    evidence: "E".repeat(4_000),
+  });
+  const note = bounded.entries.at(-1).data.goal.note;
+  assert.equal(note.length, 4_000);
+  assert.ok(note.endsWith("E".repeat(100)));
 });
 
 test("continuations dispatch only when settled, idle, and without pending messages", async () => {
@@ -318,6 +329,33 @@ test("branch restore pauses active goals, preserves waiting goals, and clears ti
   assert.match(waiting.statuses.at(-1).value, /waiting/);
   await waiting.events.get("session_shutdown")({}, waiting.context);
   assert.equal(waiting.statuses.at(-1).value, undefined);
+});
+
+test("goal edit, pause, resume, and clear transitions stay explicit", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("Original objective", h.context);
+  const id = h.entries.at(-1).data.goal.id;
+
+  await h.commands.get("goal").handler("edit Revised objective", h.context);
+  assert.deepEqual(h.entries.at(-1).data.goal, {
+    id,
+    objective: "Revised objective",
+    status: "paused",
+    waitingUntil: undefined,
+    note: "Edited; use /goal resume.",
+  });
+  await h.commands.get("goal").handler("resume", h.context);
+  assert.match(h.entries.at(-1).data.goal.note, /queued/);
+  await startRun(h);
+  await h.commands.get("goal").handler("pause", h.context);
+  assert.equal(h.entries.at(-1).data.goal.status, "paused");
+  await h.commands.get("goal").handler("resume", h.context);
+  await h.commands.get("goal").handler("clear", h.context);
+  assert.equal(h.entries.at(-1).data.goal, null);
+  assert.equal(h.statuses.at(-1).value, undefined);
+  assert.ok(!h.active().includes("goal_complete"));
+  assert.ok(h.aborts() >= 3);
 });
 
 test("a malformed latest snapshot fails closed instead of restoring older waiting state", async () => {

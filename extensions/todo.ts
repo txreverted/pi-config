@@ -13,9 +13,10 @@ import {
   type TodoSnapshot,
   type TodoTask,
 } from "./todo-core.ts";
-import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
+import { normalizeDisplayText } from "./text-safety.ts";
 
 const TOOL_NAME = "todo";
+const WIDGET_NAME = "pi-config-todo";
 const WIDGET_TASK_LINES = 6;
 
 interface TodoDetails {
@@ -35,7 +36,7 @@ const Parameters = Type.Object({
 
 function taskLine(task: TodoTask): string {
   const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
-  const activity = task.status === "in_progress" && task.activeForm ? ` - ${task.activeForm}` : "";
+  const activity = task.status === "in_progress" && task.activeForm ? ` │ ${task.activeForm}` : "";
   const blockers = task.blockedBy.length ? ` depends on ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
   return `${mark} #${task.id} ${task.subject}${activity}${blockers}`;
 }
@@ -77,21 +78,31 @@ export default function todoExtension(pi: ExtensionAPI): void {
     if (latestContext?.mode !== "tui") return;
     const unfinished = snapshot.tasks.filter((task) => task.status !== "completed");
     if (!unfinished.length) {
-      pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
+      latestContext.ui.setWidget(WIDGET_NAME, undefined);
       return;
     }
-    const render: UiPanelRenderer = (width, theme) => {
-      const summary = `Todos: ${snapshot.tasks.length - unfinished.length}/${snapshot.tasks.length} completed`;
-      if (collapsed) return [truncateToWidth(theme.fg("muted", `${summary} (collapsed)`), width)];
-      const shown = unfinished.slice(0, WIDGET_TASK_LINES);
-      const lines = [
-        theme.fg("accent", summary),
-        ...shown.map((task) => ` ├─ ${taskLine(task)}`),
-      ];
-      if (unfinished.length > shown.length) lines.push(theme.fg("dim", `    ... ${unfinished.length - shown.length} more`));
-      return lines.map((line) => truncateToWidth(line, width));
-    };
-    pi.events.emit(UI_PANEL_EVENT, { id: "todo", render });
+    latestContext.ui.setWidget(WIDGET_NAME, (tui, theme) => ({
+      invalidate() {},
+      render(width: number): string[] {
+        const safeWidth = Math.max(1, Math.floor(width));
+        const contentWidth = Math.max(0, safeWidth - 1);
+        const row = (text: string) => ` ${truncateToWidth(text, contentWidth, "")}`;
+        const summary = `Todos: ${snapshot.tasks.length - unfinished.length}/${snapshot.tasks.length} completed`;
+        if (collapsed) return [row(theme.fg("muted", `${summary} (collapsed)`))];
+        const bodyRows = Math.max(0, Math.max(1, (tui.terminal?.rows ?? 30) - 8) - 1);
+        let shownCount = Math.min(WIDGET_TASK_LINES, bodyRows, unfinished.length);
+        if (unfinished.length > shownCount && shownCount === bodyRows) shownCount = Math.max(0, shownCount - 1);
+        const shown = unfinished.slice(0, shownCount);
+        const lines = [
+          theme.fg("accent", summary),
+          ...shown.map((task) => ` ├─ ${taskLine(task)}`),
+        ];
+        if (unfinished.length > shown.length && bodyRows > shown.length) {
+          lines.push(theme.fg("dim", ` └─ ${unfinished.length - shown.length} more`));
+        }
+        return lines.map(row);
+      },
+    }), { placement: "aboveEditor" });
   };
 
   const restore = (ctx: ExtensionContext) => {
@@ -152,6 +163,6 @@ export default function todoExtension(pi: ExtensionAPI): void {
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_compact", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
-    if (ctx.mode === "tui") pi.events.emit(UI_PANEL_EVENT, { id: "todo" });
+    if (ctx.mode === "tui") ctx.ui.setWidget(WIDGET_NAME, undefined);
   });
 }

@@ -7,7 +7,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 | Feature | Source | Tests |
 |---|---|---|
 | Package and theme | [`package.json`](package.json), [`themes/neutral.json`](themes/neutral.json) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
-| Shared UI | [`extensions/ui.ts`](extensions/ui.ts) | [`test/ui-extension.test.mjs`](test/ui-extension.test.mjs) |
+| Repository workflows | [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Command-line tools | [`extensions/tools.ts`](extensions/tools.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs) |
 | Web search and fetch | [`extensions/web.ts`](extensions/web.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
@@ -28,6 +28,7 @@ Subagent role prompts are in [`subagents/prompts/`](subagents/prompts/).
 - Workers require a trusted Git project, a clean parent checkout, and human confirmation. Inspect each patch. Completed worktrees remain recoverable by id from their original repository after a restart.
 - `/goal <objective>` continues until completion. Use `status`, `pause`, `resume`, `edit`, or `clear`. A failed turn pauses safely. `goal_wait` waits for input or a deadline without completing the goal.
 - `/ponytail` accepts `lite`, `full`, `ultra`, `off`, `status`, or `default <mode>`.
+- `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
 - `web_search` and `web_fetch` need no API key.
 - `jq` executes the local command. Pi's built-in `grep` and `find` are active.
 

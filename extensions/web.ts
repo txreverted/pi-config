@@ -7,8 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
-import { normalizeDisplayText } from "./ui-core.ts";
+import { normalizeDisplayText, safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import { fetchWebPage, searchWeb, type ReaderMode } from "./web-core.ts";
 
 const MAX_TOOL_CONTENT_BYTES = 40 * 1024;

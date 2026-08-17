@@ -9,9 +9,10 @@ import {
   validateGoalSnapshot,
   type GoalSnapshot,
 } from "./goal-core.ts";
-import { normalizeDisplayText, UI_MODE_STATUS_EVENT } from "./ui-core.ts";
+import { normalizeDisplayText } from "./text-safety.ts";
 
 const ENTRY = "goal-snapshot";
+const STATUS_NAME = "pi-config-goal";
 const TOOL_NAMES = ["goal_complete", "goal_wait"] as const;
 const MAX_WAIT_MS = 2_147_483_647;
 const STARTING_NOTE = "Goal turn queued; waiting for Pi to start.";
@@ -24,9 +25,13 @@ function textResult(text: string, goal: GoalSnapshot) {
 
 function completionNote(summary: string, evidence: string): string {
   const separator = " Evidence: ";
-  const summaryLimit = Math.floor((GOAL_LIMITS.snapshotText - separator.length) / 2);
-  const evidenceLimit = GOAL_LIMITS.snapshotText - separator.length - summaryLimit;
-  return `${cleanGoalText(summary).slice(0, summaryLimit)}${separator}${cleanGoalText(evidence).slice(0, evidenceLimit)}`;
+  const capacity = GOAL_LIMITS.snapshotText - separator.length;
+  const summaryText = cleanGoalText(summary);
+  const evidenceText = cleanGoalText(evidence);
+  let summaryLimit = Math.min(summaryText.length, Math.floor(capacity / 2));
+  const evidenceLimit = Math.min(evidenceText.length, capacity - summaryLimit);
+  summaryLimit = Math.min(summaryText.length, capacity - evidenceLimit);
+  return `${summaryText.slice(0, summaryLimit)}${separator}${evidenceText.slice(0, evidenceLimit)}`;
 }
 
 function restoreGoalState(ctx: ExtensionContext): GoalSnapshot | undefined {
@@ -69,11 +74,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
   };
   const syncStatus = (ctx?: ExtensionContext) => {
     latestContext = ctx ?? latestContext;
-    if (!goal) {
-      pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
-      return;
-    }
-    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal", text: `goal: ${goal.status}` });
+    latestContext?.ui.setStatus(STATUS_NAME, goal ? `goal: ${goal.status}` : undefined);
   };
   const wakeWaiting = (): boolean => {
     if (!goal || goal.status !== "waiting") return false;
@@ -197,7 +198,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
       goal_id: Type.String({ minLength: 1, maxLength: 100 }),
       reason: Type.String({ minLength: 1, maxLength: GOAL_LIMITS.reason }),
       resume_after_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_WAIT_MS })),
-    }),
+    }, { additionalProperties: false }),
     async execute(_id, params) {
       const current = requireActiveGoal(params.goal_id);
       const reason = cleanGoalText(params.reason);
@@ -387,10 +388,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
     if (!continuationPending || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
     kickoff("automatic");
   });
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", (_event, ctx) => {
     clearTimer();
     resetRun();
+    ctx.ui.setStatus(STATUS_NAME, undefined);
     latestContext = undefined;
-    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "goal" });
   });
 }
