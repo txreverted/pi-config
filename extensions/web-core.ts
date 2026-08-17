@@ -17,7 +17,9 @@ const FETCH_TIMEOUT_MS = 30_000;
 const ADDRESS_TIMEOUT_MS = 10_000;
 const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_FETCH_RESPONSE_BYTES = 5 * 1024 * 1024;
+const MAX_NORMALIZED_LINK_BYTES = 1024 * 1024;
 const MAX_REDIRECTS = 5;
+const MAX_RESULT_URL_CHARS = 4_096;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 const gunzipAsync = promisify(gunzip);
@@ -98,6 +100,7 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
 async function readWebResponse(response: Response, maxBytes: number): Promise<string> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => {});
     throw new Error(`Response exceeds ${Math.round(maxBytes / 1024 / 1024)}MB limit`);
   }
 
@@ -158,7 +161,8 @@ function normalizeHttpUrl(value: unknown): string | null {
     const url = new URL(value.trim());
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     if (url.username || url.password) return null;
-    return url.toString();
+    const normalized = url.toString();
+    return normalized.length <= MAX_RESULT_URL_CHARS ? normalized : null;
   } catch {
     return null;
   }
@@ -448,12 +452,16 @@ async function requestResolvedTarget(target: ResolvedTarget, signal: AbortSignal
   let lastError: unknown;
   for (const address of target.addresses) {
     if (signal.aborted) throw abortError(signal);
-    const attemptSignal = AbortSignal.any([signal, AbortSignal.timeout(ADDRESS_TIMEOUT_MS)]);
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(new Error("Connection timed out")), ADDRESS_TIMEOUT_MS);
+    timer.unref?.();
     try {
-      return await requestAddress(target, address, attemptSignal);
+      return await requestAddress(target, address, AbortSignal.any([signal, timeout.signal]));
     } catch (error) {
       if (signal.aborted) throw abortError(signal);
       lastError = error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   const message = lastError instanceof Error ? lastError.message : String(lastError ?? "connection failed");
@@ -504,7 +512,7 @@ async function fetchHttp(
     const status = response.statusCode ?? 0;
     if (REDIRECT_STATUSES.has(status)) {
       const location = Array.isArray(response.headers.location) ? response.headers.location[0] : response.headers.location;
-      response.resume();
+      response.destroy();
       if (!location) throw new Error(`Redirect from ${target.url.hostname} omitted Location header`);
       if (redirects === MAX_REDIRECTS) throw new Error("Too many redirects");
       target = await resolvePublicUrl(new URL(location, target.url), signal, lookup);
@@ -512,7 +520,7 @@ async function fetchHttp(
     }
 
     if (status < 200 || status >= 300) {
-      response.resume();
+      response.destroy();
       throw new Error(`HTTP ${status} fetching ${target.url.hostname}`);
     }
 
@@ -541,41 +549,38 @@ function decodeBody(body: Buffer, headers: http.IncomingHttpHeaders): string {
 }
 
 function absoluteLinks(document: Document, baseUrl: URL): void {
-  for (const anchor of document.querySelectorAll("a[href]")) {
-    const href = anchor.getAttribute("href");
-    if (!href) continue;
+  let remainingBytes = MAX_NORMALIZED_LINK_BYTES;
+  const resolveAttribute = (element: Element, attribute: "href" | "src") => {
+    const value = element.getAttribute(attribute);
+    if (!value) return;
     try {
-      const resolved = new URL(href, baseUrl);
-      if (resolved.protocol === "http:" || resolved.protocol === "https:") anchor.setAttribute("href", resolved.toString());
-      else anchor.removeAttribute("href");
+      const resolved = new URL(value, baseUrl);
+      const normalized = resolved.toString();
+      const bytes = Buffer.byteLength(normalized, "utf8");
+      if ((resolved.protocol !== "http:" && resolved.protocol !== "https:") || bytes > remainingBytes) {
+        element.removeAttribute(attribute);
+        return;
+      }
+      element.setAttribute(attribute, normalized);
+      remainingBytes -= bytes;
     } catch {
-      anchor.removeAttribute("href");
+      element.removeAttribute(attribute);
     }
-  }
-  for (const image of document.querySelectorAll("img[src]")) {
-    const src = image.getAttribute("src");
-    if (!src) continue;
-    try {
-      const resolved = new URL(src, baseUrl);
-      if (resolved.protocol === "http:" || resolved.protocol === "https:") image.setAttribute("src", resolved.toString());
-      else image.removeAttribute("src");
-    } catch {
-      image.removeAttribute("src");
-    }
-  }
+  };
+  for (const anchor of document.querySelectorAll("a[href]")) resolveAttribute(anchor, "href");
+  for (const image of document.querySelectorAll("img[src]")) resolveAttribute(image, "src");
 }
 
 const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
 
 export function htmlToMarkdown(html: string, baseUrl: URL): { title: string; markdown: string } {
   const { document } = parseHTML(html);
-  absoluteLinks(document as unknown as Document, baseUrl);
-
   for (const element of document.querySelectorAll(
     "script, style, noscript, template, iframe, object, embed, svg, canvas, form, nav, footer, aside, [hidden], [aria-hidden='true']",
   )) {
     element.remove();
   }
+  absoluteLinks(document as unknown as Document, baseUrl);
 
   const documentTitle = cleanSnippet(document.title, 500);
   const readableDocument = document.cloneNode(true) as unknown as Document;
@@ -586,6 +591,9 @@ export function htmlToMarkdown(html: string, baseUrl: URL): { title: string; mar
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{4,}/g, "\n\n\n")
     .trim();
+  if (Buffer.byteLength(markdown, "utf8") > MAX_FETCH_RESPONSE_BYTES) {
+    throw new Error("Extracted content exceeds 5MB limit");
+  }
 
   return {
     title: cleanSnippet(article?.title, 500) || documentTitle || baseUrl.hostname,
