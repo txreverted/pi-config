@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Value } from "typebox/value";
+import { ASK_LIMITS } from "../extensions/ask-core.ts";
 import askExtension from "../extensions/ask.ts";
 
 function setup() {
@@ -15,6 +17,34 @@ function setup() {
   askExtension(pi);
   return { tool: tools.get("ask_user_question"), handlers, active: () => active };
 }
+
+test("question tool schema uses the shared boundaries", () => {
+  const { tool } = setup();
+  const valid = {
+    context: "c".repeat(ASK_LIMITS.context),
+    questions: Array.from({ length: ASK_LIMITS.questions.max }, (_, questionIndex) => ({
+      id: `q${questionIndex}${"i".repeat(ASK_LIMITS.id - 2)}`,
+      question: "q".repeat(ASK_LIMITS.question),
+      options: Array.from({ length: ASK_LIMITS.options.max }, (_, optionIndex) => ({
+        label: `${optionIndex}${"l".repeat(ASK_LIMITS.label - 1)}`,
+        description: "d".repeat(ASK_LIMITS.description),
+      })),
+    })),
+  };
+
+  assert.equal(Value.Check(tool.parameters, valid), true);
+  assert.equal(Value.Check(tool.parameters, { ...valid, context: `${valid.context}x` }), false);
+  assert.equal(Value.Check(tool.parameters, {
+    questions: [{ id: "graphemes", question: "e\u0301".repeat(ASK_LIMITS.question) }],
+  }), true);
+  assert.equal(Value.Check(tool.parameters, {
+    questions: [{ id: "graphemes", question: "e\u0301".repeat(ASK_LIMITS.question + 1) }],
+  }), false);
+  assert.equal(Value.Check(tool.parameters, { questions: [...valid.questions, valid.questions[0]] }), false);
+  assert.equal(Value.Check(tool.parameters, {
+    questions: [{ ...valid.questions[0], options: valid.questions[0].options.slice(0, ASK_LIMITS.options.min - 1) }],
+  }), false);
+});
 
 test("question tool executes choices and reports cancellation", async () => {
   const { tool } = setup();
@@ -98,15 +128,77 @@ test("questionnaire sanitizes titles, choices, and custom answers", async () => 
     /context cannot be empty after sanitation/,
   );
 
-  await assert.rejects(
-    () => tool.execute("call", {
-      questions: [{ id: "scope", question: "Scope?" }],
-    }, undefined, undefined, {
-      hasUI: true,
-      ui: { editor: async () => "\u001b]52;c;SGFja2Vk\u0007" },
-    }),
-    /answer cannot be empty after sanitation/,
-  );
+  const empty = await tool.execute("call", {
+    questions: [{ id: "scope", question: "Scope?" }],
+  }, undefined, undefined, {
+    hasUI: true,
+    ui: { editor: async () => "\u001b]52;c;SGFja2Vk\u0007" },
+  });
+  assert.equal(empty.details.cancelled, true);
+  assert.deepEqual(empty.details.answers, []);
+
+  const cancelled = await tool.execute("call", {
+    questions: [{ id: "scope", question: "Scope?" }],
+  }, undefined, undefined, {
+    hasUI: true,
+    ui: { editor: async () => undefined },
+  });
+  assert.equal(cancelled.details.cancelled, true);
+});
+
+test("RPC free-form answers obey tool cancellation", async () => {
+  const { tool } = setup();
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  let opened = false;
+  const cancelledBeforeOpen = await tool.execute("call", {
+    questions: [{ id: "scope", question: "Scope?" }],
+  }, alreadyAborted.signal, undefined, {
+    mode: "rpc",
+    hasUI: true,
+    ui: { input: async () => { opened = true; } },
+  });
+  assert.equal(opened, false);
+  assert.equal(cancelledBeforeOpen.details.cancelled, true);
+
+  const controller = new AbortController();
+  let receivedSignal;
+  const pending = tool.execute("call", {
+    questions: [{ id: "scope", question: "Scope?" }],
+  }, controller.signal, undefined, {
+    mode: "rpc",
+    hasUI: true,
+    ui: {
+      input: async (_title, _placeholder, options) => {
+        receivedSignal = options.signal;
+        return new Promise((resolve) => options.signal.addEventListener("abort", () => resolve(undefined), { once: true }));
+      },
+    },
+  });
+  controller.abort();
+  const cancelledWhileOpen = await pending;
+  assert.equal(receivedSignal, controller.signal);
+  assert.equal(cancelledWhileOpen.details.cancelled, true);
+});
+
+test("four emoji-heavy custom answers remain under Pi's output cap", async () => {
+  const { tool } = setup();
+  const result = await tool.execute("call", {
+    questions: Array.from({ length: ASK_LIMITS.questions.max }, (_, index) => ({
+      id: `q${index}`,
+      question: "😀".repeat(ASK_LIMITS.question),
+    })),
+  }, undefined, undefined, {
+    hasUI: true,
+    ui: { editor: async () => "😀".repeat(ASK_LIMITS.customAnswerBytes) },
+  });
+
+  assert.equal(result.details.cancelled, false);
+  assert.equal(result.details.answers.length, ASK_LIMITS.questions.max);
+  assert.ok(result.details.answers.every((answer) => Buffer.byteLength(answer.answer, "utf8") <= ASK_LIMITS.customAnswerBytes));
+  assert.match(result.content[0].text, /Custom answer truncated/);
+  assert.doesNotMatch(result.content[0].text, /Clarification answers truncated/);
+  assert.ok(Buffer.byteLength(result.content[0].text, "utf8") <= ASK_LIMITS.outputBytes);
 });
 
 test("question tool rejects non-UI execution and removes itself from non-UI sessions", async () => {

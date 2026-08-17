@@ -147,6 +147,7 @@ export function applyTodoAction(current: TodoSnapshot, input: TodoAction): TodoC
       return { snapshot, task: copyTask(find(input.id)) };
     case "create": {
       if (snapshot.tasks.length >= TODO_LIMITS.tasks) throw new Error(`Todo list is limited to ${TODO_LIMITS.tasks} tasks`);
+      if (snapshot.nextId >= Number.MAX_SAFE_INTEGER) throw new Error("Todo id space is exhausted");
       const task: TodoTask = {
         id: snapshot.nextId++,
         subject: validText(input.subject, "subject", TODO_LIMITS.subject, true)!,
