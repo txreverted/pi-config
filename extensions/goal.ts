@@ -45,25 +45,19 @@ function restoreGoalState(ctx: ExtensionContext): { goal?: GoalSnapshot; migrate
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "custom" || entry.customType !== ENTRY) continue;
     const data = entry.data as { goal?: unknown } | undefined;
-    if (data?.goal === null) {
-      restored = undefined;
-      migrated = false;
-      continue;
-    }
+    restored = undefined;
+    migrated = false;
+    if (data?.goal === null) continue;
     const validated = validateGoalSnapshot(data?.goal);
     if (!validated) continue;
     restored = validated;
     const raw = data?.goal as Record<string, unknown>;
-    migrated = "tokenBudget" in raw || "tokensUsed" in raw;
+    migrated = "tokenBudget" in raw || "tokensUsed" in raw || "automaticResponses" in raw;
   }
   if (restored?.status === "active") {
     restored = { ...restored, status: "paused", note: "Restored active goal paused; use /goal resume." };
   }
   return { goal: restored, migrated };
-}
-
-export function restoreGoalSnapshot(ctx: ExtensionContext): GoalSnapshot | undefined {
-  return restoreGoalState(ctx).goal;
 }
 
 export default function goalExtension(pi: ExtensionAPI): void {
@@ -74,7 +68,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
   let runKind: RunKind | undefined;
   let continuationPending = false;
   let runText = "";
-  let runResponses = 0;
   let runUsedTool = false;
   let runStopReason: string | undefined;
 
@@ -97,20 +90,30 @@ export default function goalExtension(pi: ExtensionAPI): void {
     }
     pi.events.emit(UI_MODE_STATUS_EVENT, {
       id: "goal",
-      text: `goal: ${goal.status} · ${goal.automaticResponses} auto`.slice(0, 200),
+      text: `goal: ${goal.status} · ${goal.automaticRuns}/${GOAL_LIMITS.automaticRuns} auto`.slice(0, 200),
     });
+  };
+  const wakeWaiting = (): boolean => {
+    if (!goal || goal.status !== "waiting") return false;
+    const reason = automaticStopReason(goal);
+    continuationPending = reason === undefined;
+    goal = {
+      ...goal,
+      status: reason ? "paused" : "active",
+      waitingUntil: undefined,
+      note: reason ? `Automatic continuation stopped: ${reason}.` : "Wait deadline elapsed.",
+    };
+    setToolsVisible(!reason);
+    persist();
+    syncStatus();
+    return reason === undefined;
   };
   const armWaiting = () => {
     clearTimer();
     if (!goal || goal.status !== "waiting" || goal.waitingUntil === undefined) return;
     const remaining = goal.waitingUntil - Date.now();
     if (remaining <= 0) {
-      goal = { ...goal, status: "active", waitingUntil: undefined, note: "Wait deadline elapsed." };
-      continuationPending = true;
-      setToolsVisible(true);
-      persist();
-      syncStatus();
-      if (latestContext?.isIdle() && !latestContext.hasPendingMessages()) kickoff("automatic");
+      if (wakeWaiting() && latestContext?.isIdle() && !latestContext.hasPendingMessages()) kickoff("automatic");
       return;
     }
     waitTimer = setTimeout(() => {
@@ -120,11 +123,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
         armWaiting();
         return;
       }
-      goal = { ...goal, status: "active", waitingUntil: undefined, note: "Wait deadline elapsed." };
-      continuationPending = true;
-      setToolsVisible(true);
-      persist();
-      syncStatus();
+      if (!wakeWaiting()) return;
       latestContext?.ui.notify(normalizeDisplayText("Goal wait elapsed; continuing when Pi is idle."), "info");
       if (latestContext?.isIdle() && !latestContext.hasPendingMessages()) kickoff("automatic");
     }, Math.min(remaining, MAX_WAIT_MS));
@@ -204,7 +203,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "goal_blocked",
     label: "Goal Blocked",
-    description: "Report a genuinely blocked active goal during each automatic run. The first two matching reason/evidence reports are recorded and rejected so work continues; the third consecutive matching report stops the goal. repeated_turns cannot bypass this local count.",
+    description: "Report a genuinely blocked active goal during each automatic run. The first two matching reason/evidence reports are recorded and rejected so work continues; the third consecutive matching report stops the goal.",
     promptSnippet: "Report the same verified impasse across three automatic runs before stopping",
     promptGuidelines: ["Use goal_blocked with matching reason and evidence on each automatic run where the same true external blocker persists; only the third consecutive local report stops the goal."],
     executionMode: "sequential",
@@ -212,13 +211,14 @@ export default function goalExtension(pi: ExtensionAPI): void {
       goal_id: Type.String({ minLength: 1, maxLength: 100 }),
       reason: Type.String({ minLength: 1, maxLength: GOAL_LIMITS.reason }),
       evidence: Type.String({ minLength: 1, maxLength: GOAL_LIMITS.evidence }),
-      repeated_turns: Type.Integer({ minimum: GOAL_LIMITS.repeatedRuns }),
-    }),
+    }, { additionalProperties: false }),
+    prepareArguments(args) {
+      if (!args || typeof args !== "object") return args as { goal_id: string; reason: string; evidence: string };
+      const { repeated_turns: _legacy, ...current } = args as Record<string, unknown>;
+      return current as { goal_id: string; reason: string; evidence: string };
+    },
     async execute(_id, params) {
       const current = requireActiveGoal(params.goal_id);
-      if (!Number.isSafeInteger(params.repeated_turns) || params.repeated_turns < GOAL_LIMITS.repeatedRuns) {
-        throw new Error(`repeated_turns must be at least ${GOAL_LIMITS.repeatedRuns}.`);
-      }
       if (runKind !== "automatic") throw new Error("goal_blocked is available only during an automatic goal run.");
       const reason = cleanGoalText(params.reason);
       const evidence = cleanGoalText(params.evidence);
@@ -230,6 +230,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
         ? current.blockerReports ?? 0
         : sameBlocker ? (current.blockerReports ?? 0) + 1 : 1;
       goal = { ...current, blockerSignature: signature, blockerReports: reports, lastBlockerRun: runNumber };
+      runUsedTool = true;
       persist();
       syncStatus();
       if (reports < GOAL_LIMITS.repeatedRuns) {
@@ -320,7 +321,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
           id: randomUUID(),
           objective: command.objective,
           status: "active",
-          automaticResponses: 0,
           automaticRuns: 0,
           repeatedToolFreeRuns: 0,
         };
@@ -375,7 +375,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
         status: "active",
         waitingUntil: undefined,
         note: undefined,
-        automaticResponses: 0,
         automaticRuns: 0,
         repeatedToolFreeRuns: 0,
         lastToolFreeSignature: undefined,
@@ -395,7 +394,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
     runKind = undefined;
     continuationPending = false;
     runText = "";
-    runResponses = 0;
     runUsedTool = false;
     runStopReason = undefined;
   };
@@ -442,17 +440,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
     runKind = queuedKind;
     queuedKind = undefined;
     runText = "";
-    runResponses = 0;
     runUsedTool = false;
     runStopReason = undefined;
   });
-  pi.on("tool_execution_start", () => {
-    if (runKind) runUsedTool = true;
+  pi.on("tool_execution_end", (event) => {
+    if (runKind && !event.isError) runUsedTool = true;
   });
   pi.on("message_end", (event) => {
     if (!runKind || !event.message || event.message.role !== "assistant") return;
     runText = `${runText}\n${assistantText(event.message)}`.slice(-GOAL_LIMITS.snapshotText);
-    runResponses += 1;
     const stopReason = (event.message as { stopReason?: unknown }).stopReason;
     runStopReason = typeof stopReason === "string" ? stopReason : runStopReason;
   });
@@ -470,7 +466,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
         goal = { ...goal, blockerSignature: undefined, blockerReports: undefined, lastBlockerRun: undefined };
       }
       if (settledKind === "automatic") {
-        goal = recordAutomaticRun(goal, runText, runUsedTool, runResponses);
+        goal = recordAutomaticRun(goal, runText, runUsedTool);
         persist();
       }
     }

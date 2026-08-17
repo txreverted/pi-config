@@ -77,6 +77,10 @@ export class BackgroundRunManager {
     return Math.max(0, this.capacity - this.records.size);
   }
 
+  hasOutstanding(): boolean {
+    return this.records.size > 0;
+  }
+
   enqueue(
     task: ChildTask,
     thinking: ThinkingLevel,

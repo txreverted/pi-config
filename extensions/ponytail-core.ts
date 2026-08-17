@@ -151,14 +151,6 @@ export function readPonytailDefaultMode(): PonytailMode {
   return mode;
 }
 
-export function readPonytailQuietStartup(): boolean {
-  return environmentBoolean("PONYTAIL_QUIET_STARTUP") ?? configBoolean(readConfig(), "quietStartup");
-}
-
-export function readPonytailHideStatus(): boolean {
-  return environmentBoolean("PONYTAIL_HIDE_STATUS") ?? configBoolean(readConfig(), "hideStatus");
-}
-
 export function writePonytailDefaultMode(value: unknown): PonytailMode | undefined {
   const mode = normalizePonytailMode(value);
   if (!mode) return undefined;
@@ -210,18 +202,12 @@ export function isPonytailDeactivationCommand(value: unknown): boolean {
   return text === "stop ponytail" || text === "normal mode";
 }
 
-export function filterPonytailSkillForMode(body: string, mode: PonytailMode): string {
-  return body
-    .replace(/^---[\s\S]*?---\s*/, "")
-    .split(/\r?\n/)
-    .filter((line) => {
-      const tableMode = line.match(/^\|\s*\*\*(lite|full|ultra)\*\*\s*\|/i)?.[1]?.toLowerCase();
-      if (tableMode) return tableMode === mode;
-      const exampleMode = line.match(/^-\s*(lite|full|ultra):\s*"/i)?.[1]?.toLowerCase();
-      return !exampleMode || exampleMode === mode;
-    })
-    .join("\n")
-    .trim();
+export function ponytailSkillCommonBody(body: string): string {
+  const lines = body.replace(/^---[\s\S]*?---\s*/, "").split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "## Intensity");
+  if (start < 0) return lines.join("\n").trim();
+  const nextHeading = lines.findIndex((line, index) => index > start && /^##\s+/.test(line.trimStart()));
+  return [...lines.slice(0, start), ...lines.slice(nextHeading < 0 ? lines.length : nextHeading)].join("\n").trim();
 }
 
 export function buildPonytailInstructions(skillBody: string, mode: PonytailSessionMode): string {
@@ -232,5 +218,5 @@ export function buildPonytailInstructions(skillBody: string, mode: PonytailSessi
     : mode === "full"
       ? "FULL SCOPE: Skip speculative behavior and use the smallest safe interpretation that satisfies the concrete request."
       : "ULTRA SCOPE: Challenge speculative requirements, delete before adding, and implement only the narrowest safe behavior the concrete request needs.";
-  return `PONYTAIL MODE ACTIVE — level: ${mode}\n\n${scopeRule}\n\n${filterPonytailSkillForMode(skillBody, mode)}`;
+  return `PONYTAIL MODE ACTIVE — level: ${mode}\n\n${scopeRule}\n\n${ponytailSkillCommonBody(skillBody)}`;
 }

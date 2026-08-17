@@ -92,6 +92,7 @@ export interface RunChildOptions {
 interface ProtocolState {
   output: string;
   partialText?: string;
+  partialOmittedBytes?: number;
   model?: string;
   stopReason?: string;
   assistantError?: string;
@@ -190,18 +191,22 @@ function utf8Prefix(value: string, maxBytes: number): string {
   return bytes.subarray(0, end).toString("utf8");
 }
 
-export function truncateText(value: string, maxBytes = MAX_RESULT_BYTES): { text: string; truncated: boolean } {
+function truncateBufferedText(value: string, alreadyOmitted: number, maxBytes: number): { text: string; truncated: boolean } {
   const contentLimit = Math.max(1, maxBytes - TRUNCATION_NOTICE_BYTES);
-  const bounded = truncateHead(value, { maxBytes: contentLimit, maxLines: DEFAULT_MAX_LINES });
-  if (!bounded.truncated) return { text: value, truncated: false };
+  const bounded = truncateHead(value, { maxBytes: contentLimit, maxLines: DEFAULT_MAX_LINES - 2 });
+  if (!bounded.truncated && alreadyOmitted === 0) return { text: value, truncated: false };
 
   const content = bounded.firstLineExceedsLimit ? utf8Prefix(value, contentLimit) : bounded.content;
-  const omittedBytes = Math.max(0, bounded.totalBytes - Buffer.byteLength(content, "utf8"));
+  const omittedBytes = alreadyOmitted + Math.max(0, bounded.totalBytes - Buffer.byteLength(content, "utf8"));
   const notice = `\n\n[Subagent output truncated; ${omittedBytes} or more bytes omitted.]`;
   return {
     text: utf8Prefix(`${content.trimEnd()}${notice}`, maxBytes),
     truncated: true,
   };
+}
+
+export function truncateText(value: string, maxBytes = MAX_RESULT_BYTES): { text: string; truncated: boolean } {
+  return truncateBufferedText(value, 0, maxBytes);
 }
 
 function assistantText(message: Record<string, unknown>): string {
@@ -232,7 +237,12 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
     if (event.assistantMessageEvent && typeof event.assistantMessageEvent === "object") {
       const update = event.assistantMessageEvent as Record<string, unknown>;
       if (update.type === "text_delta" && typeof update.delta === "string") {
-        state.partialText = `${state.partialText ?? ""}${update.delta}`.slice(-MAX_RESULT_BYTES);
+        const current = state.partialText ?? "";
+        const remaining = Math.max(0, MAX_RESULT_BYTES - TRUNCATION_NOTICE_BYTES - Buffer.byteLength(current, "utf8"));
+        const kept = utf8Prefix(update.delta, remaining);
+        state.partialText = current + kept;
+        state.partialOmittedBytes = (state.partialOmittedBytes ?? 0) +
+          Buffer.byteLength(update.delta, "utf8") - Buffer.byteLength(kept, "utf8");
       }
     }
   }
@@ -253,10 +263,13 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
   const text = assistantText(message);
   if (text) state.output = text;
   state.partialText = undefined;
+  state.partialOmittedBytes = undefined;
   if (typeof message.provider === "string" && typeof message.model === "string") state.model = `${message.provider}/${message.model}`;
   else if (typeof message.model === "string") state.model = message.model;
   if (typeof message.stopReason === "string") state.stopReason = message.stopReason;
-  if (typeof message.errorMessage === "string" && message.errorMessage.trim()) state.assistantError = message.errorMessage.trim();
+  state.assistantError = typeof message.errorMessage === "string" && message.errorMessage.trim()
+    ? message.errorMessage.trim()
+    : undefined;
   return summary;
 }
 
@@ -318,16 +331,29 @@ async function validatePreflight(definition: AgentDefinition, task: ChildTask): 
   }));
 }
 
+async function removeRunFiles(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 });
+}
+
 async function createRunFiles(definition: AgentDefinition, task: ChildTask) {
   const dir = await mkdtemp(join(tmpdir(), "pi-config-subagent-"));
-  await chmod(dir, 0o700);
-  const promptPath = join(dir, "role.md");
-  const taskPath = join(dir, "task.md");
-  await Promise.all([
-    writeFile(promptPath, definition.prompt, { encoding: "utf8", mode: 0o600 }),
-    writeFile(taskPath, `# Delegated task\n\n${task.task.trim()}\n`, { encoding: "utf8", mode: 0o600 }),
-  ]);
-  return { dir, promptPath, taskPath };
+  try {
+    await chmod(dir, 0o700);
+    const promptPath = join(dir, "role.md");
+    const taskPath = join(dir, "task.md");
+    await Promise.all([
+      writeFile(promptPath, definition.prompt, { encoding: "utf8", mode: 0o600 }),
+      writeFile(taskPath, `# Delegated task\n\n${task.task.trim()}\n`, { encoding: "utf8", mode: 0o600 }),
+    ]);
+    return { dir, promptPath, taskPath };
+  } catch (error) {
+    try {
+      await removeRunFiles(dir);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `Failed to create and clean up subagent run files at ${dir}`);
+    }
+    throw error;
+  }
 }
 
 function terminate(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -439,14 +465,18 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   let startupTimer: NodeJS.Timeout | undefined;
   let progressTimer: NodeJS.Timeout | undefined;
   let staleTimer: NodeJS.Timeout | undefined;
+  let cleanupError: string | undefined;
 
   const emit = () => {
+    const visible = state.partialText === undefined
+      ? truncateText(state.output || progress.text)
+      : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
     progress = {
       ...progress,
       status: progress.status === "starting" && protocolSeen ? "running" : progress.status,
       turns: state.turns,
       toolCalls: state.toolCalls,
-      text: truncateText(state.output || state.partialText || progress.text).text,
+      text: visible.text,
       usage: reportedUsage(state),
     };
     try {
@@ -561,10 +591,16 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   } finally {
     for (const timer of [killTimer, startupTimer, staleTimer]) if (timer) clearTimeout(timer);
     if (progressTimer) clearInterval(progressTimer);
-    await rm(files.dir, { recursive: true, force: true }).catch(() => {});
+    try {
+      await removeRunFiles(files.dir);
+    } catch (error) {
+      cleanupError = `Failed to remove subagent run files at ${files.dir}: ${error instanceof Error ? error.message : String(error)}`;
+    }
   }
 
-  const bounded = truncateText(state.output || state.partialText || "");
+  const bounded = state.partialText === undefined
+    ? truncateText(state.output)
+    : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
   let status: ChildStatus = "done";
   let error: string | undefined;
   if (stop === "aborted") {
@@ -591,6 +627,10 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
   } else if (!state.output.trim()) {
     status = "bugged";
     error = "Subagent produced no final text response";
+  }
+  if (cleanupError) {
+    status = "error";
+    error = error ? `${error}; ${cleanupError}` : cleanupError;
   }
 
   const endedAt = Date.now();

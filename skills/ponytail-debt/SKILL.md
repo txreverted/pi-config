@@ -7,9 +7,9 @@ description: Find deliberate `ponytail:` shortcut comments and turn them into a 
 
 Search tracked source for actual comment markers containing `ponytail:`. Skip `.git`, dependencies, generated files, and build output. Recognize the repository's comment syntax, including `#`, `//`, `/*`, and `<!--` where applicable.
 
-For every marker, report:
+For every marker, map the comment directly to:
 
-`<file>:<line>, <shortcut>. ceiling: <limit>. upgrade: <revisit trigger>.`
+`<file>:<line>, ceiling: <ceiling>. upgrade: <trigger>.`
 
 The convention is `ponytail: <ceiling>; upgrade when <trigger>`. Add `no-trigger` when the comment lacks a concrete upgrade path or measurable revisit condition. Group rows by file.
 

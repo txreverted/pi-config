@@ -4,7 +4,9 @@ import { readFile, writeFile } from "node:fs/promises";
 const mode = process.env.FAKE_PI_MODE ?? "success";
 const args = process.argv.slice(2);
 const taskArgument = args.find((arg) => arg.startsWith("@"));
-const task = taskArgument ? await readFile(taskArgument.slice(1), "utf8") : "";
+const taskPath = taskArgument?.slice(1);
+const task = taskPath ? await readFile(taskPath, "utf8") : "";
+if (taskPath && process.env.FAKE_PI_TASK_PATH_FILE) await writeFile(process.env.FAKE_PI_TASK_PATH_FILE, taskPath);
 const delayMs = Number(process.env.FAKE_PI_DELAY_MS ?? 5);
 
 function writeEvent(event) {
@@ -62,6 +64,13 @@ if (mode === "hang" || mode === "startup-hang") {
 } else if (mode === "stderr-failure") {
   process.stderr.write("provider authentication failed\n");
   process.exitCode = 1;
+} else if (mode === "error-then-success") {
+  const failed = finalEvent();
+  failed.message.content[0].text = "retryable failure";
+  failed.message.stopReason = "error";
+  failed.message.errorMessage = "temporary provider error";
+  writeEvent(failed);
+  writeEvent(finalEvent());
 } else if (mode === "stubborn-descendant") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], {
@@ -108,6 +117,19 @@ if (mode === "hang" || mode === "startup-hang") {
     writeEvent({ type: "tool_execution_end", toolCallId, toolName, result: {}, isError: false });
   }
   writeEvent(finalEvent());
+} else if (mode === "interrupted-partial" || mode === "interrupted-large-partial") {
+  writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
+  const completed = finalEvent();
+  completed.message.content[0].text = "old completed response";
+  writeEvent(completed);
+  writeEvent({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "text_delta",
+      delta: mode === "interrupted-large-partial" ? `BEGIN${"x".repeat(20_000)}END` : "new partial response",
+    },
+  });
+  setInterval(() => {}, 1_000);
 } else if (mode === "activity-heartbeats") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   await new Promise((resolve) => setTimeout(resolve, delayMs));
