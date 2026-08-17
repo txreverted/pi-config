@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import toolsExtension from "../extensions/tools.ts";
 
 function fakePi(initialActive = ["read", "grep", "find"]) {
@@ -44,6 +45,55 @@ test("jq executes shell-free input and enforces exclusive input modes", async ()
     () => jq.execute("jq-test", { filter: ".", input: "{}", files: ["package.json"] }, undefined, undefined, { cwd: process.cwd() }),
     /either input or files/,
   );
+});
+
+test("jq excludes parent secrets from its child environment", async () => {
+  const previous = process.env.PI_CONFIG_JQ_SECRET;
+  const previousLowerPath = process.env.path;
+  process.env.PI_CONFIG_JQ_SECRET = "canary";
+  if (process.platform !== "win32") process.env.path = "case-sensitive-canary";
+  try {
+    const pi = fakePi();
+    toolsExtension(pi);
+    const result = await pi.tools.get("jq").execute("jq-env", {
+      filter: "$ENV.PI_CONFIG_JQ_SECRET // \"absent\"",
+      nullInput: true,
+      rawOutput: true,
+    }, undefined, undefined, { cwd: process.cwd() });
+    assert.equal(result.content[0].text.trim(), "absent");
+    if (process.platform !== "win32") {
+      const lowerPath = await pi.tools.get("jq").execute("jq-env-case", {
+        filter: "$ENV.path // \"absent\"",
+        nullInput: true,
+        rawOutput: true,
+      }, undefined, undefined, { cwd: process.cwd() });
+      assert.equal(lowerPath.content[0].text.trim(), "absent");
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PI_CONFIG_JQ_SECRET;
+    else process.env.PI_CONFIG_JQ_SECRET = previous;
+    if (previousLowerPath === undefined) delete process.env.path;
+    else process.env.path = previousLowerPath;
+  }
+});
+
+test("jq bounds combined stdout and stderr output", async () => {
+  const pi = fakePi();
+  toolsExtension(pi);
+  const jq = pi.tools.get("jq");
+  for (const filter of [
+    "(\"x\" * 50000), (range(0; 3000) | debug | empty)",
+    "range(0; 1500), (range(0; 3000) | debug | empty)",
+  ]) {
+    const result = await jq.execute("jq-combined", {
+      filter,
+      nullInput: true,
+      rawOutput: true,
+    }, undefined, undefined, { cwd: process.cwd() });
+    assert.ok(Buffer.byteLength(result.content[0].text, "utf8") <= DEFAULT_MAX_BYTES);
+    assert.ok(result.content[0].text.split("\n").length <= DEFAULT_MAX_LINES);
+    assert.match(result.content[0].text, /Combined jq output truncated/);
+  }
 });
 
 test("jq sanitizes terminal controls in displayed and retained output", async () => {

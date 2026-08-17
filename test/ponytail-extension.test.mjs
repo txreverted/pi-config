@@ -180,6 +180,22 @@ test("active rules propagate into custom subagents", () => withEnvironment(async
   assert.equal(disabled.input.tasks[0].task, "Leave unchanged");
 }));
 
+test("oversized subagent policy propagation blocks atomically", () => withEnvironment(async () => {
+  const harness = createHarness();
+  const { context } = createContext();
+  await harness.events.get("session_start")({}, context);
+
+  const tasks = [{ task: "Inspect first" }, { task: "x".repeat(50_000) }];
+  const call = { toolName: "subagent", input: { tasks } };
+  const result = await harness.events.get("tool_call")(call, context);
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Subagent task is too long to include the active Ponytail policy; shorten the task.",
+  });
+  assert.equal(tasks[0].task, "Inspect first");
+  assert.equal(tasks[1].task.length, 50_000);
+}));
+
 test("every skill alias expands immediately when idle and queues when busy", () => withEnvironment(async () => {
   const names = ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"];
   const idle = createHarness();
