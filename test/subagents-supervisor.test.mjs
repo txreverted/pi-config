@@ -207,6 +207,7 @@ test("permission broker preserves exact args and denies, times out, and disconne
 
 
 
+
 test("broker bounds aggregate requests, result DTOs, and descendant visibility", async () => {
   const { root, supervisor } = await isolatedSupervisor("pi-broker-bounds");
   const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };
@@ -353,6 +354,46 @@ test("malformed hop counts cannot mutate storage or break reload", async () => {
     try { assert.deepEqual(restored.pendingMail("bob"), []); }
     finally { await restored.shutdown(); }
   } finally { await clean(root, supervisor); }
+});
+
+test("pending main mail replays when the root handler is restored", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-main-mail-restore");
+  try {
+    await supervisor.reserve(task("alice", "Restore Alice"));
+    await supervisor.send("alice", "main", "replayed status", "replay-main");
+    assert.equal(supervisor.pendingMail("main").length, 1);
+    await supervisor.shutdown();
+
+    const restored = await AgentSupervisor.create(rootId);
+    const received = [];
+    try {
+      restored.setMainMessageHandler(async (message) => { received.push(message); });
+      const deadline = Date.now() + 1_000;
+      while ((!received.length || restored.pendingMail("main").length) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(received[0].body, "replayed status");
+      assert.deepEqual(restored.pendingMail("main"), []);
+    } finally { await restored.shutdown(); }
+  } finally { await clean(root, supervisor); }
+});
+
+test("terminal history loads after its working directory is removed", async () => {
+  const { root, rootId, supervisor } = await isolatedSupervisor("pi-missing-history-cwd");
+  const cwd = await mkdtemp(join(tmpdir(), "pi-history-cwd-"));
+  try {
+    await supervisor.reserve({ ...task("history", "History cwd"), cwd });
+    await supervisor.finish("history", result("history", "reviewer", { cwd }));
+    await supervisor.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+
+    const restored = await AgentSupervisor.create(rootId);
+    try {
+      assert.equal(restored.get("history").status, "done");
+      await assert.rejects(() => restored.beginResume("history"), /working directory is unavailable/);
+    } finally { await restored.shutdown(); }
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+    await clean(root, supervisor);
+  }
 });
 
 test("persisted records reject session path escapes", async () => {

@@ -882,7 +882,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const progress = background.progress(params.id);
       const supervisor = await supervisorPromise;
       if (!progress && !supervisor?.get(params.id)) throw new Error(`Unknown agent '${params.id}'`);
-      const cancelled = progress ? background.cancel(params.id) : await supervisor!.cancel(params.id);
+      const cancelledInManager = progress ? background.cancel(params.id) : false;
+      const cancelledInSupervisor = supervisor?.get(params.id) ? await supervisor.cancel(params.id) : false;
+      const cancelled = cancelledInManager || cancelledInSupervisor;
       return {
         content: [{
           type: "text",
