@@ -50,12 +50,12 @@ test("Pi child arguments remove ambient resources and fix role capabilities", ()
     model: "provider/model",
   });
   for (const flag of [
-    "--mode", "--print", "--no-session", "--no-approve", "--no-extensions",
-    "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
   ]) assert.ok(args.includes(flag), flag);
+  for (const removed of ["--print", "--no-session"]) assert.equal(args.includes(removed), false, removed);
   assert.deepEqual(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2), ["--tools", "read,grep"]);
   assert.ok(args.includes("/safe/web.ts"));
-  assert.ok(args.includes("@/tmp/task.md"));
+  assert.equal(args.includes("@/tmp/task.md"), false);
 });
 
 test("Pi invocation does not treat an arbitrary script as the Pi CLI", () => {
@@ -380,7 +380,7 @@ test("child output remains capped in results and progress", async () => {
   }
 });
 
-test("child runner accepts Pi-sized JSON events and rejects larger lines", async () => {
+test("RpcClient accepts large native events while bounded child output stays capped", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-json-size-"));
   try {
     const accepted = await runChildAgent({
@@ -406,8 +406,8 @@ test("child runner accepts Pi-sized JSON events and rejects larger lines", async
       },
       staleTimeoutMs: 5_000,
     });
-    assert.equal(rejected.status, "bugged");
-    assert.match(rejected.error, /Child JSON event exceeded 8388608 characters/);
+    assert.equal(rejected.status, "done");
+    assert.ok(Buffer.byteLength(rejected.output) <= 16_000);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -444,6 +444,23 @@ test("startup faults are bugged while tool and cost usage never stop children", 
     });
     assert.equal(highCost.status, "done");
     assert.equal(highCost.output, "fixture completed");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("terminal length stop reasons remain errors even with partial text", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-length-"));
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("length", "Stop at a length limit", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "length" },
+    });
+    assert.equal(result.status, "error");
+    assert.equal(result.output, "fixture completed");
+    assert.match(result.error, /length/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -519,17 +536,39 @@ test("interrupted large partial output reports truncation without losing its pre
   }
 });
 
+test("child stderr is bounded and never forwarded raw to the parent terminal", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-stderr-bound-"));
+  const originalWrite = process.stderr.write;
+  let forwarded = "";
+  process.stderr.write = (chunk) => { forwarded += String(chunk); return true; };
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("stderr-large", "Emit unsafe stderr", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "stderr-large" },
+    });
+    assert.equal(result.status, "error");
+    assert.ok(Buffer.byteLength(result.stderr, "utf8") <= 64 * 1024);
+    assert.equal(forwarded, "");
+    assert.doesNotMatch(result.stderr, /payload/);
+  } finally {
+    process.stderr.write = originalWrite;
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("child runner classifies malformed output, staleness, errors, and cancellation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-failure-"));
   try {
     const malformed = await runChildAgent({
       definition,
       task: childTask("bad", "Malformed", cwd),
+      staleTimeoutMs: 100,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "malformed" },
     });
-    assert.equal(malformed.status, "bugged");
-    assert.match(malformed.error, /malformed JSON/);
+    assert.equal(malformed.status, "error");
 
     const malformedHang = await runChildAgent({
       definition,
@@ -538,12 +577,12 @@ test("child runner classifies malformed output, staleness, errors, and cancellat
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "malformed-hang" },
     });
-    assert.equal(malformedHang.status, "bugged");
-    assert.match(malformedHang.error, /malformed JSON/);
+    assert.equal(malformedHang.status, "stale");
 
     const stderrFailure = await runChildAgent({
       definition,
       task: childTask("stderr", "Fail on stderr", cwd),
+      staleTimeoutMs: 100,
       invocation: { command: process.execPath, argsPrefix: [fixture] },
       env: { FAKE_PI_MODE: "stderr-failure" },
     });
