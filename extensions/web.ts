@@ -16,6 +16,7 @@ const SEARCH_TRUNCATION_MARKER = "\n\n[Output truncated at 50KB.]";
 
 interface SearchDetails {
   provider: "exa-mcp" | "duckduckgo";
+  attemptedProviders: Array<"exa-mcp" | "duckduckgo">;
   query: string;
   resultCount: number;
 }
@@ -151,7 +152,7 @@ export default function webExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "web search",
-    description: "Search the public web without an API key. Uses Exa's keyless MCP service with keyless DuckDuckGo HTML fallback. Returns up to 10 titles, URLs, and snippets; search queries are sent to the selected service. Output is capped at 50KB.",
+    description: "Search the public web without an API key. Every query is sent to Exa's keyless MCP service first and may also be sent to keyless DuckDuckGo HTML on fallback. Returns up to 10 titles, URLs, and snippets. Output is capped at 50KB.",
     promptSnippet: "Search the public web without an API key",
     promptGuidelines: [
       "Use web_search for current or external information; use web_fetch to read a promising result.",
@@ -173,6 +174,7 @@ export default function webExtension(pi: ExtensionAPI) {
         content: [{ type: "text", text: formatSearchResults(query, response) }],
         details: {
           provider: response.provider,
+          attemptedProviders: response.attemptedProviders,
           query,
           resultCount: response.results.length,
         } satisfies SearchDetails,

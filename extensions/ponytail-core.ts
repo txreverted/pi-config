@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 export const PONYTAIL_RUNTIME_MODES = ["off", "lite", "full", "ultra"] as const;
 export type PonytailMode = typeof PONYTAIL_RUNTIME_MODES[number];
-export type PonytailSessionMode = PonytailMode | "review";
+export type PonytailSessionMode = PonytailMode;
 export const DEFAULT_PONYTAIL_MODE: PonytailMode = "full";
 
 interface PonytailConfig {
@@ -31,10 +31,6 @@ export function normalizePonytailMode(value: unknown): PonytailMode | undefined 
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().toLowerCase();
   return PONYTAIL_RUNTIME_MODES.find((mode) => mode === normalized);
-}
-
-export function normalizePonytailSessionMode(value: unknown): PonytailSessionMode | undefined {
-  return normalizePonytailMode(value) ?? (typeof value === "string" && value.trim().toLowerCase() === "review" ? "review" : undefined);
 }
 
 export function ponytailConfigPath(): string {
@@ -191,7 +187,7 @@ export function resolvePonytailSessionMode(
     if (!entry || typeof entry !== "object") continue;
     const record = entry as { type?: unknown; customType?: unknown; data?: { mode?: unknown } };
     if (record.type !== "custom" || record.customType !== "ponytail-mode") continue;
-    const mode = normalizePonytailSessionMode(record.data?.mode);
+    const mode = normalizePonytailMode(record.data?.mode);
     if (mode) return mode;
   }
   return fallback;
@@ -212,7 +208,6 @@ export function ponytailSkillCommonBody(body: string): string {
 
 export function buildPonytailInstructions(skillBody: string, mode: PonytailSessionMode): string {
   if (mode === "off") return "";
-  if (mode === "review") return "PONYTAIL MODE ACTIVE — level: review. Follow the ponytail-review skill.";
   const scopeRule = mode === "lite"
     ? "LITE SCOPE: Build all explicitly requested behavior. Use the ladder only to choose the implementation, then name a lazier alternative in one sentence; do not omit or narrow requirements."
     : mode === "full"

@@ -29,9 +29,18 @@ test("shared tasks validate dependencies and atomically choose unblocked pending
   assert.throws(() => apply(snapshot, { action: "update", id: 1, blockedBy: [3] }), /cycle|blocked/i);
 });
 
+test("implicit claim-next skips tasks assigned to another owner", () => {
+  let snapshot = apply(emptyTaskSnapshot(), { action: "create", subject: "Assigned", owner: "worker-2" }).snapshot;
+  snapshot = apply(snapshot, { action: "create", subject: "Unowned" }).snapshot;
+  assert.equal(apply(snapshot, { action: "claim" }, main).task.id, 2);
+  assert.equal(apply(snapshot, { action: "claim", id: 1 }, main).task.id, 1);
+});
+
 test("agents mutate only owned work while main can administer", () => {
   let snapshot = apply(emptyTaskSnapshot(), { action: "create", subject: "Owned", owner: "worker-1" }).snapshot;
   assert.throws(() => apply(snapshot, { action: "update", id: 1, subject: "No" }, other), /only tasks they own/);
+  snapshot = apply(snapshot, { action: "update", id: 1, owner: "" }, main).snapshot;
+  assert.equal(snapshot.tasks[0].owner, undefined);
   snapshot = apply(snapshot, { action: "claim", id: 1 }, agent).snapshot;
   snapshot = apply(snapshot, { action: "release", id: 1 }, agent).snapshot;
   assert.equal(snapshot.tasks[0].owner, undefined);

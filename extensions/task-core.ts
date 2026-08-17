@@ -172,7 +172,7 @@ export function applyTaskAction(current: TaskSnapshot, input: TaskAction, caller
     const task = input.id === undefined
       ? snapshot.tasks.find((candidate) =>
           candidate.status === "pending" &&
-          (caller.main || !candidate.owner || candidate.owner === caller.id) &&
+          (!candidate.owner || candidate.owner === caller.id) &&
           candidate.blockedBy.every((blocker) => snapshot.tasks.find((item) => item.id === blocker)?.status === "completed"),
         )
       : find(input.id);

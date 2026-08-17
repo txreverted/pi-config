@@ -29,7 +29,6 @@ const ICONS: Record<PonytailSessionMode, string> = {
   lite: "🌿",
   full: "⚡",
   ultra: "🔥",
-  review: "🔎",
 };
 
 export default function ponytailExtension(pi: ExtensionAPI): void {

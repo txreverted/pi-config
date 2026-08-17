@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,20 +70,29 @@ test("dirty checks handle tracked filenames containing newlines", async () => {
   }
 });
 
-test("writable policy strips secrets and blocks path and symlink escapes before approval", async () => {
-  assert.deepEqual(stripChildCommandEnvironment({ PATH: "/bin", API_TOKEN: "x", COOKIE: "y", PI_CONFIG_BROKER_TOKEN: "z" }), { PATH: "/bin" });
+test("writable policy runs tools without approval while blocking path and symlink escapes", async () => {
+  assert.deepEqual(stripChildCommandEnvironment({
+    PATH: "/bin", LANG: "en_US.UTF-8", API_TOKEN: "x", COOKIE: "y", PI_CONFIG_BROKER_TOKEN: "z",
+    PGPASSWORD: "password", DATABASE_URL: "postgres://user:password@example.test/db",
+    HTTPS_PROXY: "https://user:password@proxy.example.test", HOME: "/home/user", NODE_OPTIONS: "--require=/tmp/hook.js",
+    GOOGLE_APPLICATION_CREDENTIALS: "/tmp/key.json", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/id",
+  }), { PATH: "/bin", LANG: "en_US.UTF-8" });
   const root = await mkdtemp(join(tmpdir(), "pi-agent-policy-"));
   const outside = await mkdtemp(join(tmpdir(), "pi-agent-outside-"));
   const previous = { child: process.env.PI_CONFIG_SUBAGENT_CHILD, worktree: process.env.PI_CONFIG_AGENT_WORKTREE, cwd: process.env.PI_CONFIG_AGENT_CWD };
   try {
     await symlink(join(outside, "target"), join(root, "link"));
     process.env.PI_CONFIG_SUBAGENT_CHILD = "1";
-    process.env.PI_CONFIG_AGENT_WORKTREE = root;
-    process.env.PI_CONFIG_AGENT_CWD = root;
+    const workspace = await realpath(root);
+    process.env.PI_CONFIG_AGENT_WORKTREE = workspace;
+    process.env.PI_CONFIG_AGENT_CWD = workspace;
     let handler;
     writableAgentPolicy({ registerTool() {}, on(name, value) { if (name === "tool_call") handler = value; } });
+    assert.equal(await handler({ toolName: "bash", toolCallId: "b", input: { command: "printf ok" } }), undefined);
+    assert.equal(await handler({ toolName: "write", toolCallId: "w", input: { path: join(workspace, "new.txt") } }), undefined);
+    assert.match((await handler({ toolName: "write", toolCallId: "w", input: { path: `@${join(outside, "new.txt")}` } })).reason, /inside/);
     assert.match((await handler({ toolName: "read", toolCallId: "r", input: { path: outside } })).reason, /inside/);
-    assert.match((await handler({ toolName: "write", toolCallId: "w", input: { path: join(root, "link") } })).reason, /symlink/);
+    assert.match((await handler({ toolName: "write", toolCallId: "w", input: { path: join(workspace, "link") } })).reason, /symlink/);
     assert.match((await handler({ toolName: "unknown", toolCallId: "u", input: {} })).reason, /not allowed/);
   } finally {
     if (previous.child === undefined) delete process.env.PI_CONFIG_SUBAGENT_CHILD; else process.env.PI_CONFIG_SUBAGENT_CHILD = previous.child;

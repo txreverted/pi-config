@@ -88,16 +88,8 @@ function duration(ms: number): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-function safeStatusText(value: string): string {
-  return safeDisplayLine(value);
-}
-
-function shortStatusText(value: string, maxChars = 64): string {
-  return safeDisplayLine(value, maxChars);
-}
-
 function cleanTaskName(value: string): string {
-  const name = safeStatusText(value);
+  const name = safeDisplayLine(value);
   if (!name || name.length > 80 || name.split(" ").length > 3) {
     throw new Error("Subagent task names must contain one to three words");
   }
@@ -127,7 +119,7 @@ function progressActivity(entry: ChildRunProgress): string {
   if (entry.status === "error") return "error";
   if (entry.status === "starting") return "starting…";
   const activity = entry.activity ?? entry.currentTool;
-  return activity ? `${shortStatusText(activity)}…` : "thinking…";
+  return activity ? `${safeDisplayLine(activity, 64)}…` : "thinking…";
 }
 
 interface AgentDisplayEntry {
@@ -151,7 +143,7 @@ function agentTreeLines(entries: readonly AgentDisplayEntry[], theme: Theme, inc
     const tokens = Math.round(progress.usage.totalTokens);
     const stats = `${toolUses} · ${tokenCount(tokens)} token${tokens === 1 ? "" : "s"} · ${duration(elapsed)}`;
     lines.push(
-      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", shortStatusText(name || progress.id))} ${theme.fg("dim", `· ${stats}`)}`,
+      `${branch} ${theme.bold(roleLabel(progress.agent))}  ${theme.fg("dim", safeDisplayLine(name || progress.id, 64))} ${theme.fg("dim", `· ${stats}`)}`,
       `${continuation} ${theme.fg("dim", progressActivity(progress))}`,
     );
   });
@@ -169,7 +161,7 @@ async function prepareAgentBatch(
   definitions: readonly { mutatesWorkspace: boolean }[],
   parentId: string | undefined,
   depth: number,
-  isolateWriters: boolean,
+  background: boolean,
 ): Promise<Array<Awaited<ReturnType<typeof createAgentWorktree>> | undefined>> {
   const existing = supervisor.list();
   const ids = new Set<string>();
@@ -188,14 +180,14 @@ async function prepareAgentBatch(
   const reserved: string[] = [];
   try {
     for (let index = 0; index < tasks.length; index++) {
-      const workspace = isolateWriters && definitions[index].mutatesWorkspace
+      const workspace = background && definitions[index].mutatesWorkspace
         ? await createAgentWorktree(tasks[index].cwd, tasks[index].id)
         : undefined;
       workspaces.push(workspace);
       if (workspace) tasks[index] = { ...tasks[index], cwd: workspace.cwd };
     }
     for (let index = 0; index < tasks.length; index++) {
-      await supervisor.reserve(tasks[index], parentId, depth, workspaces[index]);
+      await supervisor.reserve(tasks[index], parentId, depth, workspaces[index], background);
       reserved.push(tasks[index].id);
     }
     return workspaces;
@@ -243,8 +235,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   let background: BackgroundRunManager;
   let supervisorPromise: Promise<AgentSupervisor> | undefined;
   let rootContext: ExtensionContext | undefined;
-  let confirmationChain = Promise.resolve();
-  let permissionAbort = new AbortController();
   let unsubscribeSupervisor = () => {};
   let supervisorPanelVisible = false;
   const refreshWidget = () => {
@@ -311,33 +301,13 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     widgetContext = ctx;
     rootContext = ctx;
     const rootId = process.env.PI_CONFIG_ROOT_AGENT_SESSION ?? ctx.sessionManager.getSessionId();
-    permissionAbort.abort();
-    permissionAbort = new AbortController();
     const supervisor = await (supervisorPromise = AgentSupervisor.create(rootId));
     unsubscribeSupervisor();
     unsubscribeSupervisor = supervisor.subscribe(refreshWidget);
-    supervisor.setPermissionHandler(async (senderId, request) => {
-      const decide = async () => {
-        const current = rootContext;
-        if (!current?.hasUI || !current.ui?.confirm) return false;
-        const record = supervisor.get(senderId);
-        if (!record?.worktree || request.workspace !== record.worktree) return false;
-        const rawDetail = JSON.stringify({ tool: request.toolName, args: request.args, workspace: request.workspace });
-        if (Buffer.byteLength(rawDetail) > 50_000) return false;
-        const detail = safeDisplayText(rawDetail);
-        return current.ui.confirm(`Approve ${safeStatusText(String(request.toolName))} for ${safeStatusText(record.name)}?`, detail, {
-          timeout: 30_000,
-          signal: permissionAbort.signal,
-        });
-      };
-      const approval = confirmationChain.then(decide, () => false);
-      confirmationChain = approval.then(() => undefined, () => undefined);
-      return approval.catch(() => false);
-    });
     supervisor.setMainMessageHandler(async (message) => {
       pi.sendMessage({
         customType: "agent-message",
-        content: `Untrusted message from agent ${safeStatusText(message.from)} (${safeStatusText(message.id)}):\n\n${safeDisplayText(message.body)}`,
+        content: `Untrusted message from agent ${safeDisplayLine(message.from)} (${safeDisplayLine(message.id)}):\n\n${safeDisplayText(message.body)}`,
         display: true,
         details: { id: message.id, from: message.from },
       }, { deliverAs: "followUp", triggerTurn: true });
@@ -349,7 +319,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
       if (request.action !== "spawn" || !Array.isArray(request.tasks)) throw new Error("Unsupported broker request");
       const parent = supervisor.get(senderId);
-      if (!parent || (parent.agent !== "worker" && parent.agent !== "general-purpose")) throw new Error("This agent role is a leaf");
+      if (!parent || parent.agent !== "worker") throw new Error("This agent role is a leaf");
       if (!rootContext?.model) throw new Error("Root model is unavailable");
       if (request.tasks.length < 1 || request.tasks.length > MAX_SUBAGENT_TASKS) throw new Error("Invalid descendant task count");
       const seenIds = new Set<string>();
@@ -422,7 +392,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "subagent",
-    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only; reviewer Git inspection requires a trusted project. Foreground workers retain local checkout compatibility. Background writable agents use detached persistent worktrees and parent-routed approval. Children use separate processes and contexts and load only static tools and extensions; writable roles receive a supervisor-proxied delegation tool. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background results are session-scoped and bounded.",
+    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only; reviewer Git inspection requires a trusted project. Foreground workers retain local checkout compatibility. Background writable agents use detached persistent worktrees without per-tool confirmation. Children use separate processes and contexts and load only static tools and extensions; writable roles receive a supervisor-proxied delegation tool. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background results are session-scoped and bounded.",
     promptSnippet: "Delegate implementation, independent review, or public-web research to isolated child contexts",
     promptGuidelines: [
       "Give every subagent task a descriptive name of at most three words.",
@@ -567,6 +537,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           },
         });
         await supervisor.finish(task.id, result);
+        await supervisor.collect(task.id);
         progress[index] = result;
         results[index] = result;
         publish();
@@ -611,8 +582,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal) {
       const supervisor = await supervisorPromise;
       const persisted = supervisor?.get(params.id);
-      const current = background.progress(params.id) ?? persisted?.progress ?? persisted?.result;
-      if (!current || persisted?.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
+      if (!persisted?.background) throw new Error(`Unknown background subagent id '${params.id}'`);
+      const current = background.progress(params.id) ?? persisted.progress ?? persisted.result;
+      if (!current || persisted.collected) throw new Error(`Unknown background subagent id '${params.id}'`);
       let result = background.result(params.id) ?? persisted?.result;
       if (!result && params.wait) result = await background.wait(params.id, signal);
       if (!result) {
@@ -655,7 +627,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const state: AgentsUiState = {};
       for (;;) {
         const tasks = await taskStoreForContext(ctx).read().catch(() => undefined);
-        state.claimedTasks = new Map(tasks?.tasks.filter((task) => task.owner && task.status === "in_progress").map((task) => [task.owner!, `${task.id} ${safeStatusText(task.activeForm || task.subject)}`]) ?? []);
+        state.claimedTasks = new Map(tasks?.tasks.filter((task) => task.owner && task.status === "in_progress").map((task) => [task.owner!, `${task.id} ${safeDisplayLine(task.activeForm || task.subject)}`]) ?? []);
         if (state.selectedId && state.transcript === undefined) state.transcript = formatRecentTranscript(await supervisor.transcriptTail(state.selectedId).catch(() => ""));
         const action = await ctx.ui.custom<AgentsUiAction>((tui, theme, _keys, done) => {
           let unsubscribe = () => {};
@@ -685,6 +657,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             if (["queued", "starting", "running"].includes(record.status)) throw new Error("Cannot discard an active agent worktree");
             if (!await ctx.ui.confirm(`Discard worktree for ${record.name}?`, "All unapplied agent changes will be permanently deleted.")) continue;
             await discardAgentWorktree(workspaceFor(record)); await supervisor.clearWorkspace(record.id);
+          } else if (action.type === "delete") {
+            if (!await ctx.ui.confirm(`Delete agent record ${record.name}?`, "The agent record and mail will be deleted. Its native session file will be retained.")) continue;
+            await supervisor.deleteRecord(record.id);
           } else if (action.type === "resume") {
             if (!ctx.model || !record.sessionFile) throw new Error(`Agent '${record.id}' has no native session to resume`);
             const definition = agents.get(record.agent); if (!definition) throw new Error(`Unknown subagent role '${record.agent}'`);
@@ -697,7 +672,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
               sessionDir: supervisor.sessionsDirectory, sessionPath: record.sessionFile,
               env: { PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0", PI_CONFIG_TASK_LIST_ID: process.env.PI_CONFIG_TASK_LIST_ID ?? ctx.sessionManager.getSessionId(), PI_CONFIG_TASK_OWNER: record.id, ...(record.worktree ? { PI_CONFIG_AGENT_WORKTREE: record.worktree, PI_CONFIG_AGENT_CWD: record.cwd } : {}), ...supervisor.childEnvironment(record.id) },
               onSession: (sessionFile, client) => supervisor.attach(record.id, sessionFile, client, controller), onUpdate: (progress) => { void supervisor.update(record.id, progress).catch(() => {}); },
-            }).then((result) => supervisor.finish(record.id, result)).catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
+            }).then(async (result) => { await supervisor.finish(record.id, result); await supervisor.collect(record.id); })
+              .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
           }
           if (action.type !== "diff") state.transcript = undefined;
         } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
@@ -759,6 +735,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         },
       });
       await supervisor.finish(record.id, result);
+      await supervisor.collect(record.id);
       return { content: [{ type: "text", text: untrustedOutput([result]) }], details: { progress: [result], results: [result], usage: result.usage }, usage: result.usage as Usage };
     },
   });
@@ -854,6 +831,25 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "delete_agent_record",
+    label: "delete agent record",
+    description: "Delete one terminal, worktree-free agent record after explicit human confirmation. Native session files are retained.",
+    parameters: cancelSchema,
+    executionMode: "sequential",
+    async execute(_call, params, _signal, _update, ctx) {
+      const supervisor = await supervisorPromise;
+      const record = supervisor?.get(params.id);
+      if (!record) throw new Error(`Unknown agent '${params.id}'`);
+      if (!ctx.hasUI || !await ctx.ui.confirm(
+        `Delete agent record ${record.name}?`,
+        "The agent record and mail will be deleted. Its native session file will be retained.",
+      )) throw new Error("Human confirmation denied");
+      await supervisor!.deleteRecord(record.id);
+      return { content: [{ type: "text", text: `Deleted agent record ${record.id}. Native session retained.` }], details: { id: record.id } };
+    },
+  });
+
+  pi.registerTool({
     name: "cancel_subagent",
     label: "cancel subagent",
     description: "Cancel one queued or running agent by id.",
@@ -864,7 +860,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const progress = background.progress(params.id);
       const supervisor = await supervisorPromise;
       if (!progress && !supervisor?.get(params.id)) throw new Error(`Unknown agent '${params.id}'`);
-      const cancelled = progress ? background.cancel(params.id) : await supervisor!.cancel(params.id);
+      const cancelledInManager = progress ? background.cancel(params.id) : false;
+      const cancelledInSupervisor = supervisor?.get(params.id) ? await supervisor.cancel(params.id) : false;
+      const cancelled = cancelledInManager || cancelledInSupervisor;
       return {
         content: [{
           type: "text",
@@ -890,7 +888,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     completionTimer = undefined;
     pendingCompletions.clear();
     if (ctx?.mode === "tui") pi.events.emit(UI_PANEL_EVENT, { id: "subagents" });
-    permissionAbort.abort();
     unsubscribeSupervisor();
     unsubscribeSupervisor = () => {};
     const supervisor = await supervisorPromise;
