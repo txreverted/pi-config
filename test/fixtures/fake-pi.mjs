@@ -71,6 +71,11 @@ if (mode === "hang" || mode === "startup-hang") {
   failed.message.errorMessage = "temporary provider error";
   writeEvent(failed);
   writeEvent(finalEvent());
+} else if (mode === "empty-final") {
+  writeEvent(finalEvent());
+  const empty = finalEvent();
+  empty.message.content[0].text = "";
+  writeEvent(empty);
 } else if (mode === "stubborn-descendant") {
   writeEvent({ type: "session", version: 3, id: "fixture-session", timestamp: new Date().toISOString(), cwd: process.cwd() });
   const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], {

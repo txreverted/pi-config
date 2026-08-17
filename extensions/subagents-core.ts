@@ -261,7 +261,7 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
   state.usage = addUsage(state.usage, normalizeUsage(message.usage));
   state.streamingUsage = undefined;
   const text = assistantText(message);
-  if (text) state.output = text;
+  state.output = text;
   state.partialText = undefined;
   state.partialOmittedBytes = undefined;
   if (typeof message.provider === "string" && typeof message.model === "string") state.model = `${message.provider}/${message.model}`;
@@ -469,7 +469,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
 
   const emit = () => {
     const visible = state.partialText === undefined
-      ? truncateText(state.output || progress.text)
+      ? truncateText(state.output)
       : truncateBufferedText(state.partialText, state.partialOmittedBytes ?? 0, MAX_RESULT_BYTES);
     progress = {
       ...progress,

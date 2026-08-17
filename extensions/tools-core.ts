@@ -33,6 +33,7 @@ export interface BoundedProcessOptions {
   timeoutMs?: number;
   tempPrefix?: string;
   maxOutputBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function removeBoundedOutput(fullOutputPath: string): Promise<void> {
@@ -112,6 +113,7 @@ export async function runBoundedProcess(
     shell: false,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
+    env: options.env,
   });
 
   const requestStop = (reason: typeof stopReason) => {

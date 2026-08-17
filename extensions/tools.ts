@@ -5,6 +5,7 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
   formatSize,
+  truncateHead,
   type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -17,6 +18,11 @@ import {
 } from "./tools-core.ts";
 
 const JQ_OUTPUT_HARD_LIMIT_BYTES = 10 * 1024 * 1024;
+const COMBINED_TRUNCATION_NOTICE = "[Combined jq output truncated to stay within Pi's tool output limits.]";
+const JQ_ENVIRONMENT_KEYS = new Set([
+  "PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ",
+  "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+]);
 
 interface OutputDetails {
   exitCode: number;
@@ -72,12 +78,14 @@ async function sanitizeRetainedOutput(path: string): Promise<void> {
   await writeFile(path, safeDisplayText(content), "utf8");
 }
 
-function appendTruncationNotice(
-  text: string,
-  result: BoundedProcessResult,
-  retainedOutputs: Set<string>,
-): string {
-  if (!result.truncation || !result.fullOutputPath) return text;
+function jqEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(environment).filter(([name, value]) =>
+    value !== undefined && JQ_ENVIRONMENT_KEYS.has(process.platform === "win32" ? name.toUpperCase() : name),
+  ));
+}
+
+function truncationNotice(result: BoundedProcessResult, retainedOutputs: Set<string>): string | undefined {
+  if (!result.truncation || !result.fullOutputPath) return undefined;
   retainedOutputs.add(result.fullOutputPath);
   const truncation = result.truncation;
   const savedOutput = result.outputLimitReached
@@ -86,11 +94,25 @@ function appendTruncationNotice(
   const hardLimit = result.outputLimitReached
     ? ` Processing stopped after reaching the ${formatSize(result.outputLimitReached)} hard output limit.`
     : "";
-  const notice =
-    `[Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} captured lines ` +
+  return `[Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} captured lines ` +
     `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)} captured). ` +
     `${savedOutput}.${hardLimit}]`;
-  return text ? `${text}\n\n${notice}` : notice;
+}
+
+function boundedJqOutput(result: BoundedProcessResult, retainedOutputs: Set<string>): string {
+  const output = safeDisplayText(appendStderr(result.stdout, result.stderr)) || "jq produced no output";
+  const processNotice = truncationNotice(result, retainedOutputs);
+  const complete = processNotice ? `${output}\n\n${processNotice}` : output;
+  if (Buffer.byteLength(complete, "utf8") <= DEFAULT_MAX_BYTES && complete.split("\n").length <= DEFAULT_MAX_LINES) {
+    return complete;
+  }
+
+  const footer = `${processNotice ? `\n\n${processNotice}` : ""}\n\n${COMBINED_TRUNCATION_NOTICE}`;
+  const truncated = truncateHead(output, {
+    maxBytes: DEFAULT_MAX_BYTES - Buffer.byteLength(footer, "utf8"),
+    maxLines: DEFAULT_MAX_LINES - footer.split("\n").length,
+  });
+  return `${truncated.content}${footer}`;
 }
 
 export default function toolsExtension(pi: ExtensionAPI): void {
@@ -135,6 +157,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
         input: params.input,
         tempPrefix: "pi-jq",
         maxOutputBytes: JQ_OUTPUT_HARD_LIMIT_BYTES,
+        env: jqEnvironment(),
       });
       if (result.code !== 0 && !result.outputLimitReached) {
         if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
@@ -142,10 +165,8 @@ export default function toolsExtension(pi: ExtensionAPI): void {
       }
       if (result.fullOutputPath) await sanitizeRetainedOutput(result.fullOutputPath);
 
-      let text = safeDisplayText(appendStderr(result.stdout, result.stderr)) || "jq produced no output";
-      text = appendTruncationNotice(text, result, retainedOutputs);
       return {
-        content: [{ type: "text", text }],
+        content: [{ type: "text", text: boundedJqOutput(result, retainedOutputs) }],
         details: {
           exitCode: result.code,
           truncation: result.truncation,

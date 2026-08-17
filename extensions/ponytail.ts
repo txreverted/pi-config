@@ -152,22 +152,20 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", (event) => {
-    if (currentMode === "off") return;
-    const suffix = `\n\n--- Active parent coding policy ---\n${buildPonytailInstructions(SKILL_BODY, currentMode)}`;
-    const append = (value: unknown): string | undefined => {
-      if (typeof value !== "string" || value.length + suffix.length > 50_000) return undefined;
-      return `${value}${suffix}`;
-    };
-
-    if (event.toolName !== "subagent") return;
+    if (currentMode === "off" || event.toolName !== "subagent") return;
     const input = event.input as { tasks?: unknown };
     if (!Array.isArray(input.tasks)) return;
-    for (const task of input.tasks) {
-      if (!task || typeof task !== "object") continue;
-      const record = task as { task?: unknown };
-      if (typeof record.task !== "string" || !record.task.trim()) continue;
-      const next = append(record.task);
-      if (next) record.task = next;
+    const records = input.tasks.flatMap((task) =>
+      task && typeof task === "object" && typeof (task as { task?: unknown }).task === "string"
+        ? [task as { task: string }]
+        : [],
+    );
+    const suffix = `\n\n--- Active parent coding policy ---\n${buildPonytailInstructions(SKILL_BODY, currentMode)}`;
+    if (records.some((record) => record.task.trim() && record.task.length + suffix.length > 50_000)) {
+      return { block: true, reason: "Subagent task is too long to include the active Ponytail policy; shorten the task." };
+    }
+    for (const record of records) {
+      if (record.task.trim()) record.task = `${record.task}${suffix}`;
     }
   });
 
