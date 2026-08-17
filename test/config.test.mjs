@@ -10,6 +10,14 @@ const packageJson = JSON.parse(await readFile(new URL("../package.json", import.
 const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+const promptNames = ["implement-review", "list-improvements", "research", "review", "rework-docs"];
+const skillNames = ["ponytail", "ponytail-audit", "ponytail-debt", "ponytail-help", "ponytail-review"];
+const roleNames = ["Explore", "researcher", "reviewer", "worker"];
+const runtimeMarkdownPaths = [
+  ...promptNames.map((name) => `prompts/${name}.md`),
+  ...roleNames.map((name) => `subagents/prompts/${name}.md`),
+  ...skillNames.map((name) => `skills/${name}/SKILL.md`),
+];
 const themeNames = ["neutral"];
 const themes = await Promise.all(themeNames.map(async (name) =>
   JSON.parse(await readFile(new URL(`../themes/${name}.json`, import.meta.url), "utf8"))
@@ -38,21 +46,9 @@ test("only productionized extensions, skills, and prompts are enabled", async ()
   assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
   assert.deepEqual(packageJson.pi.themes, themeNames.map((name) => `./themes/${name}.json`));
   assert.deepEqual(packageJson.files, ["assets", "extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
-  assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), [
-    "implement-review.md",
-    "list-improvements.md",
-    "research.md",
-    "review.md",
-    "rework-docs.md",
-  ]);
-  assert.deepEqual((await readdir(new URL("../skills/", import.meta.url))).sort(), [
-    "ponytail",
-    "ponytail-audit",
-    "ponytail-debt",
-    "ponytail-help",
-    "ponytail-review",
-  ]);
-  for (const skill of ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"]) {
+  assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`).sort());
+  assert.deepEqual((await readdir(new URL("../skills/", import.meta.url))).sort(), skillNames);
+  for (const skill of skillNames) {
     await access(new URL(`../skills/${skill}/SKILL.md`, import.meta.url));
   }
   const ponytailSkill = await readFile(new URL("../skills/ponytail/SKILL.md", import.meta.url), "utf8");
@@ -79,9 +75,7 @@ test("package contents include runtime resources and exclude repository-only sta
       ...packageJson.pi.themes.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
       "subagents/registry.ts",
-      "subagents/prompts/worker.md",
-      "prompts/rework-docs.md",
-      "skills/ponytail/SKILL.md",
+      ...runtimeMarkdownPaths,
     ]) assert.ok(names.has(path), path);
     assert.equal([...names].some((path) => /^(?:test|\.github)\//.test(path)), false);
     for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
@@ -119,7 +113,6 @@ test("production tarball installs without dev dependencies and loads through Pi"
     const packagePath = join(application, "node_modules", ...packageJson.name.split("/"));
     const loaded = spawnSync("pi", [
       "-e", packagePath,
-      "--no-skills",
       "--list-models", "__pi_config_production_install__",
     ], {
       cwd: application,
@@ -164,32 +157,41 @@ test("theme stays neutral except for added and removed diff lines", () => {
   }
 });
 
-test("CI checks pushes and the human guide keeps operational safety facts", () => {
+test("CI checks pushes and the human guide links runtime resources and safety facts", async () => {
   assert.match(workflow, /^on:\n  push:\n  pull_request:/m);
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /node: \["22\.19\.0", "22\.x"\]/);
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
+  assert.match(workflow, /windows-latest/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
+
+  assert.match(readme, /\]\(extensions\/[^)]+\)/);
+  assert.match(readme, /\]\(test\/[^)]+\)/);
+  for (const path of runtimeMarkdownPaths) {
+    assert.ok(readme.includes(`](${path})`), path);
+    await access(new URL(`../${path}`, import.meta.url));
+  }
+
   for (const pattern of [
     /worker.*local user's privileges/i,
     /context, not operating-system permissions/i,
     /Active subagents have no time, token, cost, turn, or tool-call ceiling/,
     /Goal mode can use every active tool and provider quota/,
-    /Productive runs continue until completion/,
     /Never send secrets or private code through `web_search`/,
     /Never pass signed URLs or private query tokens to `web_fetch`/,
     /web_fetch` fails closed when an HTTP proxy is configured/,
     /built-in `find` and `grep` tools/,
-    /exact black \(`#000000`\)/,
-    /No config widget or footer renders below the editor/,
-    /Pi-native transcript layout, dialogs, loaders, warnings/,
     /`outputPad: 1` and `editorPaddingX: 0`/,
     /`tuiMode: "regular"`/,
     /PI_LIVE_SUBAGENT_WORKER=1/,
     /PI_LIVE_WEB=1/,
+    /\/agents.*persistent subagents/,
+    /Background `worker` launches require.*clean checkout/,
+    /Applying changes removes the managed worktree/,
+    /\/skill:ponytail-audit/,
   ]) assert.match(readme, pattern);
 });
 
