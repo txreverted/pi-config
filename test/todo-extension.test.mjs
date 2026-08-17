@@ -69,6 +69,19 @@ test("session events restore the latest validated current-branch snapshot", asyn
   assert.doesNotMatch(listed.content[0].text, /Old/);
 });
 
+test("a malformed final result retains the latest validated todo snapshot", async () => {
+  const { tool, events } = setup();
+  const valid = { tasks: [{ id: 1, subject: "Keep", status: "pending", blockedBy: [] }], nextId: 2 };
+  const ctx = context([
+    resultEntry({ action: "create", snapshot: valid }),
+    resultEntry({ action: "update", snapshot: { tasks: "invalid", nextId: 3 } }),
+  ]);
+
+  events.get("session_start")({}, ctx.value);
+  const listed = await tool.execute("call", { action: "list" });
+  assert.match(listed.content[0].text, /#1 Keep/);
+});
+
 test("restoration keeps legacy blocked work by returning it to pending", async () => {
   const { tool, events } = setup();
   const legacy = {
