@@ -12,6 +12,6 @@ The final Pi config is minimal and contains only:
 - Goal mode, so long-running work continues until it is done or the user stops it.
 - Web search that requires no API key or credentials.
 - Practical command-line tools such as `rg`, `find`, and `jq`.
-- These approved UI elements only: `□`, `■`, `☒`, `⎿`, `├`, `─`, `│`, and Pi's default animated loader.
+- These approved UI elements only: `□`, `■`, `☒`, `⎿`, `├`, `─`, `│`, `└` and Pi's default animated loader.
 
 Prefer Pi built-ins, platform features, command-line tools, and small local implementations. Do not add or import a Pi extension or package when the needed behavior can reasonably be implemented locally.
