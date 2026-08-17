@@ -17,7 +17,7 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 | Subagents | [`extensions/subagents.ts`](extensions/subagents.ts), [`extensions/subagents-core.ts`](extensions/subagents-core.ts), [`extensions/subagents-background.ts`](extensions/subagents-background.ts), [`extensions/subagent-tools.ts`](extensions/subagent-tools.ts), [`subagents/registry.ts`](subagents/registry.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-background.test.mjs`](test/subagents-background.test.mjs), [`test/subagents-security.test.mjs`](test/subagents-security.test.mjs), [`test/live-subagent.mjs`](test/live-subagent.mjs) |
 | Todos | [`extensions/todo.ts`](extensions/todo.ts), [`extensions/todo-core.ts`](extensions/todo-core.ts) | [`test/todo-core.test.mjs`](test/todo-core.test.mjs), [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs) |
 | Goal mode | [`extensions/goal.ts`](extensions/goal.ts), [`extensions/goal-core.ts`](extensions/goal-core.ts) | [`test/goal-core.test.mjs`](test/goal-core.test.mjs), [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs) |
-| Concise replies | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
+| Concise replies (Caveman) | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
 | Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts), [`extensions/ponytail-core.ts`](extensions/ponytail-core.ts) | [`test/ponytail-core.test.mjs`](test/ponytail-core.test.mjs), [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs) |
 | Package load | [`package.json`](package.json) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 
@@ -31,10 +31,10 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 
 ## Operation
 
-- The `worker` subagent runs alone in the foreground with the local user's privileges. Reviewers and researchers are read only. Separate processes isolate context, not operating-system permissions. Background runs are limited to three outstanding results. Collect or cancel them before starting a worker.
+- The `worker` subagent runs alone in the foreground with the local user's privileges. Reviewers and researchers are read only. Reviewer Git inspection requires a trusted project because repository Git configuration can execute commands. Separate processes isolate context, not operating-system permissions. Background runs are limited to three outstanding results. Collect all results before starting a worker.
 - Active subagents have no time, token, cost, turn, or tool-call ceiling. They stop on completion, failure, cancellation, or inactivity. Cancel work that is no longer useful.
 - `/goal <objective>` starts goal mode. `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, and `/goal clear` manage it.
-- Goal mode can use every active tool and provider quota. Productive runs continue until completion, a genuine blocker, an error, explicit pause or clear, or three repeated empty tool-free runs. Ordinary input steers or wakes it.
+- Goal mode can use every active tool and provider quota. Productive runs continue until completion within each 20-automatic-run allowance. Work pauses at that ceiling, or sooner on a genuine blocker, an error, explicit pause or clear, or three repeated empty tool-free runs. `/goal resume` renews the allowance. Ordinary input steers or wakes it.
 - Never send secrets or private code through `web_search`.
 - Never pass signed URLs or private query tokens to `web_fetch`.
 - `web_fetch` fails closed when an HTTP proxy is configured because proxy-side DNS would weaken its pinned-address SSRF protection. `web_search` uses Pi's proxy-aware fetch.
