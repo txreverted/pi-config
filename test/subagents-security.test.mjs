@@ -388,10 +388,17 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       .map((line) => line.trimEnd()).join("\n");
     assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 tokens · 0s/);
 
+    const cancelled = await tools.get("cancel_subagent").execute("cancel-queued", { id: ids[1] });
+    assert.equal(cancelled.details.cancelled, true);
+    assert.ok(!["queued", "starting", "running"].includes(
+      (await tools.get("list_agents").execute("list", {})).details.records.find((record) => record.id === ids[1]).status,
+    ));
+
     await waitFor(() => messages.flatMap((entry) => entry.message.details.results).length >= ids.length);
     const notified = messages.flatMap((entry) => entry.message.details.results);
     assert.deepEqual(notified.map((result) => result.id).sort(), [...ids].sort());
-    assert.ok(notified.every((result) => result.status === "done"));
+    assert.equal(notified.find((result) => result.id === ids[0]).status, "done");
+    assert.equal(notified.find((result) => result.id === ids[1]).status, "error");
     assert.ok(messages.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
 
     await assert.rejects(
@@ -403,8 +410,13 @@ test("background extension launches, renders, notifies, collects, and evicts", {
 
     for (const id of ids) {
       const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
-      assert.match(collected.content[0].text, /fixture completed/);
-      assert.equal(collected.usage.totalTokens, 17);
+      if (id === ids[0]) {
+        assert.match(collected.content[0].text, /fixture completed/);
+        assert.equal(collected.usage.totalTokens, 17);
+      } else {
+        assert.match(collected.content[0].text, /cancelled/);
+        assert.equal(collected.usage.totalTokens, 0);
+      }
       await assert.rejects(
         () => tools.get("get_subagent_result").execute("collect-again", { id }, undefined),
         /Unknown background subagent id/,
@@ -435,7 +447,9 @@ test("background extension launches, renders, notifies, collects, and evicts", {
 
     const persistent = await tools.get("list_agents").execute("list", {});
     assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
-    assert.ok(persistent.details.records.every((record) => record.collected && record.sessionFile));
+    assert.ok(persistent.details.records.every((record) => record.collected));
+    assert.ok(persistent.details.records.find((record) => record.id === ids[0]).sessionFile);
+    assert.ok(!["queued", "starting", "running"].includes(persistent.details.records.find((record) => record.id === ids[1]).status));
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;

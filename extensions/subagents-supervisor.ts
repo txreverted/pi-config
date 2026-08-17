@@ -251,9 +251,9 @@ export class AgentSupervisor {
         if (!validRecord(value, supervisor.sessionsDirectory) || ids.has(value.id) || names.has(value.name)) throw new Error("Invalid persisted agent record");
         const parent = value.parentId ? data.records.find((candidate) => validRecord(candidate, supervisor.sessionsDirectory) && candidate.id === value.parentId) as PersistentAgentRecord | undefined : undefined;
         if ((value.parentId && (!parent || value.depth !== parent.depth + 1)) || (!value.parentId && value.depth !== 1)) throw new Error("Invalid persisted agent ancestry");
-        const cwd = await realpath(value.cwd).catch(() => undefined);
-        if (!cwd || !(await stat(cwd)).isDirectory()) throw new Error("Invalid persisted agent cwd");
         if (value.worktree) {
+          const cwd = await realpath(value.cwd).catch(() => undefined);
+          if (!cwd || !(await stat(cwd)).isDirectory()) throw new Error("Invalid persisted agent cwd");
           const managedRoot = join(getAgentDir(), "pi-config", "worktrees");
           const [repoRoot, worktree] = await Promise.all([realpath(value.repoRoot!).catch(() => undefined), realpath(value.worktree).catch(() => undefined)]);
           if (!repoRoot || !worktree || repoRoot !== value.repoRoot || worktree !== value.worktree ||
@@ -289,7 +289,10 @@ export class AgentSupervisor {
 
   setBrokerHandler(handler: BrokerHandler): void { this.handler = handler; }
   setPermissionHandler(handler: PermissionHandler): void { this.permissionHandler = handler; }
-  setMainMessageHandler(handler: (message: AgentMail) => Promise<void>): void { this.mainMessageHandler = handler; }
+  setMainMessageHandler(handler: (message: AgentMail) => Promise<void>): void {
+    this.mainMessageHandler = handler;
+    void this.deliver("main").then(() => this.persist()).catch(() => undefined);
+  }
 
   async startBroker(): Promise<void> {
     if (this.server) return;
@@ -347,6 +350,8 @@ export class AgentSupervisor {
     const record = this.records.get(id);
     if (!record || ACTIVE.has(record.status)) throw new Error(`Agent '${id}' cannot be resumed`);
     if (record.worktreeDiscarded) throw new Error(`Agent '${id}' cannot be resumed after its worktree was discarded`);
+    const cwd = await realpath(record.cwd).catch(() => undefined);
+    if (!cwd || !(await stat(cwd)).isDirectory()) throw new Error(`Agent '${id}' cannot be resumed because its working directory is unavailable`);
     if (this.activeCount() >= maxAgentConcurrency()) throw new Error(`At most ${maxAgentConcurrency()} agents may be active globally`);
     const active = [...this.records.values()].filter((item) => ACTIVE.has(item.status));
     const writable = record.agent === "worker";
