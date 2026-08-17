@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,6 +82,48 @@ test("package contents include runtime resources and exclude repository-only sta
     }
   } finally {
     await rm(cache, { recursive: true, force: true });
+  }
+});
+
+test("production tarball installs without dev dependencies and loads through Pi", async () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const temporary = await mkdtemp(join(tmpdir(), "pi-config-production-install-"));
+  const application = join(temporary, "application");
+  try {
+    const packed = spawnSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", temporary], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.equal(packed.status, 0, packed.stderr || packed.stdout);
+    const tarball = join(temporary, JSON.parse(packed.stdout)[0].filename);
+    await mkdir(application);
+    await writeFile(join(application, "package.json"), '{"private":true,"type":"module"}\n');
+
+    const installed = spawnSync("npm", [
+      "install", "--offline", "--ignore-scripts", "--omit=dev", "--legacy-peer-deps", "--no-package-lock", tarball,
+    ], {
+      cwd: application,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+
+    const packagePath = join(application, "node_modules", ...packageJson.name.split("/"));
+    const loaded = spawnSync("pi", [
+      "-e", packagePath,
+      "--no-skills",
+      "--list-models", "__pi_config_production_install__",
+    ], {
+      cwd: application,
+      encoding: "utf8",
+      env: { ...process.env, PI_OFFLINE: "1" },
+      timeout: 30_000,
+    });
+    assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
+    assert.match(loaded.stdout, /No models (?:matching|available)/);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
 });
 
