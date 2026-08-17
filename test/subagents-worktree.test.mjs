@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import writableAgentPolicy, { stripChildCommandEnvironment } from "../extensions/subagents-policy.ts";
-import { agentDiff, applyAgentDiff, createAgentWorktree, discardAgentWorktree } from "../extensions/subagents-worktree.ts";
+import { agentDiff, applyAgentDiff, createAgentWorktree, discardAgentWorktree, recoverAgentWorktree } from "../extensions/subagents-worktree.ts";
 
 const execFile = promisify(execFileCallback);
 async function git(cwd, ...args) { return execFile("git", args, { cwd }); }
@@ -18,6 +18,7 @@ test("writable worktrees isolate changes and apply only onto clean parent paths"
   process.env.PI_CODING_AGENT_DIR = agentRoot;
   let first;
   let second;
+  let dotted;
   try {
     await git(root, "init", "-q");
     await git(root, "config", "user.email", "test@example.invalid");
@@ -27,8 +28,10 @@ test("writable worktrees isolate changes and apply only onto clean parent paths"
     await git(root, "commit", "-qm", "base");
     first = await createAgentWorktree(root, "writer-one");
     second = await createAgentWorktree(root, "writer-two");
+    dotted = await createAgentWorktree(root, "writer-one.json");
     await writeFile(join(first.worktree, "file.txt"), "first\n");
     await writeFile(join(first.worktree, "new.bin"), Buffer.from([0, 1, 2, 255]));
+    await writeFile(join(first.worktree, "empty.txt"), "");
     await writeFile(join(second.worktree, "file.txt"), "second\n");
     assert.equal(await readFile(join(root, "file.txt"), "utf8"), "base\n");
     const patch = await agentDiff(first);
@@ -38,6 +41,7 @@ test("writable worktrees isolate changes and apply only onto clean parent paths"
     await applyAgentDiff(first, patch);
     assert.equal(await readFile(join(root, "file.txt"), "utf8"), "first\n");
     assert.deepEqual(await readFile(join(root, "new.bin")), Buffer.from([0, 1, 2, 255]));
+    assert.equal(await readFile(join(root, "empty.txt"), "utf8"), "");
     const appliedWorktree = first.worktree;
     await discardAgentWorktree(first);
     first = undefined;
@@ -45,6 +49,43 @@ test("writable worktrees isolate changes and apply only onto clean parent paths"
   } finally {
     if (first) await discardAgentWorktree(first).catch(() => {});
     if (second) await discardAgentWorktree(second).catch(() => {});
+    if (dotted) await discardAgentWorktree(dotted).catch(() => {});
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+    await Promise.all([rm(root, { recursive: true, force: true }), rm(agentRoot, { recursive: true, force: true })]);
+  }
+});
+
+test("worktree recovery keeps the exact base across divergent parent history", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-recovery-"));
+  const agentRoot = await mkdtemp(join(tmpdir(), "pi-agent-state-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentRoot;
+  let workspace;
+  try {
+    await git(root, "init", "-q");
+    await git(root, "config", "user.email", "test@example.invalid");
+    await git(root, "config", "user.name", "Test");
+    await writeFile(join(root, "base.txt"), "A\n");
+    await git(root, "add", "base.txt");
+    await git(root, "commit", "-qm", "A");
+    const commitA = (await git(root, "rev-parse", "HEAD")).stdout.trim();
+    await writeFile(join(root, "history.txt"), "B\n");
+    await git(root, "add", "history.txt");
+    await git(root, "commit", "-qm", "B");
+    workspace = await createAgentWorktree(root, "recover-worker");
+    await writeFile(join(workspace.worktree, "worker.txt"), "worker\n");
+
+    await git(root, "reset", "--hard", commitA);
+    await writeFile(join(root, "divergent.txt"), "C\n");
+    await git(root, "add", "divergent.txt");
+    await git(root, "commit", "-qm", "C");
+
+    const recovered = await recoverAgentWorktree(root, "recover-worker");
+    const patch = await agentDiff(recovered);
+    assert.match(patch, /worker\.txt/);
+    assert.doesNotMatch(patch, /history\.txt|divergent\.txt/);
+  } finally {
+    if (workspace) await discardAgentWorktree(workspace).catch(() => {});
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
     await Promise.all([rm(root, { recursive: true, force: true }), rm(agentRoot, { recursive: true, force: true })]);
   }
@@ -76,7 +117,7 @@ test("dirty checks handle tracked filenames containing newlines", async () => {
   }
 });
 
-test("background worktrees reject dirty parent checkouts", async () => {
+test("worker worktrees reject dirty parent checkouts", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-dirty-launch-"));
   const agentRoot = await mkdtemp(join(tmpdir(), "pi-agent-state-"));
   const previous = process.env.PI_CODING_AGENT_DIR;

@@ -96,25 +96,6 @@ test("a malformed final result retains the latest validated todo snapshot", asyn
   assert.match(listed.content[0].text, /#1 Keep/);
 });
 
-test("restoration keeps legacy blocked work by returning it to pending", async () => {
-  const { tool, events } = setup();
-  const legacy = {
-    tasks: [
-      { id: 1, subject: "Blocker", status: "pending", blockedBy: [] },
-      { id: 2, subject: "Dependent", status: "in_progress", blockedBy: [1] },
-    ],
-    nextId: 3,
-  };
-  const ctx = context([resultEntry({ action: "update", snapshot: legacy })], "print");
-
-  events.get("session_start")({}, ctx.value);
-  const listed = await tool.execute("call", { action: "list" });
-  assert.deepEqual(listed.details.snapshot.tasks.map(({ subject, status }) => ({ subject, status })), [
-    { subject: "Blocker", status: "pending" },
-    { subject: "Dependent", status: "pending" },
-  ]);
-});
-
 test("todo publishes bounded logical panel content to the composite UI", async () => {
   const { tool, commands, shortcuts, events, panelUpdates } = setup();
   const ctx = context();
@@ -126,10 +107,10 @@ test("todo publishes bounded logical panel content to the composite UI", async (
   assert.equal(mixedUpdate.name, UI_PANEL_EVENT);
   const mixed = mixedUpdate.data.render(80, { fg: (_color, text) => text });
   assert.deepEqual(mixed.slice(0, 4), [
-    "Todos · 1/10 completed",
-    " └─ ■ #2 Task 1 — Working",
-    "    □ #3 Task 2",
-    "    □ #4 Task 3",
+    "Todos: 1/10 completed",
+    " ├─ ■ #2 Task 1 - Working",
+    " ├─ □ #3 Task 2",
+    " ├─ □ #4 Task 3",
   ]);
 
   await shortcuts.get("ctrl+shift+t").handler(ctx.value);

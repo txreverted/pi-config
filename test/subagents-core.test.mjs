@@ -11,6 +11,7 @@ import {
   consumeProtocolEvent,
   emptyUsage,
   mapConcurrent,
+  MAX_AGENT_ERROR_BYTES,
   resolvePiInvocation,
   resolveWorkspaceCwd,
   runChildAgent,
@@ -50,7 +51,8 @@ test("Pi child arguments remove ambient resources and fix role capabilities", ()
   for (const flag of [
     "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
   ]) assert.ok(args.includes(flag), flag);
-  for (const removed of ["--print", "--no-session"]) assert.equal(args.includes(removed), false, removed);
+  assert.ok(args.includes("--no-session"));
+  assert.equal(args.includes("--print"), false);
   assert.deepEqual(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2), ["--tools", "read,grep"]);
   assert.ok(args.includes("/safe/web.ts"));
   assert.equal(args.includes("@/tmp/task.md"), false);
@@ -94,6 +96,7 @@ test("protocol parsing keeps visible text, final output, and usage", () => {
       provider: "test",
       model: "one",
       stopReason: "stop",
+      errorMessage: "é".repeat(MAX_AGENT_ERROR_BYTES),
       usage: { input: 5, totalTokens: 5, cost: { total: 0.1 } },
     },
   }), protocol);
@@ -102,6 +105,8 @@ test("protocol parsing keeps visible text, final output, and usage", () => {
   assert.equal(protocol.turns, 1);
   assert.equal(protocol.usage.input, 5);
   assert.equal(protocol.usage.cost.total, 0.1);
+  assert.ok(Buffer.byteLength(protocol.assistantError) <= MAX_AGENT_ERROR_BYTES);
+  assert.match(protocol.assistantError, /truncated/);
   assert.equal(protocol.streamingUsage, undefined);
 });
 
@@ -134,9 +139,10 @@ test("bounded concurrency preserves input order", async () => {
   assert.equal(peak, 2);
 });
 
-test("child runner parses chunked Pi JSON, reports progress, and removes private run files", async () => {
+test("child runner sends delegated text directly, reports progress, and removes private run files", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-run-"));
-  const taskPathFile = join(cwd, "task-path");
+  const promptFile = join(cwd, "prompt");
+  const runPathFile = join(cwd, "run-path");
   const updates = [];
   try {
     const result = await runChildAgent({
@@ -144,7 +150,7 @@ test("child runner parses chunked Pi JSON, reports progress, and removes private
       task: childTask("fixture", "Inspect the fixture", cwd),
       model: "fixture/test-model",
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_MODE: "tool", FAKE_PI_DELAY_MS: "10", FAKE_PI_TASK_PATH_FILE: taskPathFile },
+      env: { FAKE_PI_MODE: "tool", FAKE_PI_DELAY_MS: "10", FAKE_PI_PROMPT_FILE: promptFile, FAKE_PI_RUN_PATH_FILE: runPathFile },
       onUpdate: (update) => updates.push(update),
     });
     assert.equal(result.status, "done");
@@ -154,8 +160,11 @@ test("child runner parses chunked Pi JSON, reports progress, and removes private
     assert.ok(updates.some((update) => update.currentTool === "read"));
     assert.ok(updates.some((update) => update.activity === "reading files"));
     assert.equal(updates.at(-1).status, "done");
-    const taskPath = await readFile(taskPathFile, "utf8");
-    await assert.rejects(() => access(dirname(taskPath)));
+    const prompt = await readFile(promptFile, "utf8");
+    assert.match(prompt, /--- BEGIN DELEGATED TASK ---\nInspect the fixture\n--- END DELEGATED TASK ---/);
+    assert.doesNotMatch(prompt, /@.*task\.md/);
+    const runPath = await readFile(runPathFile, "utf8");
+    await assert.rejects(() => access(dirname(runPath)));
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -202,7 +211,7 @@ test("an empty final child response does not reuse earlier commentary", async ()
 
 test("child runner reports and preserves a run directory when cleanup fails", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-cleanup-failure-"));
-  const taskPathFile = join(cwd, "task-path");
+  const runPathFile = join(cwd, "run-path");
   const originalRm = fsPromises.rm;
   let runDirectory;
   fsPromises.rm = async (path, options) => {
@@ -215,9 +224,9 @@ test("child runner reports and preserves a run directory when cleanup fails", as
       definition,
       task: childTask("cleanup", "Exercise cleanup failure", cwd),
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_TASK_PATH_FILE: taskPathFile },
+      env: { FAKE_PI_RUN_PATH_FILE: runPathFile },
     });
-    runDirectory = dirname(await readFile(taskPathFile, "utf8"));
+    runDirectory = dirname(await readFile(runPathFile, "utf8"));
     assert.equal(result.status, "error");
     assert.match(result.error, /Failed to remove subagent run files at .*pi-config-subagent-.*: forced cleanup failure/);
     assert.match(result.error, new RegExp(runDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -548,6 +557,7 @@ test("child stderr is bounded and never forwarded raw to the parent terminal", a
     });
     assert.equal(result.status, "error");
     assert.ok(Buffer.byteLength(result.stderr, "utf8") <= 64 * 1024);
+    assert.doesNotMatch(result.stderr, /�/);
     assert.equal(forwarded, "");
     assert.doesNotMatch(result.stderr, /payload/);
   } finally {

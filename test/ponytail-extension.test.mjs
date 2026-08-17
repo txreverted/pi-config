@@ -83,15 +83,15 @@ test("session mode persists, injects isolated instructions, and updates internal
 
   assert.deepEqual(harness.entries.at(-1), { customType: "ponytail-mode", data: { mode: "ultra" } });
   const injected = await harness.events.get("before_agent_start")({ systemPrompt: "BASE" }, context);
-  assert.match(injected.systemPrompt, /^BASE\n\nPONYTAIL MODE ACTIVE — level: ultra/);
+  assert.match(injected.systemPrompt, /^BASE\n\nPONYTAIL MODE ACTIVE - level: ultra/);
   assert.match(injected.systemPrompt, /challenge speculative requirements/i);
   assert.doesNotMatch(injected.systemPrompt, /Build the request, then mention/i);
 
   await harness.events.get("agent_start")({}, context);
-  assert.match(harness.statuses.at(-1).value, /^●.*ULTRA$/);
+  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra (active)");
   assert.equal(harness.events.has("agent_end"), false);
   await harness.events.get("agent_settled")({}, context);
-  assert.match(harness.statuses.at(-1).value, /^○.*ULTRA$/);
+  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra (idle)");
 }));
 
 test("session tree navigation restores the selected branch mode", () => withEnvironment(async () => {
@@ -162,7 +162,7 @@ test("active rules propagate into custom subagents", () => withEnvironment(async
   const subagent = { toolName: "subagent", input: { tasks: [{ task: "Inspect the change" }] } };
   await harness.events.get("tool_call")(subagent, context);
   assert.match(subagent.input.tasks[0].task, /Active parent coding policy/);
-  assert.match(subagent.input.tasks[0].task, /PONYTAIL MODE ACTIVE — level: full/);
+  assert.match(subagent.input.tasks[0].task, /PONYTAIL MODE ACTIVE - level: full/);
 
   for (const tasks of [{}, [null], ["not-an-object"]]) {
     await assert.doesNotReject(async () => harness.events.get("tool_call")({ toolName: "subagent", input: { tasks } }, context));

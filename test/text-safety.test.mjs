@@ -19,6 +19,6 @@ test("multiline display text removes terminal and directional controls", () => {
 test("single-line display text collapses whitespace and truncates by character", () => {
   assert.equal(safeDisplayLine("  one\n\ttwo\r three  "), "one two three");
   assert.equal(safeDisplayLine("a😀bc", 4), "a😀bc");
-  assert.equal(safeDisplayLine("a😀bcd", 4), "a😀b…");
+  assert.equal(safeDisplayLine("a😀bcd", 4), "a...");
   assert.throws(() => safeDisplayLine("x", 0), /positive integer/);
 });
