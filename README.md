@@ -65,7 +65,7 @@ This contract covers this package's editor, persistent panels, tool renderers, n
 
 ## Install
 
-Requires Node `>=22.19.0` and `jq` on `PATH`. The package activates Pi's built-in `find` and `grep` tools without overriding them.
+Requires Node `>=22.19.0`, Pi packages `>=0.84.2`, TypeBox `>=1.3.14`, and `jq` on `PATH`. The package activates Pi's built-in `find` and `grep` tools without overriding them.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
