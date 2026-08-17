@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import webExtension, {
   configuredProxy,
   formatFetchedContent,
+  formatFetchedPage,
   formatSearchResults,
 } from "../extensions/web.ts";
 
@@ -29,6 +30,46 @@ test("web_fetch rejects a configured proxy before network access while search st
     if (previous === undefined) delete process.env.HTTPS_PROXY;
     else process.env.HTTPS_PROXY = previous;
   }
+});
+
+test("complete web outputs reserve notices within their byte caps", () => {
+  const search = formatSearchResults("max output", {
+    provider: "exa-mcp",
+    results: Array.from({ length: 10 }, (_, index) => ({
+      title: `${index}${"t".repeat(299)}`,
+      url: `https://example.com/${"u".repeat(4_076)}`,
+      snippet: "s".repeat(1_000),
+    })),
+  });
+  assert.ok(Buffer.byteLength(search, "utf8") <= 50 * 1024);
+  assert.match(search, /\[Output truncated at 50KB\.\]$/);
+
+  const title = "t".repeat(500);
+  const url = `https://example.com/${"u".repeat(4_076)}`;
+  const fetched = formatFetchedPage({
+    title,
+    url,
+    source: "direct",
+    content: "😀".repeat(30_000),
+  }, 0, 30_000);
+  assert.ok(Buffer.byteLength(fetched.text, "utf8") <= 40 * 1024);
+  assert.match(fetched.text, new RegExp(`Title: ${title}`));
+  assert.match(fetched.text, new RegExp(`URL: ${url}`));
+  assert.match(fetched.text, new RegExp(`\\[Content truncated\\. Call web_fetch again with start: ${fetched.end} to continue\\.\\]$`));
+
+  const manyLines = formatFetchedPage({
+    title: "Lines",
+    url: "https://example.com/lines",
+    source: "direct",
+    content: "line\n".repeat(10_000),
+  }, 0, 30_000);
+  assert.ok(manyLines.text.split("\n").length <= 2_000);
+  assert.equal(manyLines.truncated, true);
+  assert.match(manyLines.text, /Content truncated/);
+
+  const emptyPage = { title: "Empty", url: "https://example.com/empty", source: "direct", content: "" };
+  assert.doesNotThrow(() => formatFetchedPage(emptyPage, 0, 1_000));
+  assert.throws(() => formatFetchedPage(emptyPage, 1, 1_000), /beyond content length 0/);
 });
 
 test("web result formatting removes terminal controls from untrusted data", () => {

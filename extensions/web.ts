@@ -1,5 +1,10 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  truncateHead,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
@@ -7,6 +12,7 @@ import { normalizeDisplayText } from "./ui-core.ts";
 import { fetchWebPage, searchWeb, type ReaderMode } from "./web-core.ts";
 
 const MAX_TOOL_CONTENT_BYTES = 40 * 1024;
+const SEARCH_TRUNCATION_MARKER = "\n\n[Output truncated at 50KB.]";
 
 interface SearchDetails {
   provider: "exa-mcp" | "duckduckgo";
@@ -44,15 +50,20 @@ export function formatSearchResults(
 
   if (response.results.length === 0) {
     lines.push("", safeDisplayText(response.rawText || "No results found."));
-    return lines.join("\n");
+  } else {
+    for (let index = 0; index < response.results.length; index++) {
+      const result = response.results[index];
+      lines.push("", `${index + 1}. ${safeDisplayLine(result.title)}`, `   URL: ${safeDisplayLine(result.url)}`);
+      if (result.snippet) lines.push(`   ${safeDisplayLine(result.snippet)}`);
+    }
   }
 
-  for (let index = 0; index < response.results.length; index++) {
-    const result = response.results[index];
-    lines.push("", `${index + 1}. ${safeDisplayLine(result.title)}`, `   URL: ${safeDisplayLine(result.url)}`);
-    if (result.snippet) lines.push(`   ${safeDisplayLine(result.snippet)}`);
-  }
-  return lines.join("\n");
+  const output = lines.join("\n");
+  if (Buffer.byteLength(output, "utf8") <= DEFAULT_MAX_BYTES) return output;
+  return truncateHead(output, {
+    maxBytes: DEFAULT_MAX_BYTES - Buffer.byteLength(SEARCH_TRUNCATION_MARKER, "utf8"),
+    maxLines: DEFAULT_MAX_LINES,
+  }).content + SEARCH_TRUNCATION_MARKER;
 }
 
 export function formatFetchedContent(
@@ -88,11 +99,20 @@ function truncateUtf8(value: string, maxBytes: number): string {
   return value.slice(0, end);
 }
 
-export function pageContent(value: string, start: number, maxChars: number, maxBytes: number) {
+export function pageContent(value: string, start: number, maxChars: number, maxBytes: number, maxLines = Infinity) {
   if (start > 0 && /[\uDC00-\uDFFF]/.test(value[start] ?? "") && /[\uD800-\uDBFF]/.test(value[start - 1])) {
     throw new Error(`start ${start} splits a Unicode character`);
   }
   let desiredEnd = Math.min(value.length, start + maxChars);
+  let lines = 1;
+  for (let index = start; index < desiredEnd; index++) {
+    if (value[index] !== "\n") continue;
+    if (lines === maxLines) {
+      desiredEnd = index;
+      break;
+    }
+    lines++;
+  }
   if (desiredEnd < value.length && /[\uD800-\uDBFF]/.test(value[desiredEnd - 1]) && /[\uDC00-\uDFFF]/.test(value[desiredEnd])) {
     desiredEnd--;
   }
@@ -100,11 +120,38 @@ export function pageContent(value: string, start: number, maxChars: number, maxB
   return { chunk, end: start + chunk.length };
 }
 
+export function formatFetchedPage(
+  page: { title: string; url: string; source: "direct" | "jina-reader"; content: string },
+  start: number,
+  maxChars: number,
+): { text: string; end: number; truncated: boolean } {
+  if (start > 0 && start >= page.content.length) {
+    throw new Error(`start ${start} is beyond content length ${page.content.length}`);
+  }
+  const emptyOutput = formatFetchedContent(page, "").join("\n");
+  const emptyPlaceholder = "(No readable content extracted)";
+  const metadataBytes = Buffer.byteLength(emptyOutput, "utf8") - Buffer.byteLength(emptyPlaceholder, "utf8");
+  const furthestEnd = Math.min(page.content.length, start + maxChars);
+  const reservedNotice = `\n\n[Content truncated. Call web_fetch again with start: ${furthestEnd} to continue.]`;
+  const contentBytes = MAX_TOOL_CONTENT_BYTES - metadataBytes - Buffer.byteLength(reservedNotice, "utf8");
+  if (contentBytes < Buffer.byteLength(emptyPlaceholder, "utf8")) {
+    throw new Error("Page metadata exceeds the 40KB output limit");
+  }
+  const metadataLines = formatFetchedContent(page, "").length - 1;
+  const contentLines = DEFAULT_MAX_LINES - metadataLines - 2;
+
+  const { chunk, end } = pageContent(page.content, start, maxChars, contentBytes, contentLines);
+  const truncated = end < page.content.length;
+  const lines = formatFetchedContent(page, chunk);
+  if (truncated) lines.push("", `[Content truncated. Call web_fetch again with start: ${end} to continue.]`);
+  return { text: lines.join("\n"), end, truncated };
+}
+
 export default function webExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "web search",
-    description: "Search the public web without an API key. Uses Exa's keyless MCP service with keyless DuckDuckGo HTML fallback. Returns up to 10 titles, URLs, and snippets; search queries are sent to the selected service.",
+    description: "Search the public web without an API key. Uses Exa's keyless MCP service with keyless DuckDuckGo HTML fallback. Returns up to 10 titles, URLs, and snippets; search queries are sent to the selected service. Output is capped at 50KB.",
     promptSnippet: "Search the public web without an API key",
     promptGuidelines: [
       "Use web_search for current or external information; use web_fetch to read a promising result.",
@@ -173,23 +220,14 @@ export default function webExtension(pi: ExtensionAPI) {
       });
 
       const start = params.start ?? 0;
-      if (start >= page.content.length && page.content.length > 0) {
-        throw new Error(`start ${start} is beyond content length ${page.content.length}`);
-      }
-
-      const { chunk, end } = pageContent(
-        page.content,
+      const { text, end, truncated } = formatFetchedPage(
+        page,
         start,
         params.maxChars ?? 20_000,
-        MAX_TOOL_CONTENT_BYTES,
       );
-      const truncated = end < page.content.length;
-
-      const lines = formatFetchedContent(page, chunk);
-      if (truncated) lines.push("", `[Content truncated. Call web_fetch again with start: ${end} to continue.]`);
 
       return {
-        content: [{ type: "text", text: lines.join("\n") }],
+        content: [{ type: "text", text }],
         details: {
           url: safeDisplayLine(url),
           finalUrl: safeDisplayLine(page.url),
