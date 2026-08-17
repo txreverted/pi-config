@@ -14,7 +14,8 @@ import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
 const allowedTools = new Set([
   "read", "bash", "edit", "write", "grep", "find", "ls", "jq",
-  "web_search", "web_fetch", "git_status", "git_diff",
+  "web_search", "web_fetch", "git_status", "git_diff", "subagent",
+  "get_subagent_result", "cancel_subagent", "list_agents", "send_agent_message", "task",
 ]);
 
 test("expanded subagent output strips terminal control sequences", () => {
@@ -23,7 +24,11 @@ test("expanded subagent output strips terminal control sequences", () => {
     registerTool(value) { tools.set(value.name, value); },
     on() {},
   });
-  assert.deepEqual([...tools.keys()], ["subagent", "get_subagent_result", "cancel_subagent"]);
+  assert.deepEqual([...tools.keys()], [
+    "subagent", "get_subagent_result", "list_agents", "resume_agent",
+    "get_agent_transcript", "send_agent_message", "get_agent_diff",
+    "apply_agent_changes", "discard_agent_worktree", "cancel_subagent",
+  ]);
   const tool = tools.get("subagent");
   const rendered = tool.renderResult({
     content: [{ type: "text", text: "safe\u001b]52;c;SGFja2Vk\u0007\u001b[31m red\u001b[0m\nnext" }],
@@ -220,14 +225,6 @@ test("writable workers require trust and exclusive foreground execution", async 
   }), /trusted project/);
 
   await assert.rejects(() => tool.execute("call", {
-    tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
-    background: true,
-  }, undefined, undefined, {
-    ...context,
-    isProjectTrusted: () => true,
-  }), /foreground only/);
-
-  await assert.rejects(() => tool.execute("call", {
     tasks: [
       { name: "Implement change", agent: "worker", task: "Implement the change" },
       { name: "Review change", agent: "reviewer", task: "Review the change" },
@@ -249,29 +246,31 @@ test("writable workers require trust and exclusive foreground execution", async 
 
 test("agent registry keeps specialist roles read-only and scopes the worker", () => {
   const agents = createAgentRegistry();
-  assert.equal(MAX_SUBAGENT_TASKS, 3);
-  assert.deepEqual([...agents.keys()], ["reviewer", "researcher", "worker"]);
+  assert.equal(MAX_SUBAGENT_TASKS, 20);
+  assert.deepEqual([...agents.keys()], ["Explore", "general-purpose", "reviewer", "researcher", "worker"]);
 
   for (const agent of agents.values()) {
     assert.ok(agent.prompt.length > 0, agent.name);
     for (const budget of ["maxTurns", "maxToolCalls", "maxReportedTokens", "maxCostUsd", "timeoutMs"]) {
       assert.equal(budget in agent, false, `${agent.name}:${budget}`);
     }
-    assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
+    if (agent.name !== "Explore") assert.ok((agent.extensions?.length ?? 0) > 0, agent.name);
     assert.equal(typeof agent.mutatesWorkspace, "boolean", agent.name);
     for (const tool of agent.tools) assert.ok(allowedTools.has(tool), `${agent.name}:${tool}`);
   }
 
   const reviewer = agents.get("reviewer");
-  assert.deepEqual(reviewer.tools, ["read", "grep", "find", "ls", "git_status", "git_diff"]);
+  assert.deepEqual(reviewer.tools, ["read", "grep", "find", "ls", "git_status", "git_diff", "task"]);
   assert.match(reviewer.extensions[0], /extensions[/\\]subagent-tools\.ts$/);
+  assert.match(reviewer.extensions[1], /extensions[/\\]task\.ts$/);
   assert.equal(reviewer.contextFiles, true);
   assert.equal(reviewer.thinking, "high");
   assert.equal(reviewer.mutatesWorkspace, false);
 
   const researcher = agents.get("researcher");
-  assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
+  assert.deepEqual(researcher.tools, ["web_search", "web_fetch", "task"]);
   assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
+  assert.match(researcher.extensions[1], /extensions[/\\]task\.ts$/);
   assert.equal(researcher.contextFiles, false);
   assert.equal(researcher.thinking, "low");
   assert.equal(researcher.mutatesWorkspace, false);
@@ -279,9 +278,13 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
   const worker = agents.get("worker");
   assert.deepEqual(worker.tools, [
     "read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch",
+    "subagent", "get_subagent_result", "cancel_subagent", "list_agents", "send_agent_message", "task",
   ]);
   assert.match(worker.extensions[0], /extensions[/\\]tools\.ts$/);
   assert.match(worker.extensions[1], /extensions[/\\]web\.ts$/);
+  assert.match(worker.extensions[2], /extensions[/\\]subagents-bridge\.ts$/);
+  assert.match(worker.extensions[3], /extensions[/\\]task\.ts$/);
+  assert.match(worker.extensions[4], /extensions[/\\]subagents-policy\.ts$/);
   assert.equal(worker.contextFiles, true);
   assert.equal(worker.thinking, "medium");
   assert.equal(worker.mutatesWorkspace, true);
@@ -318,6 +321,7 @@ test("background extension launches, renders, notifies, collects, and evicts", {
   const originalPath = process.env.PATH;
   const originalMode = process.env.FAKE_PI_MODE;
   const originalDelay = process.env.FAKE_PI_DELAY_MS;
+  const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
   let shutdown;
 
   try {
@@ -326,6 +330,8 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     process.env.PATH = `${root}${delimiter}${originalPath ?? ""}`;
     process.env.FAKE_PI_MODE = "tool";
     process.env.FAKE_PI_DELAY_MS = "120";
+    process.env.PI_CONFIG_SUBAGENT_CLI_PATH = fixture;
+    process.env.PI_CODING_AGENT_DIR = join(root, "agent-dir");
 
     const tools = new Map();
     const events = new Map();
@@ -343,10 +349,19 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       cwd: root,
       mode: "tui",
       model: { provider: "fixture", id: "test-model", reasoning: true },
+      sessionManager: { getSessionId: () => "fixture-root" },
       isProjectTrusted: () => true,
       ui: {},
     };
-    events.get("session_start")({}, context);
+    await events.get("session_start")({}, context);
+
+    await assert.rejects(() => tools.get("subagent").execute("duplicate", {
+      tasks: [
+        { name: "Duplicate name", agent: "reviewer", task: "First duplicate" },
+        { name: "Duplicate name", agent: "reviewer", task: "Second duplicate" },
+      ],
+    }, undefined, undefined, context), /Agent name.*already exists/);
+    assert.deepEqual((await tools.get("list_agents").execute("list", {})).details.records, []);
 
     const started = await tools.get("subagent").execute("call", {
       tasks: [
@@ -388,6 +403,9 @@ test("background extension launches, renders, notifies, collects, and evicts", {
         /Unknown background subagent id/,
       );
     }
+    const persistent = await tools.get("list_agents").execute("list", {});
+    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
+    assert.ok(persistent.details.records.every((record) => record.collected && record.sessionFile));
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;
@@ -396,6 +414,9 @@ test("background extension launches, renders, notifies, collects, and evicts", {
     else process.env.FAKE_PI_MODE = originalMode;
     if (originalDelay === undefined) delete process.env.FAKE_PI_DELAY_MS;
     else process.env.FAKE_PI_DELAY_MS = originalDelay;
+    delete process.env.PI_CONFIG_SUBAGENT_CLI_PATH;
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
     await rm(root, { recursive: true, force: true });
   }
 });
