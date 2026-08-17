@@ -10,6 +10,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 | Shared UI | [`extensions/ui.ts`](extensions/ui.ts) | [`test/ui-extension.test.mjs`](test/ui-extension.test.mjs) |
 | Command-line tools | [`extensions/tools.ts`](extensions/tools.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs) |
 | Web search and fetch | [`extensions/web.ts`](extensions/web.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs) |
+| User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
 | Subagents | [`extensions/subagents.ts`](extensions/subagents.ts), [`subagents/registry.ts`](subagents/registry.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-security.test.mjs`](test/subagents-security.test.mjs) |
 | Todos | [`extensions/todo.ts`](extensions/todo.ts) | [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs) |
 | Goal mode | [`extensions/goal.ts`](extensions/goal.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs) |
@@ -21,6 +22,7 @@ Subagent role prompts are in [`subagents/prompts/`](subagents/prompts/).
 ## Use
 
 - `todo` manages one branch-local dependency-aware list. `/todos` shows it.
+- `ask_user_question` asks one to four structured questions in TUI or RPC mode. Every question includes a custom answer.
 - `subagent` runs independent tasks concurrently and returns every result in the same call. Use it for work that is faster in parallel, including unblocked todos.
 - Read-only agents inspect the delegated workspace. Each worker uses a separate Git worktree.
 - Workers require a trusted Git project, a clean parent checkout, and human confirmation. Inspect each patch. Completed worktrees remain recoverable by id from their original repository after a restart.
