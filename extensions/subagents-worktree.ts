@@ -7,6 +7,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const exec = promisify(execFile);
 export const MAX_AGENT_DIFF_BYTES = 2_000_000;
+const MAX_UNTRACKED_FILES = 1_000;
 
 export interface AgentWorkspace {
   repoRoot: string;
@@ -41,6 +42,9 @@ export async function repositoryIdentity(cwd: string): Promise<{ repoRoot: strin
 export async function createAgentWorktree(cwd: string, agentId: string): Promise<AgentWorkspace & { cwd: string }> {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(agentId)) throw new Error("Invalid agent id");
   const { repoRoot, baseCommit } = await repositoryIdentity(cwd);
+  if ((await git(repoRoot, ["status", "--porcelain=v1", "--untracked-files=normal"])).trim()) {
+    throw new Error("Background writable agents require a clean parent checkout; use a foreground worker or clean/stash first");
+  }
   const requested = await realpath(resolve(cwd));
   if (!inside(repoRoot, requested)) throw new Error("Agent cwd must be inside its repository");
   const hash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 24);
@@ -68,6 +72,7 @@ export async function createAgentWorktree(cwd: string, agentId: string): Promise
 export async function agentDiff(workspace: AgentWorkspace): Promise<string> {
   const tracked = await git(workspace.worktree, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", workspace.baseCommit, "--"]);
   const untracked = (await git(workspace.worktree, ["ls-files", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
+  if (untracked.length > MAX_UNTRACKED_FILES) throw new Error(`Agent diff contains more than ${MAX_UNTRACKED_FILES} untracked files`);
   let patch = tracked;
   for (const path of untracked) {
     try {

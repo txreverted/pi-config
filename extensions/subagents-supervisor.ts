@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { chmod, lstat, mkdir, open, realpath, rename, rm, stat } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { AgentWorkspace } from "./subagents-worktree.ts";
 import { getAgentDir, type RpcClient } from "@earendil-works/pi-coding-agent";
@@ -71,15 +71,29 @@ const MAX_HOPS = 8;
 const BROKER_TIMEOUT_MS = 120_000;
 export const BROKER_BYTE_LIMIT = 64_000;
 const BROKER_TEXT_BYTES = 24_000;
+const INSTANCE_LOCK_STALE_MS = 30_000;
+const PROGRESS_PERSIST_INTERVAL_MS = 1_000;
 
 function safeRootId(value: string): string {
-  const clean = value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
-  return clean || `session-${randomUUID()}`;
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(value)) return value;
+  const clean = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^[^A-Za-z0-9]+/, "").slice(0, 96) || "session";
+  return `${clean}-${createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
 }
 
 function inside(root: string, candidate: string): boolean {
   const path = relative(root, candidate);
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+function lockIdentity(info: Stats): string {
+  return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`;
+}
+
+async function existingRealpath(path: string): Promise<string | undefined> {
+  try { return await realpath(path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function validResult(value: unknown, id: string, agent: string): boolean {
@@ -203,21 +217,147 @@ export class AgentSupervisor {
   private readonly tokens = new Map<string, string>();
   private readonly sockets = new Set<Socket>();
   private readonly mail: AgentMail[] = [];
-  private readonly progressPersistedAt = new Map<string, number>();
+  private readonly instanceToken = randomUUID();
+  private readonly instanceLock: string;
+  private readonly instanceRecoveryLock: string;
+  private progressPersistedAt = 0;
+  private progressTimer?: NodeJS.Timeout;
+  private progressPromise?: Promise<void>;
+  private resolveProgress?: () => void;
+  private rejectProgress?: (error: unknown) => void;
   private server?: Server;
   private handler?: BrokerHandler;
   private mainMessageHandler?: (message: AgentMail) => Promise<void>;
   private writeChain = Promise.resolve();
   private shuttingDown = false;
+  private closed = false;
   private readonly listeners = new Set<() => void>();
 
   private constructor(rootSessionId: string) {
     this.directory = join(getAgentDir(), "pi-config", "agents", safeRootId(rootSessionId));
     this.sessionsDirectory = join(this.directory, "sessions");
+    this.instanceLock = join(this.directory, ".supervisor.lock");
+    this.instanceRecoveryLock = join(this.directory, ".supervisor.lock-recovery");
     const hash = createHash("sha256").update(this.directory).digest("hex").slice(0, 24);
     const socketRoot = process.platform === "darwin" ? "/tmp" : tmpdir();
     this.socketDirectory = join(socketRoot, `pc-${randomBytes(8).toString("hex")}`);
     this.socketPath = process.platform === "win32" ? `\\\\.\\pipe\\pi-config-${hash}` : join(this.socketDirectory, "broker.sock");
+  }
+
+  private async recoverInstanceLock(expectedIdentity: string, expectedToken: unknown): Promise<boolean> {
+    const recoveryToken = randomUUID();
+    for (;;) {
+      try {
+        const handle = await open(this.instanceRecoveryLock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+        let failure: unknown;
+        try {
+          await handle.writeFile(`${JSON.stringify({ host: hostname(), pid: process.pid, token: recoveryToken })}\n`, "utf8");
+          await handle.sync();
+        } catch (error) {
+          failure = error;
+        } finally {
+          await handle.close();
+        }
+        if (failure) {
+          await rm(this.instanceRecoveryLock, { force: true });
+          throw failure;
+        }
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const info = await lstat(this.instanceRecoveryLock).catch(() => undefined);
+        if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("Invalid agent supervisor recovery lock");
+        return false;
+      }
+    }
+
+    try {
+      let info;
+      try { info = await lstat(this.instanceLock); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+        throw error;
+      }
+      if (lockIdentity(info) !== expectedIdentity) return false;
+      let token: unknown;
+      try {
+        const handle = await open(this.instanceLock, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try { token = (JSON.parse(await handle.readFile("utf8")) as { token?: unknown }).token; } finally { await handle.close(); }
+      } catch {}
+      if (token !== expectedToken) return false;
+      await rm(this.instanceLock, { force: true });
+      return true;
+    } finally {
+      let token: unknown;
+      try {
+        const handle = await open(this.instanceRecoveryLock, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try { token = (JSON.parse(await handle.readFile("utf8")) as { token?: unknown }).token; } finally { await handle.close(); }
+      } catch {}
+      if (token !== recoveryToken) throw new Error("Agent supervisor recovery lock ownership changed before release");
+      await rm(this.instanceRecoveryLock);
+    }
+  }
+
+  private async acquireInstanceLock(): Promise<void> {
+    for (;;) {
+      try {
+        const handle = await open(this.instanceLock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+        let failure: unknown;
+        try {
+          await handle.writeFile(`${JSON.stringify({ host: hostname(), pid: process.pid, token: this.instanceToken })}\n`, "utf8");
+          await handle.sync();
+        } catch (error) {
+          failure = error;
+        } finally {
+          await handle.close();
+        }
+        if (failure) {
+          await rm(this.instanceLock, { force: true });
+          throw failure;
+        }
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+
+      let info;
+      try { info = await lstat(this.instanceLock); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error("Invalid agent supervisor lock");
+      if (Date.now() - info.mtimeMs <= INSTANCE_LOCK_STALE_MS) throw new Error("Agent supervisor is already open for this root session");
+      let owner: { host?: unknown; pid?: unknown } = {};
+      try {
+        const handle = await open(this.instanceLock, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try { owner = JSON.parse(await handle.readFile("utf8")) as typeof owner; } finally { await handle.close(); }
+      } catch {}
+      if (owner.host === hostname() && Number.isSafeInteger(owner.pid) && (owner.pid as number) > 0) {
+        try {
+          process.kill(owner.pid as number, 0);
+          throw new Error("Agent supervisor is already open for this root session");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      } else if (owner.host !== undefined && owner.host !== hostname()) {
+        throw new Error("Cannot recover an agent supervisor lock from another host");
+      }
+      if (!await this.recoverInstanceLock(lockIdentity(info), (owner as { token?: unknown }).token)) {
+        throw new Error("Agent supervisor lock recovery is already in progress or requires manual cleanup");
+      }
+    }
+  }
+
+  private async releaseInstanceLock(): Promise<void> {
+    let owner: { token?: unknown };
+    try {
+      const handle = await open(this.instanceLock, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try { owner = JSON.parse(await handle.readFile("utf8")) as typeof owner; } finally { await handle.close(); }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (owner.token !== this.instanceToken) throw new Error("Agent supervisor lock ownership changed before release");
+    await rm(this.instanceLock);
   }
 
   static async create(rootSessionId: string): Promise<AgentSupervisor> {
@@ -229,6 +369,10 @@ export class AgentSupervisor {
       throw new Error("Invalid agent supervisor directory");
     }
     await Promise.all([chmod(supervisor.directory, 0o700), chmod(supervisor.sessionsDirectory, 0o700)]);
+    try { await supervisor.acquireInstanceLock(); } catch (error) {
+      if (process.platform !== "win32") await rm(supervisor.socketDirectory, { recursive: true, force: true });
+      throw error;
+    }
     try {
       const path = join(supervisor.directory, "agents.json");
       const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -250,17 +394,31 @@ export class AgentSupervisor {
         const parent = value.parentId ? data.records.find((candidate) => validRecord(candidate, supervisor.sessionsDirectory) && candidate.id === value.parentId) as PersistentAgentRecord | undefined : undefined;
         if ((value.parentId && (!parent || value.depth !== parent.depth + 1)) || (!value.parentId && value.depth !== 1)) throw new Error("Invalid persisted agent ancestry");
         if (value.worktree) {
-          const cwd = await realpath(value.cwd).catch(() => undefined);
-          if (!cwd || !(await stat(cwd)).isDirectory()) throw new Error("Invalid persisted agent cwd");
-          const managedRoot = join(getAgentDir(), "pi-config", "worktrees");
-          const [repoRoot, worktree] = await Promise.all([realpath(value.repoRoot!).catch(() => undefined), realpath(value.worktree).catch(() => undefined)]);
-          if (!repoRoot || !worktree || repoRoot !== value.repoRoot || worktree !== value.worktree ||
-            !inside(managedRoot, worktree) || !inside(worktree, cwd)) throw new Error("Invalid persisted agent workspace");
+          const [managedRoot, cwd, repoRoot, worktree] = await Promise.all([
+            existingRealpath(join(getAgentDir(), "pi-config", "worktrees")),
+            existingRealpath(value.cwd),
+            existingRealpath(value.repoRoot!),
+            existingRealpath(value.worktree),
+          ]);
+          if (!managedRoot || !repoRoot || !worktree) {
+            value.cwd = value.repoRoot!;
+            delete value.repoRoot; delete value.worktree; delete value.baseCommit;
+            value.worktreeDiscarded = true;
+            value.status = "interrupted";
+            delete value.progress;
+          } else {
+            if (repoRoot !== value.repoRoot || worktree !== value.worktree || !inside(managedRoot, worktree)) {
+              throw new Error("Invalid persisted agent workspace");
+            }
+            if (!cwd) value.cwd = worktree;
+            else if (!(await stat(cwd)).isDirectory() || !inside(worktree, cwd)) throw new Error("Invalid persisted agent workspace");
+          }
         }
         if (value.sessionFile) {
-          const resolved = await realpath(value.sessionFile).catch(() => undefined);
+          const resolved = await existingRealpath(value.sessionFile);
           const sessions = await realpath(supervisor.sessionsDirectory);
-          if (!resolved || !inside(sessions, resolved) || !(await stat(resolved)).isFile()) throw new Error("Invalid persisted agent session path");
+          if (!resolved) delete value.sessionFile;
+          else if (!inside(sessions, resolved) || !(await stat(resolved)).isFile()) throw new Error("Invalid persisted agent session path");
         }
         if (ACTIVE.has(value.status)) {
           value.status = "interrupted";
@@ -278,6 +436,7 @@ export class AgentSupervisor {
       await supervisor.persist();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        await supervisor.releaseInstanceLock().catch(() => undefined);
         if (process.platform !== "win32") await rm(supervisor.socketDirectory, { recursive: true, force: true });
         throw error;
       }
@@ -287,11 +446,13 @@ export class AgentSupervisor {
 
   setBrokerHandler(handler: BrokerHandler): void { this.handler = handler; }
   setMainMessageHandler(handler: (message: AgentMail) => Promise<void>): void {
+    if (this.shuttingDown) return;
     this.mainMessageHandler = handler;
-    void this.deliver("main").then(() => this.persist()).catch(() => undefined);
+    void this.deliver("main").then(() => this.shuttingDown ? undefined : this.persist()).catch(() => undefined);
   }
 
   async startBroker(): Promise<void> {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     if (this.server) return;
     if (process.platform !== "win32") await rm(this.socketPath, { force: true });
     this.server = createServer((socket) => this.accept(socket));
@@ -339,11 +500,13 @@ export class AgentSupervisor {
   }
 
   track(id: string, controller: AbortController): void {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     if (!this.records.has(id)) throw new Error(`Unknown agent '${id}'`);
     this.controllers.set(id, controller);
   }
 
   async beginResume(id: string): Promise<PersistentAgentRecord> {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     const record = this.records.get(id);
     if (!record || ACTIVE.has(record.status)) throw new Error(`Agent '${id}' cannot be resumed`);
     if (record.worktreeDiscarded) throw new Error(`Agent '${id}' cannot be resumed after its worktree was discarded`);
@@ -364,36 +527,45 @@ export class AgentSupervisor {
   }
 
   attach(id: string, sessionFile: string, client: RpcClient, controller?: AbortController): void {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     const record = this.records.get(id);
     if (!record || !inside(this.sessionsDirectory, sessionFile)) throw new Error("Invalid agent session path");
     record.sessionFile = sessionFile; record.status = "running"; record.updatedAt = Date.now();
     this.clients.set(id, client); if (controller) this.controllers.set(id, controller);
     this.notify();
-    void this.persist().then(() => this.deliver(id)).then(() => this.persist()).catch(() => {});
+    void this.persist().then(async () => {
+      if (this.shuttingDown) return;
+      await this.deliver(id);
+      if (!this.shuttingDown) await this.persist();
+    }).catch(() => {});
   }
 
   async update(id: string, progress: ChildRunProgress): Promise<void> {
+    if (this.shuttingDown) return;
     const record = this.records.get(id); if (!record) return;
-    const previousStatus = record.status;
-    const now = Date.now();
-    record.status = progress.status; record.progress = boundedProgress(progress); record.updatedAt = now; this.notify();
-    if (previousStatus !== progress.status || now - (this.progressPersistedAt.get(id) ?? 0) >= 1_000) {
-      this.progressPersistedAt.set(id, now);
-      await this.persist();
-    }
+    record.status = progress.status;
+    record.progress = boundedProgress(progress);
+    record.updatedAt = Date.now();
+    this.notify();
+    await this.scheduleProgressPersist();
   }
 
   async finish(id: string, result: ChildRunResult): Promise<void> {
+    if (this.shuttingDown) return;
     const record = this.records.get(id); if (!record) return;
     this.clients.delete(id); this.controllers.delete(id);
-    if (this.shuttingDown && record.status === "interrupted") return;
     record.status = result.status; record.sessionFile = result.sessionFile ?? record.sessionFile; record.result = result; delete record.progress; record.updatedAt = Date.now();
     await this.persist();
   }
 
-  async collect(id: string): Promise<void> { const record = this.records.get(id); if (record) { record.collected = true; record.updatedAt = Date.now(); await this.persist(); } }
+  async collect(id: string): Promise<void> {
+    if (this.shuttingDown) return;
+    const record = this.records.get(id);
+    if (record) { record.collected = true; record.updatedAt = Date.now(); await this.persist(); }
+  }
 
   async releaseReservation(id: string): Promise<void> {
+    if (this.shuttingDown) return;
     const record = this.records.get(id);
     if (!record || record.status !== "queued" || this.clients.has(id)) throw new Error(`Agent '${id}' is not a removable reservation`);
     this.records.delete(id);
@@ -402,6 +574,7 @@ export class AgentSupervisor {
   }
 
   async deleteRecord(id: string): Promise<void> {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     const record = this.records.get(id);
     if (!record) throw new Error(`Unknown agent '${id}'`);
     if (ACTIVE.has(record.status)) throw new Error(`Agent '${id}' is still active`);
@@ -409,7 +582,6 @@ export class AgentSupervisor {
     if ([...this.records.values()].some((item) => item.parentId === id)) throw new Error(`Agent '${id}' still has child records`);
     this.records.delete(id);
     this.tokens.delete(id);
-    this.progressPersistedAt.delete(id);
     for (let index = this.mail.length - 1; index >= 0; index--) {
       if (this.mail[index].from === id || this.mail[index].to === id) this.mail.splice(index, 1);
     }
@@ -417,6 +589,7 @@ export class AgentSupervisor {
   }
 
   async clearWorkspace(id: string): Promise<void> {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     const record = this.records.get(id);
     if (!record?.repoRoot) throw new Error(`Agent '${id}' has no worktree`);
     if (ACTIVE.has(record.status)) throw new Error(`Agent '${id}' worktree is still active`);
@@ -426,16 +599,18 @@ export class AgentSupervisor {
     record.updatedAt = Date.now(); await this.persist();
   }
 
-  async cancel(id: string, senderId = "main"): Promise<boolean> {
+  async cancel(id: string, senderId = "main", duringShutdown = false): Promise<boolean> {
+    if (this.shuttingDown && !duringShutdown) return false;
     const record = this.records.get(id);
     if (!record || (senderId !== "main" && record.parentId !== senderId)) throw new Error("Unknown or unauthorized agent target");
     if (!ACTIVE.has(record.status)) return false;
     this.controllers.get(id)?.abort();
     const client = this.clients.get(id); if (client) await stopRpcClient(client);
-    record.status = "interrupted"; record.updatedAt = Date.now(); await this.persist(); return true;
+    record.status = "interrupted"; delete record.progress; record.updatedAt = Date.now(); await this.persist(); return true;
   }
 
   async send(from: string, to: string, body: string, id: string = randomUUID(), hops = 0): Promise<AgentMail> {
+    if (this.shuttingDown) throw new Error("Agent supervisor is shutting down");
     if (from !== "main" && !this.records.has(from)) throw new Error("Unknown sender identity");
     if (to !== "main" && !this.records.has(to)) throw new Error("Unknown target identity");
     if (!ID.test(id) || !Number.isSafeInteger(hops) || hops < 0 || hops > MAX_HOPS) throw new Error("Invalid message id or hop count");
@@ -453,7 +628,11 @@ export class AgentSupervisor {
       this.mail.splice(delivered, 1);
     }
     const item: AgentMail = { id, from, to, body: body.trim(), hops, createdAt: Date.now() };
-    this.mail.push(item); await this.persist(); await this.deliver(to); await this.persist(); return structuredClone(item);
+    this.mail.push(item);
+    await this.persist();
+    await this.deliver(to);
+    if (!this.shuttingDown) await this.persist();
+    return structuredClone(item);
   }
 
   pendingMail(id: string): AgentMail[] { return this.mail.filter((item) => item.to === id && !item.deliveredAt).map((item) => structuredClone(item)); }
@@ -472,26 +651,39 @@ export class AgentSupervisor {
   }
 
   async shutdown(): Promise<void> {
+    if (this.closed) return;
     this.shuttingDown = true;
-    const ids = [...this.records.values()].filter((record) => ACTIVE.has(record.status)).map((record) => record.id);
-    await Promise.allSettled(ids.map((id) => this.cancel(id)));
-    for (const socket of this.sockets) socket.destroy();
-    this.sockets.clear();
-    await new Promise<void>((resolve) => this.server ? this.server.close(() => resolve()) : resolve()); this.server = undefined;
-    if (process.platform !== "win32") await rm(this.socketDirectory, { recursive: true, force: true });
-    await this.persist();
+    try {
+      const ids = [...this.records.values()].filter((record) => ACTIVE.has(record.status)).map((record) => record.id);
+      await Promise.allSettled(ids.map((id) => this.cancel(id, "main", true)));
+      for (const socket of this.sockets) socket.destroy();
+      this.sockets.clear();
+      await new Promise<void>((resolve) => this.server ? this.server.close(() => resolve()) : resolve()); this.server = undefined;
+      if (process.platform !== "win32") await rm(this.socketDirectory, { recursive: true, force: true });
+      await this.flushProgressPersist();
+      await this.persist();
+    } finally {
+      this.closed = true;
+      await this.releaseInstanceLock();
+    }
   }
 
   private async deliver(id: string): Promise<void> {
+    if (this.shuttingDown) return;
     const messages = this.mail.filter((mail) => mail.to === id && !mail.deliveredAt);
     if (id === "main") {
       if (!this.mainMessageHandler) return;
-      for (const item of messages) { await this.mainMessageHandler(structuredClone(item)); item.deliveredAt = Date.now(); }
+      for (const item of messages) {
+        await this.mainMessageHandler(structuredClone(item));
+        if (this.shuttingDown) return;
+        item.deliveredAt = Date.now();
+      }
       return;
     }
     const client = this.clients.get(id); if (!client) return;
     for (const item of messages) {
       await client.steer(`--- BEGIN UNTRUSTED AGENT MESSAGE ---\nFrom: ${item.from}\nMessage-ID: ${item.id}\n${item.body}\n--- END UNTRUSTED AGENT MESSAGE ---`);
+      if (this.shuttingDown) return;
       item.deliveredAt = Date.now();
     }
   }
@@ -547,14 +739,63 @@ export class AgentSupervisor {
     for (const listener of this.listeners) { try { listener(); } catch {} }
   }
 
+  private scheduleProgressPersist(): Promise<void> {
+    if (this.progressPromise) return this.progressPromise;
+    const delay = Math.max(0, PROGRESS_PERSIST_INTERVAL_MS - (Date.now() - this.progressPersistedAt));
+    this.progressPromise = new Promise<void>((resolve, reject) => {
+      this.resolveProgress = resolve;
+      this.rejectProgress = reject;
+    });
+    this.progressTimer = setTimeout(() => { void this.flushProgressPersist(); }, delay);
+    return this.progressPromise;
+  }
+
+  private async flushProgressPersist(): Promise<void> {
+    if (!this.progressPromise) return;
+    if (this.progressTimer) clearTimeout(this.progressTimer);
+    this.progressTimer = undefined;
+    const resolve = this.resolveProgress;
+    const reject = this.rejectProgress;
+    this.progressPromise = undefined;
+    this.resolveProgress = undefined;
+    this.rejectProgress = undefined;
+    try {
+      await this.persist();
+      this.progressPersistedAt = Date.now();
+      resolve?.();
+    } catch (error) {
+      reject?.(error);
+    }
+  }
+
   private persist(): Promise<void> {
     const write = async () => {
-      const path = join(this.directory, "agents.json"); const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+      if (this.closed) throw new Error("Agent supervisor is closed");
+      const path = join(this.directory, "agents.json");
+      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
       const records = [...this.records.values()];
       const encoded = `${JSON.stringify({ version: 1, records, mail: this.mail }, null, 2)}\n`;
       if (Buffer.byteLength(encoded) > MAX_FILE_BYTES) throw new Error("Agent registry exceeds its persisted size limit");
-      await writeFile(temporary, encoded, { mode: 0o600 });
-      await rename(temporary, path);
+      const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+      try {
+        await handle.writeFile(encoded, "utf8");
+        await handle.sync();
+      } catch (error) {
+        await handle.close();
+        await rm(temporary, { force: true });
+        throw error;
+      }
+      await handle.close();
+      try {
+        await rename(temporary, path);
+        if (process.platform !== "win32") {
+          const directory = await open(this.directory, constants.O_RDONLY);
+          try { await directory.sync(); } finally { await directory.close(); }
+        }
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
     };
     this.writeChain = this.writeChain.then(write, write);
     return this.writeChain.then(() => this.notify());

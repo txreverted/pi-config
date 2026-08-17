@@ -292,8 +292,6 @@ export function consumeProtocolEvent(line: string, state: ProtocolState): Protoc
 export function buildPiArgs(input: {
   definition: AgentDefinition;
   promptPath: string;
-  taskPath: string;
-  model?: string;
 }): string[] {
   const args = [
     "--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
@@ -301,7 +299,6 @@ export function buildPiArgs(input: {
   if (!input.definition.contextFiles) args.push("--no-context-files");
   for (const extension of input.definition.extensions ?? []) args.push("--extension", extension);
   args.push("--tools", input.definition.tools.join(","));
-  if (input.model) args.push("--model", input.model);
   args.push("--thinking", input.definition.thinking);
   args.push("--append-system-prompt", input.promptPath);
   return args;
@@ -474,7 +471,7 @@ export async function runChildAgent(options: RunChildOptions): Promise<ChildRunR
     return finishEarly("error", `Subagent preflight failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const args = buildPiArgs({ definition, promptPath: files.promptPath, taskPath: files.taskPath, model: undefined });
+  const args = buildPiArgs({ definition, promptPath: files.promptPath });
   if (options.sessionDir) args.push("--session-dir", options.sessionDir);
   const invocation = options.invocation
     ? { command: options.invocation.command, args: [...options.invocation.argsPrefix] }
