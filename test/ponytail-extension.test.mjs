@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import ponytailExtension from "../extensions/ponytail.ts";
@@ -28,14 +28,14 @@ function createHarness() {
   return { commands, events, entries, messages, statuses };
 }
 
-function createContext(branch = [], statuses = []) {
+function createContext(branch = [], statuses = [], idle = true) {
   const notices = [];
   return {
     notices,
     statuses,
     context: {
       mode: "tui",
-      isIdle: () => true,
+      isIdle: () => idle,
       sessionManager: { getBranch: () => branch },
       ui: {
         notify: (message, level) => notices.push({ message, level }),
@@ -80,7 +80,7 @@ test("Ponytail status is hidden by default", () => withEnvironment(async () => {
   assert.deepEqual(harness.statuses.at(-1), { name: "ponytail", value: undefined });
 }));
 
-test("session mode persists, injects filtered instructions, and updates internal status activity", () => withEnvironment(async () => {
+test("session mode persists, injects isolated instructions, and updates internal status activity", () => withEnvironment(async () => {
   process.env.PONYTAIL_HIDE_STATUS = "0";
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
@@ -137,6 +137,17 @@ test("malformed optional config does not prevent extension registration", () => 
   assert.equal(await overridden.events.get("before_agent_start")({ systemPrompt: "BASE" }, overriddenContext.context), undefined);
 }));
 
+test("saving a default reports invalid environment overrides without claiming the write failed", () => withEnvironment(async () => {
+  process.env.PONYTAIL_DEFAULT_MODE = "invalid";
+  const harness = createHarness();
+  const { context, notices } = createContext();
+  await harness.commands.get("ponytail").handler("default lite", context);
+
+  assert.equal(JSON.parse(readFileSync(ponytailConfigPath(), "utf8")).defaultMode, "lite");
+  assert.equal(notices.at(-1).level, "warning");
+  assert.match(notices.at(-1).message, /saved as lite.*effective default is invalid/i);
+}));
+
 test("standalone normal mode disables injection without matching ordinary prose", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext();
@@ -169,12 +180,25 @@ test("active rules propagate into custom subagents", () => withEnvironment(async
   assert.equal(disabled.input.tasks[0].task, "Leave unchanged");
 }));
 
-test("skill aliases invoke local Pi skills with expansion enabled", () => withEnvironment(async () => {
-  const harness = createHarness();
-  const { context } = createContext();
-  await harness.commands.get("ponytail-review").handler("", context);
-  assert.deepEqual(harness.messages, [{
-    text: "/skill:ponytail-review",
+test("every skill alias expands immediately when idle and queues when busy", () => withEnvironment(async () => {
+  const names = ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-help"];
+  const idle = createHarness();
+  const idleContext = createContext().context;
+  for (const name of names) await idle.commands.get(name).handler(`scope for ${name}`, idleContext);
+  assert.deepEqual(idle.messages, names.map((name) => ({
+    text: `/skill:${name} scope for ${name}`,
     options: { expandPromptTemplates: true },
-  }]);
+  })));
+
+  const busy = createHarness();
+  const busyState = createContext([], [], false);
+  for (const name of names) await busy.commands.get(name).handler(`scope for ${name}`, busyState.context);
+  assert.deepEqual(busy.messages, names.map((name) => ({
+    text: `/skill:${name} scope for ${name}`,
+    options: { deliverAs: "followUp", expandPromptTemplates: true },
+  })));
+  assert.deepEqual(busyState.notices.map(({ message, level }) => ({ message, level })), names.map((name) => ({
+    message: `${name} queued as a follow-up.`,
+    level: "info",
+  })));
 }));

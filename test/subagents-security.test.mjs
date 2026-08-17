@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentRegistry } from "../subagents/registry.ts";
-import subagentsExtension, { safeSubagentDisplay, untrustedOutput } from "../extensions/subagents.ts";
+import subagentToolsExtension from "../extensions/subagent-tools.ts";
+import subagentsExtension, { untrustedOutput } from "../extensions/subagents.ts";
 import { MAX_SUBAGENT_TASKS } from "../extensions/subagents-core.ts";
+import { safeDisplayText } from "../extensions/text-safety.ts";
 import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
 const allowedTools = new Set([
@@ -136,7 +139,44 @@ test("expanded subagent output strips terminal control sequences", () => {
   }).render(120).join("\n");
   assert.match(collected, /safe result/);
   assert.doesNotMatch(collected, /\u001b|\u0007|SGFja2Vk/);
-  assert.equal(safeSubagentDisplay("left\u202eright\u2066end\u2069"), "leftrightend");
+  assert.equal(safeDisplayText("left\u202eright\u2066end\u2069"), "leftrightend");
+});
+
+test("reviewer Git tools reject untrusted repository configuration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-subagent-git-trust-"));
+  const hook = join(root, "fsmonitor.sh");
+  const sentinel = join(root, "executed");
+  const previousTrust = process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED;
+  process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = "0";
+  try {
+    assert.equal(spawnSync("git", ["init", "-q"], { cwd: root }).status, 0);
+    await writeFile(hook, `#!/bin/sh\nprintf hit > "${sentinel}"\n`);
+    await chmod(hook, 0o700);
+    assert.equal(spawnSync("git", ["config", "core.fsmonitor", hook], { cwd: root }).status, 0);
+
+    const tools = new Map();
+    subagentToolsExtension({
+      registerTool(tool) { tools.set(tool.name, tool); },
+      on() {},
+    });
+    const context = { cwd: root, isProjectTrusted: () => false };
+    for (const name of ["git_status", "git_diff"]) {
+      await assert.rejects(
+        () => tools.get(name).execute("call", {}, undefined, undefined, context),
+        /requires a trusted project/,
+      );
+    }
+    await assert.rejects(() => access(sentinel));
+
+    assert.equal(spawnSync("git", ["config", "--unset", "core.fsmonitor"], { cwd: root }).status, 0);
+    process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = "1";
+    const trusted = await tools.get("git_status").execute("call", {}, undefined, undefined, context);
+    assert.match(trusted.content[0].text, /^## /);
+  } finally {
+    if (previousTrust === undefined) delete process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED;
+    else process.env.PI_CONFIG_SUBAGENT_PROJECT_TRUSTED = previousTrust;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("errored child stderr is returned as untrusted evidence", () => {
@@ -326,12 +366,18 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       .map((line) => line.trimEnd()).join("\n");
     assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 tokens · 0s/);
 
-    await waitFor(() => messages.length > 0);
-    await sleep(150);
-    assert.equal(messages.length, 1);
-    for (const id of ids) assert.match(messages[0].message.content, new RegExp(id));
-    assert.deepEqual(messages[0].message.details.results.map((result) => result.status), ["done", "done"]);
-    assert.deepEqual(messages[0].options, { deliverAs: "followUp", triggerTurn: true });
+    await waitFor(() => messages.flatMap((entry) => entry.message.details.results).length >= ids.length);
+    const notified = messages.flatMap((entry) => entry.message.details.results);
+    assert.deepEqual(notified.map((result) => result.id).sort(), [...ids].sort());
+    assert.ok(notified.every((result) => result.status === "done"));
+    assert.ok(messages.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
+
+    await assert.rejects(
+      () => tools.get("subagent").execute("worker", {
+        tasks: [{ name: "Implement change", agent: "worker", task: "Implement after collecting reviews" }],
+      }, undefined, undefined, context),
+      /outstanding background subagent results/,
+    );
 
     for (const id of ids) {
       const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);

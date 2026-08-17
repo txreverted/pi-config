@@ -21,7 +21,7 @@ import {
   type UsageSummary,
 } from "./subagents-core.ts";
 import { normalizeDisplayText, UI_PANEL_EVENT, type UiPanelRenderer } from "./ui-core.ts";
-import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+import { safeDisplayLine } from "./text-safety.ts";
 
 const SUBAGENT_WIDGET_INTERVAL_MS = 1_000;
 const COMPLETION_COALESCE_MS = 100;
@@ -72,10 +72,6 @@ function duration(ms: number): string {
   if (ms < 10_000) return `${(ms / 1_000).toFixed(1)}s`;
   const seconds = Math.floor(ms / 1_000);
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
-}
-
-export function safeSubagentDisplay(value: string): string {
-  return safeDisplayText(value);
 }
 
 function safeStatusText(value: string): string {
@@ -232,7 +228,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "subagent",
-    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only. Worker can edit files, run commands and tests with the local user's privileges, but runs only in the foreground. Children use separate processes and contexts, expose no subagent tool, and load only static tools and extensions. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background tasks are read-only, session-scoped, and limited to three outstanding results.",
+    description: "Run one fixed-role child Pi agent or a bounded parallel batch. Reviewer and researcher are read-only; reviewer Git inspection requires a trusted project. Worker can edit files, run commands and tests with the local user's privileges, but runs only in the foreground. Children use separate processes and contexts, expose no subagent tool, and load only static tools and extensions. Process separation is not an OS sandbox. Active children have no time, token, cost, turn, or tool-call ceiling; they stop on completion, failure, cancellation, or inactivity. Background tasks are read-only, session-scoped, and limited to three outstanding results.",
     promptSnippet: "Delegate implementation, independent review, or public-web research to isolated child contexts",
     promptGuidelines: [
       "Give every subagent task a descriptive name of at most three words.",
@@ -287,11 +283,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       if (!params.background && writable.length > 0 && tasks.length !== 1) {
         throw new Error("A foreground writable worker must be the only task in its batch");
       }
-      if (writable.length > 0 && background.active().length > 0) {
-        throw new Error("Collect or cancel active background subagents before starting a writable worker");
+      if (writable.length > 0 && background.hasOutstanding()) {
+        throw new Error("Collect all outstanding background subagent results before starting a writable worker");
       }
 
       const childModel = modelName(ctx);
+      const childEnvironment = {
+        PI_CONFIG_SUBAGENT_PROJECT_TRUSTED: ctx.isProjectTrusted() ? "1" : "0",
+      };
 
       if (params.background) {
         if (ctx.mode === "print" || ctx.mode === "json") {
@@ -308,6 +307,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             task,
             model: childModel,
             signal: backgroundSignal,
+            env: childEnvironment,
             onUpdate: update,
           }));
         });
@@ -348,6 +348,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           task,
           model: childModel,
           signal,
+          env: childEnvironment,
           onUpdate: (update) => {
             progress[index] = update;
             publish();

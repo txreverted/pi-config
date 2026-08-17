@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import fsPromises, { access, mkdtemp, mkdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   agentDefinitionForTask,
@@ -135,8 +136,9 @@ test("bounded concurrency preserves input order", async () => {
   assert.equal(peak, 2);
 });
 
-test("child runner parses chunked Pi JSON and reports tool progress", async () => {
+test("child runner parses chunked Pi JSON, reports progress, and removes private run files", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-run-"));
+  const taskPathFile = join(cwd, "task-path");
   const updates = [];
   try {
     const result = await runChildAgent({
@@ -144,7 +146,7 @@ test("child runner parses chunked Pi JSON and reports tool progress", async () =
       task: childTask("fixture", "Inspect the fixture", cwd),
       model: "fixture/test-model",
       invocation: { command: process.execPath, argsPrefix: [fixture] },
-      env: { FAKE_PI_MODE: "tool", FAKE_PI_DELAY_MS: "10" },
+      env: { FAKE_PI_MODE: "tool", FAKE_PI_DELAY_MS: "10", FAKE_PI_TASK_PATH_FILE: taskPathFile },
       onUpdate: (update) => updates.push(update),
     });
     assert.equal(result.status, "done");
@@ -154,7 +156,89 @@ test("child runner parses chunked Pi JSON and reports tool progress", async () =
     assert.ok(updates.some((update) => update.currentTool === "read"));
     assert.ok(updates.some((update) => update.activity === "reading files"));
     assert.equal(updates.at(-1).status, "done");
+    const taskPath = await readFile(taskPathFile, "utf8");
+    await assert.rejects(() => access(dirname(taskPath)));
   } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a successful child retry clears an earlier assistant error", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-retry-"));
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("retry", "Recover from a provider error", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "error-then-success" },
+    });
+    assert.equal(result.status, "done");
+    assert.equal(result.output, "fixture completed");
+    assert.equal(result.turns, 2);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("child runner reports and preserves a run directory when cleanup fails", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-cleanup-failure-"));
+  const taskPathFile = join(cwd, "task-path");
+  const originalRm = fsPromises.rm;
+  let runDirectory;
+  fsPromises.rm = async (path, options) => {
+    if (String(path).includes("pi-config-subagent-")) throw new Error("forced cleanup failure");
+    return originalRm(path, options);
+  };
+  syncBuiltinESMExports();
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("cleanup", "Exercise cleanup failure", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_TASK_PATH_FILE: taskPathFile },
+    });
+    runDirectory = dirname(await readFile(taskPathFile, "utf8"));
+    assert.equal(result.status, "error");
+    assert.match(result.error, /Failed to remove subagent run files at .*pi-config-subagent-.*: forced cleanup failure/);
+    assert.match(result.error, new RegExp(runDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await access(runDirectory);
+  } finally {
+    fsPromises.rm = originalRm;
+    syncBuiltinESMExports();
+    if (runDirectory) await rm(runDirectory, { recursive: true, force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("failed setup cleanup reports the leaked run directory", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-setup-cleanup-"));
+  const originalWriteFile = fsPromises.writeFile;
+  const originalRm = fsPromises.rm;
+  let leakedDirectory;
+  fsPromises.writeFile = async (path, options) => {
+    if (String(path).includes("pi-config-subagent-")) throw new Error("forced write failure");
+    return originalWriteFile(path, options);
+  };
+  fsPromises.rm = async (path, options) => {
+    if (String(path).includes("pi-config-subagent-")) throw new Error("forced cleanup failure");
+    return originalRm(path, options);
+  };
+  syncBuiltinESMExports();
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("setup-cleanup", "Fail setup cleanup", cwd),
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+    });
+    assert.equal(result.status, "error");
+    assert.match(result.error, /Failed to create and clean up subagent run files at .*pi-config-subagent-/);
+    leakedDirectory = result.error.split(" at ").at(-1);
+    await access(leakedDirectory);
+  } finally {
+    fsPromises.writeFile = originalWriteFile;
+    fsPromises.rm = originalRm;
+    syncBuiltinESMExports();
+    if (leakedDirectory) await rm(leakedDirectory, { recursive: true, force: true });
     await rm(cwd, { recursive: true, force: true });
   }
 });
@@ -268,7 +352,7 @@ test("child output remains capped in results and progress", async () => {
 
     const lines = truncateText(Array.from({ length: 2_100 }, () => "x").join("\n"));
     assert.equal(lines.truncated, true);
-    assert.ok(lines.text.split("\n").length <= 2_002);
+    assert.ok(lines.text.split("\n").length <= 2_000);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -361,6 +445,57 @@ test("observable protocol and stderr activity reset staleness", async () => {
 });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("interrupted child output prefers the current partial response", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-partial-"));
+  const controller = new AbortController();
+  const safetyTimer = setTimeout(() => controller.abort(), 1_000);
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("partial", "Interrupt a later response", cwd),
+      signal: controller.signal,
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "interrupted-partial" },
+      onUpdate: (progress) => {
+        if (progress.text === "new partial response") controller.abort();
+      },
+    });
+    assert.equal(result.status, "error");
+    assert.equal(result.output, "new partial response");
+  } finally {
+    clearTimeout(safetyTimer);
+    controller.abort();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("interrupted large partial output reports truncation without losing its prefix", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-large-partial-"));
+  const controller = new AbortController();
+  const safetyTimer = setTimeout(() => controller.abort(), 1_000);
+  try {
+    const result = await runChildAgent({
+      definition,
+      task: childTask("large-partial", "Interrupt a large response", cwd),
+      signal: controller.signal,
+      invocation: { command: process.execPath, argsPrefix: [fixture] },
+      env: { FAKE_PI_MODE: "interrupted-large-partial" },
+      onUpdate: (progress) => {
+        if (progress.text.includes("Subagent output truncated")) controller.abort();
+      },
+    });
+    assert.equal(result.status, "error");
+    assert.equal(result.truncated, true);
+    assert.match(result.output, /^BEGINx+/);
+    assert.doesNotMatch(result.output, /END/);
+    assert.match(result.output, /Subagent output truncated/);
+  } finally {
+    clearTimeout(safetyTimer);
+    controller.abort();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
 
 test("child runner classifies malformed output, staleness, errors, and cancellation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-subagent-failure-"));
