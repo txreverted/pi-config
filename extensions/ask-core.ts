@@ -4,9 +4,11 @@ import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 export const ASK_LIMITS = {
   context: 500,
   id: 50,
+  header: 12,
   question: 500,
   label: 80,
   description: 240,
+  preview: 2_000,
   questions: { min: 1, max: 4 },
   options: { min: 2, max: 5 },
   customAnswerBytes: 2_000,
@@ -16,13 +18,16 @@ export const ASK_LIMITS = {
 export interface AskOption {
   label: string;
   description?: string;
+  preview?: string;
   recommended?: boolean;
 }
 
 export interface AskQuestion {
   id: string;
+  header?: string;
   question: string;
   options?: AskOption[];
+  multiSelect?: boolean;
 }
 
 export interface AskAnswer {
@@ -31,9 +36,19 @@ export interface AskAnswer {
   answer: string;
   kind: "option" | "custom";
   optionIndex?: number;
+  optionIndexes?: number[];
 }
 
 export const CUSTOM_CHOICE = "Write a different answer…";
+
+const TIMEOUTS = { "60s": 60_000, "5m": 300_000, "10m": 600_000 } as const;
+
+export function askTimeoutMs(value = process.env.PI_CONFIG_ASK_TIMEOUT): number | undefined {
+  if (value === "off") return undefined;
+  if (value === undefined || value === "") return TIMEOUTS["5m"];
+  if (value in TIMEOUTS) return TIMEOUTS[value as keyof typeof TIMEOUTS];
+  throw new Error("PI_CONFIG_ASK_TIMEOUT must be off, 60s, 5m, or 10m");
+}
 
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -68,6 +83,7 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
   const ids = new Set<string>();
   return input.map((question, questionIndex) => {
     const id = safeDisplayLine(question.id);
+    const header = question.header === undefined ? undefined : safeDisplayLine(question.header);
     const prompt = safeDisplayLine(question.question);
     if (!id) throw new Error(`Question ${questionIndex + 1} requires an id`);
     assertLength(id, ASK_LIMITS.id, `Question ${questionIndex + 1} id`);
@@ -76,10 +92,13 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
     }
     if (ids.has(id)) throw new Error(`Question ids must be unique: ${id}`);
     ids.add(id);
+    if (question.header !== undefined && !header) throw new Error(`Question ${id} has an empty header after sanitation`);
+    if (header) assertLength(header, ASK_LIMITS.header, `Question ${id} header`);
     if (!prompt) throw new Error(`Question ${id} cannot be empty`);
     assertLength(prompt, ASK_LIMITS.question, `Question ${id}`);
+    if (question.multiSelect && question.options === undefined) throw new Error(`Question ${id} cannot use multiSelect without options`);
 
-    if (question.options === undefined) return { id, question: prompt };
+    if (question.options === undefined) return { id, ...(header ? { header } : {}), question: prompt };
     if (question.options.length < ASK_LIMITS.options.min || question.options.length > ASK_LIMITS.options.max) {
       throw new Error(`Question ${id} must provide ${ASK_LIMITS.options.min}-${ASK_LIMITS.options.max} options, or omit options for a free-form answer`);
     }
@@ -89,6 +108,7 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
     const options = question.options.map((option, optionIndex) => {
       const label = safeDisplayLine(option.label);
       const description = option.description === undefined ? undefined : safeDisplayLine(option.description);
+      const preview = option.preview === undefined ? undefined : safeDisplayText(option.preview).trim();
       const normalized = normalizedLabel(label);
       if (!label) throw new Error(`Option ${optionIndex + 1} for ${id} requires a label`);
       assertLength(label, ASK_LIMITS.label, `Option ${optionIndex + 1} label for ${id}`);
@@ -96,6 +116,10 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
         throw new Error(`Option ${optionIndex + 1} for ${id} has an empty description after sanitation`);
       }
       if (description) assertLength(description, ASK_LIMITS.description, `Option ${optionIndex + 1} description for ${id}`);
+      if (option.preview !== undefined && !preview) {
+        throw new Error(`Option ${optionIndex + 1} for ${id} has an empty preview after sanitation`);
+      }
+      if (preview) assertLength(preview, ASK_LIMITS.preview, `Option ${optionIndex + 1} preview for ${id}`);
       if (RESERVED_LABELS.has(normalized)) {
         throw new Error(`Option label "${label}" is reserved; the tool adds a custom-answer choice automatically`);
       }
@@ -105,12 +129,19 @@ export function normalizeQuestions(input: readonly AskQuestion[]): AskQuestion[]
       return {
         label,
         ...(description ? { description } : {}),
+        ...(preview ? { preview } : {}),
         ...(option.recommended ? { recommended: true } : {}),
       };
     });
     if (recommendedCount > 1) throw new Error(`Question ${id} may recommend at most one option`);
 
-    return { id, question: prompt, options };
+    return {
+      id,
+      ...(header ? { header } : {}),
+      question: prompt,
+      options,
+      ...(question.multiSelect ? { multiSelect: true } : {}),
+    };
   });
 }
 
@@ -145,11 +176,16 @@ export function boundCustomAnswer(value: string): string | undefined {
   return `${utf8Prefix(sanitized, ASK_LIMITS.customAnswerBytes - Buffer.byteLength(notice, "utf8"))}${notice}`;
 }
 
-export function formatAnswers(answers: readonly AskAnswer[]): string {
+export function formatAnswers(answers: readonly AskAnswer[], notes?: string): string {
   const lines = ["User answered the clarification questions:"];
   for (const answer of answers) {
     lines.push(`- ${safeDisplayLine(answer.id)}: ${safeDisplayLine(answer.question)}`);
     lines.push(`  Answer: ${indent(safeDisplayText(answer.answer))}`);
+  }
+
+  if (notes) {
+    lines.push("- General notes:");
+    lines.push(`  ${indent(safeDisplayText(notes))}`);
   }
 
   const formatted = lines.join("\n");
