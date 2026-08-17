@@ -31,15 +31,6 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
       mutatesWorkspace: false,
     },
     {
-      name: "general-purpose",
-      tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "jq", "web_search", "web_fetch", ...teamTools],
-      extensions: [toolsExtension, webExtension, bridgeExtension, taskExtension, policyExtension],
-      prompt: prompt("general-purpose"),
-      thinking: "medium",
-      contextFiles: true,
-      mutatesWorkspace: true,
-    },
-    {
       name: "reviewer",
       tools: ["read", "grep", "find", "ls", "git_status", "git_diff", "task"],
       extensions: [gitExtension, taskExtension],
@@ -50,8 +41,8 @@ export function createAgentRegistry(): ReadonlyMap<AgentName, AgentDefinition> {
     },
     {
       name: "researcher",
-      tools: ["web_search", "web_fetch", "task"],
-      extensions: [webExtension, taskExtension],
+      tools: ["web_search", "web_fetch"],
+      extensions: [webExtension],
       prompt: prompt("researcher"),
       thinking: "low",
       contextFiles: false,

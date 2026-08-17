@@ -1,14 +1,19 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { lstat, realpath, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { brokerRequest } from "./subagents-supervisor.ts";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SAFE_TOOLS = new Set([
   "read", "grep", "find", "ls", "jq", "web_search", "web_fetch", "subagent", "get_subagent_result",
   "cancel_subagent", "list_agents", "send_agent_message", "task",
 ]);
-const SECRET_ENV = /(?:^|_)(?:secret|token|key|password|passwd|auth|authorization|cookie|credential)(?:_|$)/i;
+const COMMAND_ENV = new Set([
+  "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC",
+  "TMPDIR", "TMP", "TEMP", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ",
+  "TERM", "COLORTERM", "NO_COLOR", "FORCE_COLOR",
+]);
 
 function inside(root: string, candidate: string): boolean {
   const value = relative(root, candidate);
@@ -16,20 +21,26 @@ function inside(root: string, candidate: string): boolean {
 }
 
 export function stripChildCommandEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) =>
-    !name.startsWith("PI_CONFIG_BROKER_") && name !== "PI_CONFIG_AGENT_ID" && !SECRET_ENV.test(name),
-  ));
+  return Object.fromEntries(Object.entries(env).filter(([name]) => COMMAND_ENV.has(name)));
+}
+
+function toolPath(cwd: string, value: unknown): string {
+  if (typeof value !== "string" || !value) throw new Error("Tool path is required");
+  let path = value.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+  if (path.startsWith("@")) path = path.slice(1);
+  if (path === "~") path = homedir();
+  else if (path.startsWith("~/") || (process.platform === "win32" && path.startsWith("~\\"))) path = join(homedir(), path.slice(2));
+  else if (/^file:\/\//.test(path)) path = fileURLToPath(path);
+  return resolve(cwd, path);
 }
 
 async function existingPath(root: string, cwd: string, value: unknown): Promise<void> {
-  if (typeof value !== "string" || !value) throw new Error("Tool path is required");
-  const path = await realpath(resolve(cwd, value));
+  const path = await realpath(toolPath(cwd, value));
   if (!inside(root, path)) throw new Error("Tool path must remain inside the agent worktree");
 }
 
 async function writablePath(root: string, cwd: string, value: unknown): Promise<void> {
-  if (typeof value !== "string" || !value) throw new Error("Tool path is required");
-  const target = resolve(cwd, value);
+  const target = toolPath(cwd, value);
   if (!inside(root, target)) throw new Error("Write path must remain inside the agent worktree");
   try {
     const info = await lstat(target);
@@ -61,13 +72,6 @@ export default function writableAgentPolicy(pi: ExtensionAPI): void {
       const args = structuredClone(event.input) as Record<string, unknown>;
       if (event.toolName === "bash" || event.toolName === "edit" || event.toolName === "write") {
         if (event.toolName === "edit" || event.toolName === "write") await writablePath(workspace, cwd, args.path ?? args.file_path);
-        const result = await brokerRequest({
-          action: "permission", agentId: process.env.PI_CONFIG_AGENT_ID,
-          toolCallId: event.toolCallId, toolName: event.toolName, args, workspace,
-        });
-        if (!result || typeof result !== "object" || (result as { approved?: unknown }).approved !== true) {
-          return { block: true, reason: "Human approval denied" };
-        }
         return;
       }
       if (!SAFE_TOOLS.has(event.toolName)) return { block: true, reason: `Tool '${event.toolName}' is not allowed by writable-agent policy` };

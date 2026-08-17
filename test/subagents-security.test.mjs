@@ -27,7 +27,7 @@ test("expanded subagent output strips terminal control sequences", () => {
   assert.deepEqual([...tools.keys()], [
     "subagent", "get_subagent_result", "list_agents", "resume_agent",
     "get_agent_transcript", "send_agent_message", "get_agent_diff",
-    "apply_agent_changes", "discard_agent_worktree", "cancel_subagent",
+    "apply_agent_changes", "discard_agent_worktree", "delete_agent_record", "cancel_subagent",
   ]);
   const tool = tools.get("subagent");
   const rendered = tool.renderResult({
@@ -217,6 +217,13 @@ test("writable workers require trust and exclusive foreground execution", async 
     isProjectTrusted: () => true,
   }), /one to three words/);
 
+  await assert.rejects(() => tool.execute("legacy", {
+    tasks: [{ name: "Legacy role", agent: "general-purpose", task: "Reject the removed role" }],
+  }, undefined, undefined, {
+    ...context,
+    isProjectTrusted: () => true,
+  }), /Unknown subagent role 'general-purpose'/);
+
   await assert.rejects(() => tool.execute("call", {
     tasks: [{ name: "Implement change", agent: "worker", task: "Implement the change" }],
   }, undefined, undefined, {
@@ -247,7 +254,7 @@ test("writable workers require trust and exclusive foreground execution", async 
 test("agent registry keeps specialist roles read-only and scopes the worker", () => {
   const agents = createAgentRegistry();
   assert.equal(MAX_SUBAGENT_TASKS, 20);
-  assert.deepEqual([...agents.keys()], ["Explore", "general-purpose", "reviewer", "researcher", "worker"]);
+  assert.deepEqual([...agents.keys()], ["Explore", "reviewer", "researcher", "worker"]);
 
   for (const agent of agents.values()) {
     assert.ok(agent.prompt.length > 0, agent.name);
@@ -268,9 +275,9 @@ test("agent registry keeps specialist roles read-only and scopes the worker", ()
   assert.equal(reviewer.mutatesWorkspace, false);
 
   const researcher = agents.get("researcher");
-  assert.deepEqual(researcher.tools, ["web_search", "web_fetch", "task"]);
+  assert.deepEqual(researcher.tools, ["web_search", "web_fetch"]);
+  assert.equal(researcher.extensions.length, 1);
   assert.match(researcher.extensions[0], /extensions[/\\]web\.ts$/);
-  assert.match(researcher.extensions[1], /extensions[/\\]task\.ts$/);
   assert.equal(researcher.contextFiles, false);
   assert.equal(researcher.thinking, "low");
   assert.equal(researcher.mutatesWorkspace, false);
@@ -381,10 +388,17 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       .map((line) => line.trimEnd()).join("\n");
     assert.match(widget, /^Agents\n  ├─ Review  Review lifecycle · 0 tool uses · 0 tokens · 0s/);
 
+    const cancelled = await tools.get("cancel_subagent").execute("cancel-queued", { id: ids[1] });
+    assert.equal(cancelled.details.cancelled, true);
+    assert.ok(!["queued", "starting", "running"].includes(
+      (await tools.get("list_agents").execute("list", {})).details.records.find((record) => record.id === ids[1]).status,
+    ));
+
     await waitFor(() => messages.flatMap((entry) => entry.message.details.results).length >= ids.length);
     const notified = messages.flatMap((entry) => entry.message.details.results);
     assert.deepEqual(notified.map((result) => result.id).sort(), [...ids].sort());
-    assert.ok(notified.every((result) => result.status === "done"));
+    assert.equal(notified.find((result) => result.id === ids[0]).status, "done");
+    assert.equal(notified.find((result) => result.id === ids[1]).status, "error");
     assert.ok(messages.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
 
     await assert.rejects(
@@ -396,16 +410,46 @@ test("background extension launches, renders, notifies, collects, and evicts", {
 
     for (const id of ids) {
       const collected = await tools.get("get_subagent_result").execute("collect", { id }, undefined);
-      assert.match(collected.content[0].text, /fixture completed/);
-      assert.equal(collected.usage.totalTokens, 17);
+      if (id === ids[0]) {
+        assert.match(collected.content[0].text, /fixture completed/);
+        assert.equal(collected.usage.totalTokens, 17);
+      } else {
+        assert.match(collected.content[0].text, /cancelled/);
+        assert.equal(collected.usage.totalTokens, 0);
+      }
       await assert.rejects(
         () => tools.get("get_subagent_result").execute("collect-again", { id }, undefined),
         /Unknown background subagent id/,
       );
     }
+    const foreground = await tools.get("subagent").execute("foreground", {
+      tasks: [{ name: "Review foreground", agent: "reviewer", task: "Review foreground lifecycle integration now" }],
+    }, undefined, undefined, context);
+    const foregroundId = foreground.details.results[0].id;
+    await assert.rejects(
+      () => tools.get("get_subagent_result").execute("foreground-collect", { id: foregroundId }, undefined),
+      /Unknown background subagent id/,
+    );
+
+    const beforeDelete = await tools.get("list_agents").execute("list", {});
+    const foregroundRecord = beforeDelete.details.records.find((record) => record.id === foregroundId);
+    assert.equal(foregroundRecord.background, false);
+    await assert.rejects(
+      () => tools.get("delete_agent_record").execute("delete-denied", { id: foregroundId }, undefined, undefined, {
+        ...context, hasUI: true, ui: { confirm: async () => false },
+      }),
+      /confirmation denied/i,
+    );
+    await tools.get("delete_agent_record").execute("delete", { id: foregroundId }, undefined, undefined, {
+      ...context, hasUI: true, ui: { confirm: async () => true },
+    });
+    await access(foregroundRecord.sessionFile);
+
     const persistent = await tools.get("list_agents").execute("list", {});
     assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
-    assert.ok(persistent.details.records.every((record) => record.collected && record.sessionFile));
+    assert.ok(persistent.details.records.every((record) => record.collected));
+    assert.ok(persistent.details.records.find((record) => record.id === ids[0]).sessionFile);
+    assert.ok(!["queued", "starting", "running"].includes(persistent.details.records.find((record) => record.id === ids[1]).status));
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;

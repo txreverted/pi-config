@@ -45,6 +45,7 @@ test("latest valid session mode wins and deactivation requires a standalone comm
   const entries = [
     { type: "custom", customType: "ponytail-mode", data: { mode: "lite" } },
     { type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } },
+    { type: "custom", customType: "ponytail-mode", data: { mode: "review" } },
   ];
   assert.equal(resolvePonytailSessionMode(entries, "full"), "ultra");
   assert.equal(resolvePonytailSessionMode(undefined, "lite"), "lite");

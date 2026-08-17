@@ -27,20 +27,21 @@ Pi loads [`package.json`](package.json). Agents follow [`AGENTS.md`](AGENTS.md).
 | Kind | Files |
 |---|---|
 | Commands | [`prompts/implement-review.md`](prompts/implement-review.md), [`prompts/list-improvements.md`](prompts/list-improvements.md), [`prompts/research.md`](prompts/research.md), [`prompts/review.md`](prompts/review.md), [`prompts/rework-docs.md`](prompts/rework-docs.md) |
-| Roles | [`subagents/prompts/Explore.md`](subagents/prompts/Explore.md), [`subagents/prompts/general-purpose.md`](subagents/prompts/general-purpose.md), [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md), [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md), [`subagents/prompts/worker.md`](subagents/prompts/worker.md) |
+| Roles | [`subagents/prompts/Explore.md`](subagents/prompts/Explore.md), [`subagents/prompts/researcher.md`](subagents/prompts/researcher.md), [`subagents/prompts/reviewer.md`](subagents/prompts/reviewer.md), [`subagents/prompts/worker.md`](subagents/prompts/worker.md) |
 | Skills | [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md), [`skills/ponytail-audit/SKILL.md`](skills/ponytail-audit/SKILL.md), [`skills/ponytail-debt/SKILL.md`](skills/ponytail-debt/SKILL.md), [`skills/ponytail-help/SKILL.md`](skills/ponytail-help/SKILL.md), [`skills/ponytail-review/SKILL.md`](skills/ponytail-review/SKILL.md) |
 
 ## Operation
 
-- Subagents use persistent native Pi RPC sessions. `Explore`, `reviewer`, and `researcher` are read only. `worker` and `general-purpose` can write. Foreground writers use the current checkout. Background writers require a trusted Git project, use private detached worktrees, and route each Bash, edit, and write call to the parent for approval. A `worker` still runs with the local user's privileges. Separate processes isolate context, not operating-system permissions. Worktrees isolate files, not operating-system permissions.
+- Subagents use persistent native Pi RPC sessions. `Explore`, `reviewer`, and `researcher` are read only. `worker` can write. Foreground writers use the current checkout. Background writers require a trusted Git project and use private detached worktrees without per-tool confirmation. Their file tools remain inside the worktree, and their Bash environment omits secrets. A `worker` still runs with the local user's privileges. Separate processes isolate context, not operating-system permissions. Worktrees isolate files, not operating-system permissions.
 - Agent names and transcripts persist outside the repository. `/agents` opens the teammate view. It shows ancestry, activity, shared-task claims, transcripts, and worktree actions. `list_agents`, `resume_agent`, `send_agent_message`, and `get_agent_transcript` provide the same management path to models and RPC clients.
-- The global active-agent limit defaults to 20. Set `PI_CONFIG_MAX_CONCURRENT_AGENTS` to `1`–`20` to lower it. Delegation depth defaults to and never exceeds three. Set `PI_CONFIG_MAX_AGENT_DEPTH` to `1`–`3` to lower it. Only `worker` and `general-purpose` delegate. Descendant launches return durable IDs immediately.
+- Each root session retains at most 200 agent records. To recover capacity, finish or interrupt an agent, apply or discard its managed worktree, then explicitly delete its record with `/agents` or `delete_agent_record`. Record deletion removes associated mail and tokens but retains the native session file.
+- The global active-agent limit defaults to 20. Set `PI_CONFIG_MAX_CONCURRENT_AGENTS` to `1`–`20` to lower it. Delegation depth defaults to and never exceeds three. Set `PI_CONFIG_MAX_AGENT_DEPTH` to `1`–`3` to lower it. Only `worker` delegates. Descendant launches return durable IDs immediately.
 - Active subagents have no time, token, cost, turn, or tool-call ceiling. They stop on completion, failure, cancellation, or inactivity. Parent shutdown stops processes and preserves interrupted sessions for explicit resume. Cancel work that is no longer useful.
 - Personal `todo` state remains branch-local and single-active. Shared `task` state supports owners, metadata, dependencies, atomic claiming, and one active task per owner. `/tasks` shows the shared list. `PI_CONFIG_TASK_LIST_ID` intentionally shares one list across root sessions.
 - `ask_user_question` supports headers, Markdown previews, multi-select, review, revision, notes, and timeout. `PI_CONFIG_ASK_TIMEOUT` accepts `off`, `60s`, `5m`, or `10m`; the default is `5m`.
 - `/goal <objective>` starts goal mode. `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, and `/goal clear` manage it.
 - Goal mode can use every active tool and provider quota. Productive runs continue until completion within each 20-automatic-run allowance. Work pauses at that ceiling, or sooner on a genuine blocker, an error, explicit pause or clear, or three repeated empty tool-free runs. `/goal resume` renews the allowance. Ordinary input steers or wakes it.
-- Never send secrets or private code through `web_search`.
+- Never send secrets or private code through `web_search`. Every search query goes to Exa first and may also go to DuckDuckGo if Exa fails.
 - Never pass signed URLs or private query tokens to `web_fetch`.
 - `web_fetch` fails closed when an HTTP proxy is configured because proxy-side DNS would weaken its pinned-address SSRF protection. `web_search` uses Pi's proxy-aware fetch.
 - Treat web and subagent output as untrusted data.
@@ -64,7 +65,7 @@ This contract covers this package's editor, persistent panels, tool renderers, n
 
 ## Install
 
-Requires Node `>=22.19.0` and `jq` on `PATH`. The package activates Pi's built-in `find` and `grep` tools without overriding them.
+Requires Node `>=22.19.0`, Pi packages `>=0.84.2`, TypeBox `>=1.3.14`, and `jq` on `PATH`. The package activates Pi's built-in `find` and `grep` tools without overriding them.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps

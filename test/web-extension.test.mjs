@@ -18,6 +18,7 @@ test("web_fetch rejects a configured proxy before network access while search st
   const tools = new Map();
   webExtension({ registerTool(tool) { tools.set(tool.name, tool); } });
   assert.deepEqual([...tools.keys()], ["web_search", "web_fetch"]);
+  assert.match(tools.get("web_search").description, /Every query is sent to Exa.*may also be sent.*DuckDuckGo/);
 
   const previous = process.env.HTTPS_PROXY;
   process.env.HTTPS_PROXY = "http://127.0.0.1:9";
@@ -29,6 +30,25 @@ test("web_fetch rejects a configured proxy before network access while search st
   } finally {
     if (previous === undefined) delete process.env.HTTPS_PROXY;
     else process.env.HTTPS_PROXY = previous;
+  }
+});
+
+test("web search details report every attempted provider", async () => {
+  const tools = new Map();
+  webExtension({ registerTool(tool) { tools.set(tool.name, tool); } });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) return new Response("unavailable", { status: 503 });
+    return new Response(`<div class="result"><a class="result__a" href="https://example.com/">Example</a></div>`, { status: 200 });
+  };
+  try {
+    const result = await tools.get("web_search").execute("search", { query: "provider routing", limit: 1 });
+    assert.equal(result.details.provider, "duckduckgo");
+    assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "duckduckgo"]);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

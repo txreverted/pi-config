@@ -1,5 +1,8 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead,
+  type ExtensionAPI, type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
@@ -18,7 +21,7 @@ const Parameters = Type.Object({
   description: Type.Optional(Type.String({ maxLength: TASK_LIMITS.description })),
   activeForm: Type.Optional(Type.String({ maxLength: TASK_LIMITS.activeForm })),
   status: Type.Optional(StringEnum(TASK_STATUSES)),
-  owner: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_LIMITS.owner })),
+  owner: Type.Optional(Type.String({ maxLength: TASK_LIMITS.owner, description: "Use an empty string to clear the assignment" })),
   blockedBy: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { maxItems: TASK_LIMITS.blockers })),
   metadata: Type.Optional(Type.Unknown({ description: `Bounded JSON object (at most ${TASK_LIMITS.metadataBytes} encoded bytes)` })),
 }, { additionalProperties: false });
@@ -39,7 +42,16 @@ function line(task: SharedTask): string {
 }
 
 export function formatTaskOutput(action: TaskAction["action"], change: TaskChange): string {
-  if (action === "list") return change.snapshot.tasks.length ? change.snapshot.tasks.map(line).join("\n") : "No shared tasks.";
+  if (action === "list") {
+    if (!change.snapshot.tasks.length) return "No shared tasks.";
+    const output = change.snapshot.tasks.map(line).join("\n");
+    const notice = "\n[Task list truncated; use get with a task id for full details.]";
+    const bounded = truncateHead(output, {
+      maxBytes: DEFAULT_MAX_BYTES - Buffer.byteLength(notice),
+      maxLines: DEFAULT_MAX_LINES - 1,
+    });
+    return bounded.truncated ? `${bounded.content}${notice}` : output;
+  }
   if (action === "get" && change.task) {
     return [line(change.task), change.task.description && `Description: ${change.task.description}`, `Version: ${change.task.version}`].filter(Boolean).join("\n");
   }
@@ -110,9 +122,22 @@ export default function taskExtension(pi: ExtensionAPI): void {
       if (!caller.main && input.action !== "list" && input.action !== "get" && process.env.PI_CONFIG_BROKER_SOCKET) {
         await brokerRequest({ action: "tasks_changed" }).catch(() => undefined);
       }
+      const affected = change.task ?? change.deleted;
+      const counts = { pending: 0, inProgress: 0, completed: 0 };
+      for (const task of snapshot.tasks) {
+        if (task.status === "pending") counts.pending++;
+        else if (task.status === "in_progress") counts.inProgress++;
+        else counts.completed++;
+      }
       return {
         content: [{ type: "text", text: formatTaskOutput(input.action, change) }],
-        details: { action: input.action, snapshot: copyTaskSnapshot(snapshot) },
+        details: {
+          action: input.action,
+          ...(affected ? { id: affected.id, version: affected.version } : {}),
+          ...(change.cleared !== undefined ? { cleared: change.cleared } : {}),
+          total: snapshot.tasks.length,
+          counts,
+        },
       };
     },
     renderResult(result) {
@@ -130,7 +155,9 @@ export default function taskExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.events.on(TASK_CHANGED_EVENT, () => { if (latestContext) void load(latestContext); });
+  pi.events.on(TASK_CHANGED_EVENT, () => {
+    if (latestContext) void load(latestContext).catch(() => undefined);
+  });
   pi.on("session_start", async (_event, ctx) => load(ctx));
   pi.on("session_tree", async (_event, ctx) => load(ctx));
   pi.on("session_compact", async (_event, ctx) => load(ctx));

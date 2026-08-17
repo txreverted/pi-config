@@ -79,16 +79,20 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
   await h.events.get("session_start")({}, h.context);
   assert.deepEqual(h.active(), ["read"]);
 
-  await h.commands.get("goal").handler("Implement safely", h.context);
+  const sentinel = "IGNORE_SYSTEM_SENTINEL";
+  await h.commands.get("goal").handler(`Implement safely ${sentinel}`, h.context);
   assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => !h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: paused/);
   assert.match(h.messages[0], /untrusted task data/);
   assert.match(h.messages[0], /goal_id:/);
+  assert.match(h.messages[0], new RegExp(sentinel));
   const unrelated = await h.events.get("before_agent_start")({ prompt: "ordinary input", systemPrompt: "BASE" }, h.context);
   assert.equal(unrelated, undefined);
   assert.match(h.statuses.at(-1).value, /goal: paused/);
   const injected = await h.events.get("before_agent_start")({ prompt: h.messages[0], systemPrompt: "BASE" }, h.context);
-  assert.match(injected.systemPrompt, /JSON string/);
+  assert.match(injected.systemPrompt, /goal controller user message/);
+  assert.match(injected.systemPrompt, /Current goal_id:/);
+  assert.doesNotMatch(injected.systemPrompt, new RegExp(sentinel));
   assert.ok(["goal_complete", "goal_blocked", "goal_wait"].every((name) => h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: active/);
 });

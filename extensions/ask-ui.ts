@@ -246,13 +246,18 @@ export function createAskComponent(
       addWrapped(lines, " ", theme.fg("dim", "Tab/←→ questions • ↑↓ choose • Enter confirm • Esc cancel"), renderWidth);
       lines.push(theme.fg("accent", "─".repeat(renderWidth)));
       const bounded = lines.map((line) => truncateToWidth(line, renderWidth, ""));
-      const maxRows = Math.max(10, (tui.terminal?.rows ?? 30) - 2);
+      const maxRows = Math.max(1, (tui.terminal?.rows ?? 30) - 2);
       if (bounded.length <= maxRows) return bounded;
-      const header = bounded.slice(0, 3);
-      const footer = bounded.slice(-2);
-      const body = bounded.slice(3, -2);
+      if (maxRows === 1) return [bounded[0]];
+      if (maxRows < 5) return [bounded[0], ...Array.from({ length: maxRows - 2 }, () => theme.fg("dim", " …")), bounded.at(-1)!];
+
+      const footerCount = Math.min(2, maxRows - 2);
+      const headerCount = Math.min(3, maxRows - footerCount - 1);
+      const header = bounded.slice(0, headerCount);
+      const footer = bounded.slice(-footerCount);
+      const body = bounded.slice(headerCount, -footerCount);
       const focus = Math.max(0, body.findIndex((line) => /(?:^|\s)>\s|Enter to submit|Answer every question|Enter save/.test(stripTerminalSequences(line))));
-      const slots = Math.max(1, maxRows - header.length - footer.length);
+      const slots = maxRows - header.length - footer.length;
       const start = Math.max(0, Math.min(focus - Math.floor(slots / 2), body.length - slots));
       const window = body.slice(start, start + slots);
       if (start > 0) window[0] = theme.fg("dim", " …");

@@ -31,7 +31,7 @@ const SUBAGENT_PROGRESS_INTERVAL_MS = 1_000;
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
-export const AGENT_NAMES = ["Explore", "general-purpose", "reviewer", "researcher", "worker"] as const;
+export const AGENT_NAMES = ["Explore", "reviewer", "researcher", "worker"] as const;
 export type AgentName = typeof AGENT_NAMES[number];
 export type ChildStatus = "queued" | "starting" | "running" | "done" | "stale" | "bugged" | "error";
 

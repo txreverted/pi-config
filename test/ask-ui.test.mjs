@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { askTimeoutMs, normalizeQuestions } from "../extensions/ask-core.ts";
-import { AskState } from "../extensions/ask-ui.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { AskState, createAskComponent } from "../extensions/ask-ui.ts";
 
 test("new question fields are normalized with grapheme limits", () => {
   const [question] = normalizeQuestions([{
@@ -34,6 +35,29 @@ test("ask timeout accepts only the documented values", () => {
   assert.equal(askTimeoutMs("5m"), 300_000);
   assert.equal(askTimeoutMs("10m"), 600_000);
   assert.throws(() => askTimeoutMs("1m"), /must be off, 60s, 5m, or 10m/);
+});
+
+test("questionnaire rendering obeys available rows on short terminals", () => {
+  const questions = normalizeQuestions([{
+    id: "short",
+    header: "Short",
+    question: "Choose safely?",
+    options: Array.from({ length: 5 }, (_, index) => ({ label: `Option ${index}`, description: "A bounded description" })),
+  }]);
+  const theme = {
+    fg: (_color, text) => text,
+    bold: (text) => text,
+    italic: (text) => text,
+    strikethrough: (text) => text,
+  };
+  const keybindings = { matches: () => false };
+  for (let rows = 4; rows <= 12; rows++) {
+    const tui = { terminal: { rows, columns: 40 }, requestRender() {} };
+    const component = createAskComponent(tui, theme, keybindings, questions, "Context that wraps across rows", () => {});
+    const lines = component.render(40);
+    assert.ok(lines.length <= rows - 2, `height ${rows}: ${lines.length} rows`);
+    assert.ok(lines.every((line) => visibleWidth(line) <= 40), `height ${rows}: width overflow`);
+  }
 });
 
 test("question state supports multi-select, custom answers, and backtracking", () => {
