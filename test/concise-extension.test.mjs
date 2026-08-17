@@ -11,6 +11,7 @@ test("concise policy is always appended without replacing the base prompt", () =
   assert.match(result.systemPrompt, /^BASE\n\nCONCISE RESPONSE POLICY/);
   assert.match(result.systemPrompt, /Preserve exact code, commands/);
   assert.match(result.systemPrompt, /security warnings, irreversible actions/);
+  assert.match(result.systemPrompt, /documentation that is short, direct, concrete/i);
   assert.match(result.systemPrompt, /persisted artifacts/i);
   assert.match(result.systemPrompt, /user's requested format and level of detail win/i);
   assert.equal(result.systemPrompt.endsWith(CONCISE_RESPONSE_POLICY), true);

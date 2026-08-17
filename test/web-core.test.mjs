@@ -136,6 +136,10 @@ test("pinned HTTPS transport preserves Host and SNI and revalidates redirects", 
     assert.equal(requests[0].servername, "example.com");
     assert.equal(requests[0].headers.Host, "example.com:8443");
     assert.equal(requests[0].path, "/path?q=1");
+    const headerNames = Object.keys(requests[0].headers).map((name) => name.toLowerCase());
+    assert.ok(!headerNames.includes("authorization"));
+    assert.ok(!headerNames.includes("cookie"));
+    assert.ok(!headerNames.includes("proxy-authorization"));
 
     requests.length = 0;
     redirect = true;
@@ -238,6 +242,29 @@ test("Exa JSON results are parsed and oversized normalized URLs are rejected", (
   assert.deepEqual(parsed.results, [
     { title: "JSON result", url: "https://example.net/", snippet: "One two" },
   ]);
+});
+
+test("keyless search providers omit ambient credential headers", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), options });
+    if (requests.length === 1) return new Response("unavailable", { status: 503 });
+    return new Response(`<div class="result"><a class="result__a" href="https://example.com/">Result</a></div>`, { status: 200 });
+  };
+  try {
+    await searchWeb("credential check", 1);
+    assert.equal(requests.length, 2);
+    for (const { options } of requests) {
+      const headers = new Headers(options.headers);
+      assert.equal(headers.has("authorization"), false);
+      assert.equal(headers.has("cookie"), false);
+      assert.equal(headers.has("proxy-authorization"), false);
+      assert.equal(options.credentials, undefined);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("web search falls back from Exa to DuckDuckGo and reports both failures", async () => {

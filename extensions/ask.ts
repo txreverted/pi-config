@@ -12,7 +12,7 @@ import {
   type AskQuestion,
 } from "./ask-core.ts";
 import { createAskComponent, type AskUiResult } from "./ask-ui.ts";
-import { normalizeDisplayText } from "./ui-core.ts";
+import { normalizeDisplayText } from "./text-safety.ts";
 
 const TOOL_NAME = "ask_user_question";
 
@@ -39,11 +39,11 @@ interface AskDetails {
 }
 
 function title(question: AskQuestion, index: number, total: number): string {
-  return `${index + 1}/${total} - ${question.header}: ${question.question}`;
+  return `${index + 1}/${total} │ ${question.header}: ${question.question}`;
 }
 
 function optionText(option: AskOption, index: number, selected = false): string {
-  return `${selected ? "■" : "□"} ${index + 1}. ${option.label} - ${option.description}`;
+  return `${selected ? "■" : "□"} ${index + 1}. ${option.label} │ ${option.description}`;
 }
 
 function cancelledResult(questions: AskQuestion[]) {
@@ -73,7 +73,7 @@ async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined,
         const selected = await ctx.ui.select(prompt, [...choices, other], dialogOptions);
         if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
         if (selected === other) {
-          const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} - ${CUSTOM_CHOICE}`, signal);
+          const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
           if (answer === null) return { answers: [], cancelled: true };
           if (!answer) continue;
           answers.push({ question: question.question, answer, optionIndexes: [], custom: true });
@@ -110,7 +110,7 @@ async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined,
         break;
       }
       if (selected === other) {
-        const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} - ${CUSTOM_CHOICE}`, signal);
+        const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
         if (answer === null) return { answers: [], cancelled: true };
         custom = answer;
         continue;

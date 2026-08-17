@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import ponytailExtension from "../extensions/ponytail.ts";
 import { ponytailConfigPath } from "../extensions/ponytail-core.ts";
-import { UI_MODE_STATUS_EVENT } from "../extensions/ui-core.ts";
 
 function createHarness() {
   const commands = new Map();
@@ -18,11 +17,6 @@ function createHarness() {
     on(name, handler) { events.set(name, handler); },
     appendEntry(customType, data) { entries.push({ customType, data }); },
     sendUserMessage(text, options) { messages.push({ text, options }); },
-    events: {
-      emit(name, data) {
-        if (name === UI_MODE_STATUS_EVENT) statuses.push({ name: data.id, value: data.text });
-      },
-    },
   };
   ponytailExtension(pi);
   return { commands, events, entries, messages, statuses };
@@ -39,6 +33,7 @@ function createContext(branch = [], statuses = [], idle = true) {
       sessionManager: { getBranch: () => branch },
       ui: {
         notify: (message, level) => notices.push({ message, level }),
+        setStatus: (name, value) => statuses.push({ name, value }),
         theme: { fg: (_color, value) => value },
       },
     },
@@ -71,7 +66,7 @@ test("Ponytail status is hidden by default", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
-  assert.deepEqual(harness.statuses.at(-1), { name: "ponytail", value: undefined });
+  assert.deepEqual(harness.statuses.at(-1), { name: "pi-config-ponytail", value: undefined });
 }));
 
 test("session mode persists, injects isolated instructions, and updates internal status activity", () => withEnvironment(async () => {
@@ -163,6 +158,9 @@ test("active rules propagate into custom subagents", () => withEnvironment(async
   await harness.events.get("tool_call")(subagent, context);
   assert.match(subagent.input.tasks[0].task, /Active parent coding policy/);
   assert.match(subagent.input.tasks[0].task, /PONYTAIL MODE ACTIVE - level: full/);
+  const propagated = subagent.input.tasks[0].task;
+  await harness.events.get("tool_call")(subagent, context);
+  assert.equal(subagent.input.tasks[0].task, propagated);
 
   for (const tasks of [{}, [null], ["not-an-object"]]) {
     await assert.doesNotReject(async () => harness.events.get("tool_call")({ toolName: "subagent", input: { tasks } }, context));

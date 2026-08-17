@@ -6,8 +6,10 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { createAgentRegistry } from "../subagents/registry.ts";
 import subagentsExtension, { untrustedOutput } from "../extensions/subagents.ts";
+import { createAgentWorktree } from "../extensions/subagents-worktree.ts";
 
 const execFile = promisify(execFileCallback);
 async function git(cwd, ...args) { return execFile("git", args, { cwd }); }
@@ -36,6 +38,29 @@ test("subagent extension exposes only foreground batches and patch lifecycle too
   assert.equal(schema.properties.concurrency, undefined);
   assert.equal(schema.properties.tasks.minItems, 2);
   assert.equal(schema.properties.tasks.maxItems, 20);
+});
+
+test("subagent renderer shows bounded Claude-like progress trees", () => {
+  const tool = harness().tools.get("subagent");
+  const usage = { input: 5, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+  const now = Date.now();
+  const progress = [
+    { id: "explore", agent: "Explore", thinking: "low", status: "running", startedAt: now, turns: 1, toolCalls: 2, text: "", usage, activity: "Reading files" },
+    { id: "review", agent: "reviewer", thinking: "high", status: "completed", startedAt: now - 1_000, endedAt: now, turns: 1, toolCalls: 1, text: "done", usage },
+  ];
+  const component = tool.renderResult(
+    { content: [{ type: "text", text: "expanded output" }], details: { progress, results: [], usage } },
+    { expanded: false },
+    { fg: (_color, text) => text, bold: (text) => text },
+    { args: { tasks: [{ name: "Inspect code" }, { name: "Review patch" }] } },
+  );
+  const lines = component.render(50);
+  const rendered = lines.join("\n");
+  assert.match(rendered, /├─ Agent  Inspect code │ 2 tool uses │ 10 tokens/);
+  assert.match(rendered, /│  ⎿ Reading files/);
+  assert.match(rendered, /├─ Review  Review patch │ 1 tool use │ 10 tokens/);
+  assert.doesNotMatch(rendered, / \| |\.\.\./);
+  assert.ok(lines.every((line) => visibleWidth(line) <= 50));
 });
 
 test("registry keeps roles but removes team, task, and bridge capabilities", () => {
@@ -115,6 +140,40 @@ test("parallel workers use distinct worktrees and retain completed patches", { s
     if (previous.agentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous.agentDir;
     if (previous.cli === undefined) delete process.env.PI_CONFIG_SUBAGENT_CLI_PATH; else process.env.PI_CONFIG_SUBAGENT_CLI_PATH = previous.cli;
     if (previous.mode === undefined) delete process.env.FAKE_PI_MODE; else process.env.FAKE_PI_MODE = previous.mode;
+    await Promise.all([rm(root, { recursive: true, force: true }), rm(agentDir, { recursive: true, force: true })]);
+  }
+});
+
+test("failed public apply keeps the worker recoverable", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-subagent-apply-recovery-"));
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-subagent-apply-state-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    await git(root, "init", "-q");
+    await git(root, "config", "user.email", "test@example.invalid");
+    await git(root, "config", "user.name", "Test");
+    await writeFile(join(root, "base.txt"), "base\n");
+    await git(root, "add", "base.txt");
+    await git(root, "commit", "-qm", "base");
+
+    const workspace = await createAgentWorktree(root, "recoverable");
+    await writeFile(join(workspace.worktree, "base.txt"), "worker\n");
+    await writeFile(join(root, "base.txt"), "parent\n");
+    const { tools } = harness();
+    const context = { cwd: root, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui: { confirm: async () => true } };
+    await assert.rejects(
+      () => tools.get("apply_agent_changes").execute("apply", { id: "recoverable" }, undefined, undefined, context),
+      /dirty paths/,
+    );
+    const diff = await tools.get("get_agent_diff").execute("diff", { id: "recoverable" }, undefined, undefined, context);
+    assert.match(diff.content[0].text, /worker/);
+
+    await writeFile(join(root, "base.txt"), "base\n");
+    await tools.get("discard_agent_worktree").execute("discard", { id: "recoverable" }, undefined, undefined, context);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     await Promise.all([rm(root, { recursive: true, force: true }), rm(agentDir, { recursive: true, force: true })]);
   }
 });

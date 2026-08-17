@@ -60,7 +60,7 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
   assert.equal(component.focused, true);
 
   const rendered = component.render(80).join("\n");
-  assert.match(rendered, /> ├─ □ Web/);
+  assert.match(rendered, /⎿ ├─ □ Web/);
   assert.match(rendered, /└─ □ Other/);
   const special = rendered.match(/[^\x00-\x7f]/gu) ?? [];
   assert.ok(special.every((glyph) => "□■☒⎿├─│└".includes(glyph)), special.join(""));
@@ -89,6 +89,35 @@ test("multi-select toggles choices and cancellation preserves partial answers", 
   });
 });
 
+test("custom editor submits or cancels without leaking drafts", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  let submitted;
+  const component = createAskComponent(tui, theme, keybindings, questions(), (value) => { submitted = value; });
+  component.focused = true;
+  component.handleInput("\x1b[B");
+  component.handleInput("\x1b[B");
+  component.handleInput("\r");
+  component.handleInput("custom answer");
+  component.handleInput("\r");
+  assert.match(component.render(80).join("\n"), /custom answer/);
+  component.handleInput("\r");
+  assert.equal(submitted.cancelled, false);
+  assert.equal(submitted.answers[0].answer, "custom answer");
+
+  let cancelled;
+  const abandoned = createAskComponent(tui, theme, keybindings, questions(), (value) => { cancelled = value; });
+  abandoned.focused = true;
+  abandoned.handleInput("\x1b[B");
+  abandoned.handleInput("\x1b[B");
+  abandoned.handleInput("\r");
+  abandoned.handleInput("draft");
+  abandoned.handleInput("\x1b");
+  assert.doesNotMatch(abandoned.render(80).join("\n"), /draft/);
+  abandoned.handleInput("\x1b");
+  assert.equal(cancelled.cancelled, true);
+  assert.deepEqual(cancelled.answers, []);
+});
+
 test("enhanced keyboard sequences navigate and toggle choices", () => {
   const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
   let result;
@@ -113,7 +142,7 @@ test("questionnaire rendering stays within narrow and short terminals", () => {
     const lines = component.render(32);
     assert.ok(lines.length <= Math.max(1, rows - 2), `height ${rows}: ${lines.length}`);
     assert.ok(lines.every((line) => visibleWidth(line) <= 32), `width overflow at ${rows}`);
-    if (rows === 8) assert.match(lines.join("\n"), /> ├─/);
+    if (rows === 8) assert.match(lines.join("\n"), /⎿ ├─/);
   }
 
   const tui = { terminal: { rows: 10, columns: 32 }, requestRender() {} };
