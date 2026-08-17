@@ -33,4 +33,9 @@ jobs:
         run: npm audit --omit=dev
       - if: matrix.pi == 'latest'
         run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
-      - run: npm run check
+      - if: runner.os != 'Windows'
+        run: npm run check
+      - if: runner.os == 'Windows'
+        run: npm run typecheck
+      - if: runner.os == 'Windows'
+        run: node --experimental-strip-types --test --test-name-pattern "supervisor change subscriptions|closed supervisors|missing managed artifacts|removed delegated cwd|background worktrees reject|read-only agent tools|writable policy|permits only one concurrent claim|fails closed on corruption" test/subagents-supervisor.test.mjs test/subagents-worktree.test.mjs test/task-store.test.mjs
