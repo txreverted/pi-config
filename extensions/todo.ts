@@ -36,7 +36,7 @@ const Parameters = Type.Object({
 function taskLine(task: TodoTask): string {
   const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
   const activity = task.status === "in_progress" && task.activeForm ? ` — ${task.activeForm}` : "";
-  const blockers = task.blockedBy.length ? ` blocked by ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
+  const blockers = task.blockedBy.length ? ` depends on ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
   return `${mark} #${task.id} ${task.subject}${activity}${blockers}`;
 }
 
