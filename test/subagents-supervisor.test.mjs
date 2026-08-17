@@ -171,43 +171,6 @@ test("authenticated broker fixes sender identity and rejects forged targets", as
   }
 });
 
-test("permission broker preserves exact args and denies, times out, and disconnects closed", async () => {
-  const { root, supervisor } = await isolatedSupervisor("pi-permission");
-  const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };
-  try {
-    const worktree = join(root, "worktree");
-    await writeFile(join(root, "seed"), "x");
-    await mkdir(worktree);
-    await supervisor.reserve({ ...task("writer", "Writer", "worker"), cwd: worktree }, undefined, undefined, {
-      repoRoot: root, worktree, baseCommit: "0".repeat(40),
-    });
-    await supervisor.startBroker();
-    Object.assign(process.env, supervisor.childEnvironment("writer"));
-    let captured;
-    supervisor.setPermissionHandler(async (_sender, request) => { captured = request; return false; });
-    const args = { command: "printf exact" };
-    const deniedPromise = brokerRequest({ action: "permission", agentId: "writer", toolCallId: "call-1", toolName: "bash", args, workspace: worktree });
-    args.command = "changed";
-    assert.deepEqual(await deniedPromise, { approved: false });
-    assert.deepEqual(captured.args, { command: "printf exact" });
-
-    supervisor.setPermissionHandler(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); return true; });
-    await assert.rejects(() => brokerRequest({ action: "permission", agentId: "writer", toolCallId: "call-2", toolName: "bash", args: {}, workspace: worktree }, 5), /timed out/);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    await supervisor.shutdown();
-    await assert.rejects(() => brokerRequest({ action: "list" }, 50));
-  } finally {
-    if (previous.socket === undefined) delete process.env.PI_CONFIG_BROKER_SOCKET; else process.env.PI_CONFIG_BROKER_SOCKET = previous.socket;
-    if (previous.token === undefined) delete process.env.PI_CONFIG_BROKER_TOKEN; else process.env.PI_CONFIG_BROKER_TOKEN = previous.token;
-    await clean(root, supervisor);
-  }
-});
-
-
-
-
-
-
 test("broker bounds aggregate requests, result DTOs, and descendant visibility", async () => {
   const { root, supervisor } = await isolatedSupervisor("pi-broker-bounds");
   const previous = { socket: process.env.PI_CONFIG_BROKER_SOCKET, token: process.env.PI_CONFIG_BROKER_TOKEN };

@@ -44,7 +44,6 @@ export interface AgentMail {
 
 export interface BrokerRequest { action: string; [key: string]: unknown }
 export type BrokerHandler = (senderId: string, request: BrokerRequest) => Promise<unknown>;
-export type PermissionHandler = (senderId: string, request: BrokerRequest) => Promise<boolean>;
 
 export interface BrokerAgentRecord {
   id: string;
@@ -207,7 +206,6 @@ export class AgentSupervisor {
   private readonly progressPersistedAt = new Map<string, number>();
   private server?: Server;
   private handler?: BrokerHandler;
-  private permissionHandler?: PermissionHandler;
   private mainMessageHandler?: (message: AgentMail) => Promise<void>;
   private writeChain = Promise.resolve();
   private shuttingDown = false;
@@ -288,7 +286,6 @@ export class AgentSupervisor {
   }
 
   setBrokerHandler(handler: BrokerHandler): void { this.handler = handler; }
-  setPermissionHandler(handler: PermissionHandler): void { this.permissionHandler = handler; }
   setMainMessageHandler(handler: (message: AgentMail) => Promise<void>): void {
     this.mainMessageHandler = handler;
     void this.deliver("main").then(() => this.persist()).catch(() => undefined);
@@ -524,15 +521,6 @@ export class AgentSupervisor {
     const sender = [...this.tokens.entries()].find(([, token]) => equalSecret(token, value.token as string))?.[0];
     if (!sender) throw new Error("Unauthorized broker request");
     const request = value.request as BrokerRequest;
-    if (request.action === "permission") {
-      if (this.shuttingDown || request.agentId !== sender || !this.permissionHandler) throw new Error("Unauthorized permission request");
-      const record = this.records.get(sender);
-      if (!record?.worktree || request.workspace !== record.worktree || typeof request.toolCallId !== "string" ||
-        !["bash", "edit", "write"].includes(String(request.toolName)) || !request.args || typeof request.args !== "object" || Array.isArray(request.args)) {
-        throw new Error("Malformed permission request");
-      }
-      return { approved: await this.permissionHandler(sender, structuredClone(request)) };
-    }
     if (request.action === "list") return this.list()
       .filter((record) => record.id === sender || record.parentId === sender)
       .map(brokerRecord);
