@@ -7,6 +7,7 @@ The final Pi config is minimal and contains only:
 - Ponytail, to produce cleaner code.
 - Caveman-style output and documentation: short, direct, concrete, and easy to act on.
 - Todos with Claude Code-like UI and logic.
+- A Claude Code-like ask-user tool.
 - Subagents with Claude Code-like UI. Use subagents only to finish work faster by running independent work in parallel, including unblocked todo items.
 - Goal mode, so long-running work continues until it is done or the user stops it.
 - Web search that requires no API key or credentials.
