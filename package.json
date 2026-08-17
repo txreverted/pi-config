@@ -8,6 +8,7 @@
   ],
   "files": [
     "extensions",
+    "prompts",
     "skills",
     "subagents",
     "themes",
@@ -27,7 +28,6 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/ui.ts",
       "./extensions/tools.ts",
       "./extensions/web.ts",
       "./extensions/ask.ts",
@@ -37,8 +37,8 @@
       "./extensions/concise.ts",
       "./extensions/ponytail.ts"
     ],
-    "skills": [
-      "./skills"
+    "prompts": [
+      "./prompts"
     ],
     "themes": [
       "./themes/neutral.json"

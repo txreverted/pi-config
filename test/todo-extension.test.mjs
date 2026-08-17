@@ -1,34 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import todoExtension from "../extensions/todo.ts";
-import { UI_PANEL_EVENT } from "../extensions/ui-core.ts";
 
 function setup() {
   const tools = new Map();
   const commands = new Map();
   const shortcuts = new Map();
   const events = new Map();
-  const panelUpdates = [];
   const pi = {
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     registerShortcut(key, shortcut) { shortcuts.set(key, shortcut); },
     on(name, handler) { events.set(name, handler); },
-    events: { emit(name, data) { panelUpdates.push({ name, data }); } },
   };
   todoExtension(pi);
-  return { tool: tools.get("todo"), commands, shortcuts, events, panelUpdates };
+  return { tool: tools.get("todo"), commands, shortcuts, events };
 }
 
 function context(branch = [], mode = "tui") {
   const notices = [];
+  const widgets = [];
   return {
     notices,
+    widgets,
     value: {
       mode,
       sessionManager: { getBranch: () => branch },
       ui: {
         notify: (message, level) => notices.push({ message, level }),
+        setWidget: (name, factory, options) => widgets.push({ name, factory, options }),
       },
     },
   };
@@ -96,39 +97,45 @@ test("a malformed final result retains the latest validated todo snapshot", asyn
   assert.match(listed.content[0].text, /#1 Keep/);
 });
 
-test("todo publishes bounded logical panel content to the composite UI", async () => {
-  const { tool, commands, shortcuts, events, panelUpdates } = setup();
+test("todo publishes a bounded native Pi widget", async () => {
+  const { tool, commands, shortcuts, events } = setup();
   const ctx = context();
   events.get("session_start")({}, ctx.value);
   for (let index = 0; index < 10; index++) await tool.execute("call", { action: "create", subject: `Task ${index}` });
   await tool.execute("call", { action: "update", id: 1, status: "completed" });
   await tool.execute("call", { action: "update", id: 2, status: "in_progress", activeForm: "Working" });
-  const mixedUpdate = panelUpdates.at(-1);
-  assert.equal(mixedUpdate.name, UI_PANEL_EVENT);
-  const mixed = mixedUpdate.data.render(80, { fg: (_color, text) => text });
+  const mixedUpdate = ctx.widgets.at(-1);
+  assert.equal(mixedUpdate.name, "pi-config-todo");
+  assert.equal(mixedUpdate.options.placement, "aboveEditor");
+  const theme = { fg: (_color, text) => text };
+  const mixed = mixedUpdate.factory({ terminal: { rows: 30 } }, theme).render(80);
   assert.deepEqual(mixed.slice(0, 4), [
-    "Todos: 1/10 completed",
-    " ├─ ■ #2 Task 1 - Working",
-    " ├─ □ #3 Task 2",
-    " ├─ □ #4 Task 3",
+    " Todos: 1/10 completed",
+    "  ├─ ■ #2 Task 1 │ Working",
+    "  ├─ □ #3 Task 2",
+    "  ├─ □ #4 Task 3",
   ]);
 
+  for (const rows of [4, 9, 12]) {
+    for (const width of [1, 12, 80]) {
+      const short = mixedUpdate.factory({ terminal: { rows } }, theme).render(width);
+      assert.ok(short.length <= Math.max(1, rows - 8));
+      assert.ok(short.every((line) => visibleWidth(line) <= width));
+    }
+  }
+
   await shortcuts.get("ctrl+shift+t").handler(ctx.value);
-  const collapsed = panelUpdates.at(-1).data.render;
-  assert.equal(collapsed(80, { fg: (_color, text) => text }).length, 1);
+  const collapsed = ctx.widgets.at(-1).factory({ terminal: { rows: 30 } }, theme).render(80);
+  assert.equal(collapsed.length, 1);
   await shortcuts.get("ctrl+shift+t").handler(ctx.value);
 
   for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
-
-  assert.deepEqual(panelUpdates.at(-1).data, { id: "todo" });
-  assert.ok(panelUpdates.every((entry) => entry.name === UI_PANEL_EVENT));
+  assert.deepEqual(ctx.widgets.at(-1), { name: "pi-config-todo", factory: undefined, options: undefined });
   await commands.get("todos").handler("", ctx.value);
   assert.match(ctx.notices.at(-1).message, /Todos \(10\)/);
   assert.match(ctx.notices.at(-1).message, /#10 Task 9/);
-  assert.equal(panelUpdates.at(-1).data.id, "todo");
 
   const headless = context([], "print");
-  const beforeHeadless = panelUpdates.length;
   events.get("session_start")({}, headless.value);
-  assert.equal(panelUpdates.length, beforeHeadless);
+  assert.equal(headless.widgets.length, 0);
 });

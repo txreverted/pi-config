@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { safeDisplayLine, safeDisplayText } from "../extensions/text-safety.ts";
+import { normalizeDisplayText, safeDisplayLine, safeDisplayText } from "../extensions/text-safety.ts";
 
 test("multiline display text removes terminal and directional controls", () => {
   const value =
@@ -14,6 +14,10 @@ test("multiline display text removes terminal and directional controls", () => {
 
   assert.equal(sanitized, "safe red\nclipend\ntitleend\nc1redend\ndcsend\nleftrightend\tkept");
   assert.doesNotMatch(sanitized, /[\u001b\u0007\u009b\u202e\u2066\u2069]/);
+});
+
+test("display normalization collapses repeated blank rows", () => {
+  assert.equal(normalizeDisplayText("one\n\n \n\u001b[31m\u001b[0m\n\ntwo"), "one\n\ntwo");
 });
 
 test("single-line display text collapses whitespace and truncates by character", () => {

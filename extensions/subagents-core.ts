@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { isPathInside } from "./path-safety.ts";
 
 export const MAX_SUBAGENT_TASKS = 20;
+export const MAX_SUBAGENT_TASK_CHARS = 50_000;
 export const MAX_SUBAGENT_CONCURRENCY = 20;
 
 function boundedEnvironmentInteger(name: string, fallback: number, maximum: number): number {

@@ -95,7 +95,7 @@ function addWrapped(lines: string[], prefix: string, text: string, width: number
 function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
   if (lines.length <= maxRows) return lines;
   if (maxRows <= 1) return [lines[0]];
-  if (maxRows < 5) return [lines[0], ...Array.from({ length: maxRows - 2 }, () => theme.fg("dim", " ...")), lines.at(-1)!];
+  if (maxRows < 5) return [lines[0], ...Array.from({ length: maxRows - 2 }, () => theme.fg("dim", " ─")), lines.at(-1)!];
   const footerCount = Math.min(2, maxRows - 2);
   const headerCount = Math.min(3, maxRows - footerCount - 1);
   const header = lines.slice(0, headerCount);
@@ -103,7 +103,7 @@ function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
   const body = lines.slice(headerCount, -footerCount);
   const slots = maxRows - header.length - footer.length;
   const focus = Math.max(0, body.findIndex((line) =>
-    line.includes(CURSOR_MARKER) || /(?:^|\s)>\s|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
+    line.includes(CURSOR_MARKER) || /(?:^|\s)⎿\s|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
   ));
   const start = Math.max(0, Math.min(focus - Math.floor(slots / 2), body.length - slots));
   return [...header, ...body.slice(start, start + slots), ...footer];
@@ -219,13 +219,13 @@ export function createAskComponent(
         return theme.fg(index === state.page ? "accent" : "muted", `${mark} ${question.header}`);
       });
       tabs.push(theme.fg(state.review ? "accent" : "muted", "Review"));
-      addWrapped(lines, " ", tabs.join(" | "), renderWidth);
+      addWrapped(lines, " ", tabs.join(" │ "), renderWidth);
       lines.push("");
 
       if (editing) {
         addWrapped(lines, " ", theme.fg("accent", "Write your answer"), renderWidth);
         for (const line of editor.render(Math.max(1, renderWidth - 2))) lines.push(truncateToWidth(` ${line}`, renderWidth, ""));
-        addWrapped(lines, " ", theme.fg("dim", "Enter save | Esc back"), renderWidth);
+        addWrapped(lines, " ", theme.fg("dim", "Enter save │ Esc back"), renderWidth);
       } else if (state.review) {
         addWrapped(lines, " ", theme.bold("Review answers"), renderWidth);
         for (const question of questions) {
@@ -240,16 +240,16 @@ export function createAskComponent(
         lines.push("");
         question.options.forEach((option, index) => {
           const mark = state.selectedIndexes.includes(index) ? "■" : "□";
-          const cursor = state.cursor === index ? theme.fg("accent", "> ") : "  ";
-          addWrapped(lines, cursor, `├─ ${mark} ${option.label} - ${theme.fg("muted", option.description)}`, renderWidth);
+          const cursor = state.cursor === index ? theme.fg("accent", "⎿ ") : "  ";
+          addWrapped(lines, cursor, `├─ ${mark} ${option.label} │ ${theme.fg("muted", option.description)}`, renderWidth);
         });
         const customMark = state.customAnswer ? "■" : "□";
-        const customCursor = state.cursor === question.options.length ? theme.fg("accent", "> ") : "  ";
+        const customCursor = state.cursor === question.options.length ? theme.fg("accent", "⎿ ") : "  ";
         addWrapped(lines, customCursor, `└─ ${customMark} ${CUSTOM_CHOICE}`, renderWidth);
       }
 
       lines.push("");
-      addWrapped(lines, " ", theme.fg("dim", "Tab/left/right questions | Up/down choose | Space toggle | Enter confirm | Esc cancel"), renderWidth);
+      addWrapped(lines, " ", theme.fg("dim", "Tab/left/right questions │ Up/down choose │ Space toggle │ Enter confirm │ Esc cancel"), renderWidth);
       lines.push(theme.fg("accent", "─".repeat(renderWidth)));
       const bounded = lines.map((line) => truncateToWidth(line, renderWidth, ""));
       return fitRows(bounded, Math.max(1, (tui.terminal?.rows ?? 30) - 2), theme);

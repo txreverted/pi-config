@@ -5,6 +5,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { AGENT_NAMES, createAgentRegistry } from "../subagents/registry.ts";
 import {
+  MAX_SUBAGENT_TASK_CHARS,
   MAX_SUBAGENT_TASKS,
   agentDefinitionForTask,
   aggregateUsage,
@@ -19,8 +20,7 @@ import {
   type ChildTask,
   type UsageSummary,
 } from "./subagents-core.ts";
-import { normalizeDisplayText } from "./ui-core.ts";
-import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
+import { normalizeDisplayText, safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import { agentDiff, applyAgentDiff, createAgentWorktree, discardAgentWorktree, recoverAgentWorktree, type AgentWorkspace } from "./subagents-worktree.ts";
 
 interface SubagentToolDetails {
@@ -38,7 +38,7 @@ const taskSchema = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
   name: Type.String({ minLength: 1, maxLength: 80, pattern: "^\\S+(?:\\s+\\S+){0,2}$", description: "Descriptive task name of at most three words" }),
   agent: StringEnum(AGENT_NAMES, { description: "Fixed delegated role" }),
-  task: Type.String({ minLength: 1, maxLength: 50_000, pattern: "\\S", description: "Bounded non-blank task for this agent" }),
+  task: Type.String({ minLength: 1, maxLength: MAX_SUBAGENT_TASK_CHARS, pattern: "\\S", description: "Bounded non-blank task for this agent" }),
   cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096, description: "Working directory inside the current workspace" })),
 });
 
@@ -98,11 +98,11 @@ function tokenCount(value: number): string {
 function agentTreeLines(progress: readonly ChildRunProgress[], names: readonly string[], theme: Theme): string[] {
   return progress.flatMap((entry, index) => {
     const elapsed = "endedAt" in entry ? (entry as ChildRunResult).endedAt - entry.startedAt : Date.now() - entry.startedAt;
-    const stats = `${entry.toolCalls} tool use${entry.toolCalls === 1 ? "" : "s"} | ${tokenCount(entry.usage.totalTokens)} tokens | ${duration(elapsed)}`;
+    const stats = `${entry.toolCalls} tool use${entry.toolCalls === 1 ? "" : "s"} │ ${tokenCount(entry.usage.totalTokens)} tokens │ ${duration(elapsed)}`;
     const activity = entry.status === "running" ? entry.activity ?? entry.currentTool : entry.status;
     return [
-      `${theme.fg("dim", " ├─")} ${theme.bold(roleLabel(entry.agent))}  ${theme.fg("dim", names[index])} ${theme.fg("dim", `| ${stats}`)}`,
-      ...(activity ? [`${theme.fg("dim", " │  ⎿")} ${theme.fg("dim", `${safeDisplayLine(activity, 64)}${entry.status === "running" ? "..." : ""}`)}`] : []),
+      `${theme.fg("dim", " ├─")} ${theme.bold(roleLabel(entry.agent))}  ${theme.fg("dim", names[index])} ${theme.fg("dim", `│ ${stats}`)}`,
+      ...(activity ? [`${theme.fg("dim", " │  ⎿")} ${theme.fg("dim", safeDisplayLine(activity, 64))}`] : []),
     ];
   });
 }

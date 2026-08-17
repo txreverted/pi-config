@@ -9,8 +9,7 @@ import {
   type TruncationResult,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
-import { normalizeDisplayText } from "./ui-core.ts";
+import { normalizeDisplayText, safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import {
   removeBoundedOutput,
   runBoundedProcess,

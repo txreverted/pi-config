@@ -109,8 +109,8 @@ test("RPC display and custom answers are sanitized", async () => {
     },
   });
 
-  assert.equal(shownTitle, "1/1 - Scope: Choose?");
-  assert.equal(shownChoices[0], "□ 1. Small - Few changes");
+  assert.equal(shownTitle, "1/1 │ Scope: Choose?");
+  assert.equal(shownChoices[0], "□ 1. Small │ Few changes");
   assert.equal(result.details.answers[0].answer, "custom\nanswer");
   assert.doesNotMatch(result.content[0].text, /[\u001b\u0007\u202e]/);
 });
@@ -141,6 +141,28 @@ test("cancellation returns no partial answers and headless sessions disable the 
   await assert.rejects(() => tool.execute("call", input(), undefined, undefined, { mode: "print", hasUI: false }), /requires an interactive/);
   events.get("session_start")({}, { mode: "print" });
   assert.deepEqual(active(), ["read"]);
+});
+
+test("an active TUI ask aborts without returning partial answers", async () => {
+  const { tool } = setup();
+  const controller = new AbortController();
+  const result = await tool.execute("call", input(), controller.signal, undefined, {
+    mode: "tui",
+    hasUI: true,
+    ui: {
+      custom: async (factory) => await new Promise((resolve) => {
+        factory(
+          { terminal: { rows: 30, columns: 80 }, requestRender() {} },
+          { fg: (_color, text) => text, bold: (text) => text },
+          { matches: () => false },
+          resolve,
+        );
+        controller.abort();
+      }),
+    },
+  });
+  assert.equal(result.details.cancelled, true);
+  assert.deepEqual(result.details.answers, []);
 });
 
 test("an already aborted ask does not open UI", async () => {

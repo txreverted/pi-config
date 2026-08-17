@@ -12,9 +12,10 @@ import {
   type PonytailMode,
   type PonytailSessionMode,
 } from "./ponytail-core.ts";
-import { safeDisplayLine } from "./text-safety.ts";
-import { normalizeDisplayText, UI_MODE_STATUS_EVENT } from "./ui-core.ts";
+import { MAX_SUBAGENT_TASK_CHARS } from "./subagents-core.ts";
+import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
 
+const STATUS_NAME = "pi-config-ponytail";
 const FALLBACK_SKILL = `# Ponytail\n\nUse the smallest correct solution: YAGNI, existing code, standard library, native platform features, installed dependencies, then minimum new code. Never remove validation, data-loss protection, security, or accessibility.`;
 const SKILL_BODY = (() => {
   try {
@@ -30,14 +31,14 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   let active = false;
   let quietStartup = false;
   let hideStatus = true;
+  let context: ExtensionContext | undefined;
 
   const syncStatus = () => {
-    if (hideStatus || currentMode === "off") {
-      pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
-      return;
-    }
     const state = active ? "active" : "idle";
-    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail", text: `ponytail: ${currentMode} (${state})` });
+    context?.ui.setStatus(
+      STATUS_NAME,
+      hideStatus || currentMode === "off" ? undefined : `ponytail: ${currentMode} (${state})`,
+    );
   };
 
   const loadSettings = (ctx: ExtensionContext): boolean => {
@@ -100,12 +101,16 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    context = ctx;
     const loaded = loadSettings(ctx);
     restoreMode(ctx);
     if (loaded && !quietStartup) ctx.ui.notify(normalizeDisplayText(`Ponytail loaded: ${currentMode}`), "info");
   });
 
-  pi.on("session_tree", (_event, ctx) => restoreMode(ctx));
+  pi.on("session_tree", (_event, ctx) => {
+    context = ctx;
+    restoreMode(ctx);
+  });
 
   pi.on("input", (event, ctx) => {
     if (event.source !== "extension" && currentMode !== "off" && isPonytailDeactivationCommand(event.text)) {
@@ -134,12 +139,11 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
         : [],
     );
     const suffix = `\n\n--- Active parent coding policy ---\n${buildPonytailInstructions(SKILL_BODY, currentMode)}`;
-    if (records.some((record) => record.task.trim() && record.task.length + suffix.length > 50_000)) {
+    const pending = records.filter((record) => record.task.trim() && !record.task.endsWith(suffix));
+    if (pending.some((record) => record.task.length + suffix.length > MAX_SUBAGENT_TASK_CHARS)) {
       return { block: true, reason: "Subagent task is too long to include the active Ponytail policy; shorten the task." };
     }
-    for (const record of records) {
-      if (record.task.trim()) record.task = `${record.task}${suffix}`;
-    }
+    for (const record of pending) record.task = `${record.task}${suffix}`;
   });
 
   pi.on("before_agent_start", (event) => {
@@ -148,7 +152,8 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
     return { systemPrompt: event.systemPrompt ? `${event.systemPrompt}\n\n${instructions}` : instructions };
   });
 
-  pi.on("session_shutdown", () => {
-    pi.events.emit(UI_MODE_STATUS_EVENT, { id: "ponytail" });
+  pi.on("session_shutdown", (_event, ctx) => {
+    ctx.ui.setStatus(STATUS_NAME, undefined);
+    context = undefined;
   });
 }
