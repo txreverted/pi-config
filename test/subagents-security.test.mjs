@@ -27,7 +27,7 @@ test("expanded subagent output strips terminal control sequences", () => {
   assert.deepEqual([...tools.keys()], [
     "subagent", "get_subagent_result", "list_agents", "resume_agent",
     "get_agent_transcript", "send_agent_message", "get_agent_diff",
-    "apply_agent_changes", "discard_agent_worktree", "cancel_subagent",
+    "apply_agent_changes", "discard_agent_worktree", "delete_agent_record", "cancel_subagent",
   ]);
   const tool = tools.get("subagent");
   const rendered = tool.renderResult({
@@ -412,10 +412,23 @@ test("background extension launches, renders, notifies, collects, and evicts", {
       /Unknown background subagent id/,
     );
 
+    const beforeDelete = await tools.get("list_agents").execute("list", {});
+    const foregroundRecord = beforeDelete.details.records.find((record) => record.id === foregroundId);
+    assert.equal(foregroundRecord.background, false);
+    await assert.rejects(
+      () => tools.get("delete_agent_record").execute("delete-denied", { id: foregroundId }, undefined, undefined, {
+        ...context, hasUI: true, ui: { confirm: async () => false },
+      }),
+      /confirmation denied/i,
+    );
+    await tools.get("delete_agent_record").execute("delete", { id: foregroundId }, undefined, undefined, {
+      ...context, hasUI: true, ui: { confirm: async () => true },
+    });
+    await access(foregroundRecord.sessionFile);
+
     const persistent = await tools.get("list_agents").execute("list", {});
-    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids, foregroundId].sort());
+    assert.deepEqual(persistent.details.records.map((record) => record.id).sort(), [...ids].sort());
     assert.ok(persistent.details.records.every((record) => record.collected && record.sessionFile));
-    assert.equal(persistent.details.records.find((record) => record.id === foregroundId).background, false);
   } finally {
     await shutdown?.();
     if (originalPath === undefined) delete process.env.PATH;

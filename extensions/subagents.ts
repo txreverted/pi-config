@@ -687,6 +687,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             if (["queued", "starting", "running"].includes(record.status)) throw new Error("Cannot discard an active agent worktree");
             if (!await ctx.ui.confirm(`Discard worktree for ${record.name}?`, "All unapplied agent changes will be permanently deleted.")) continue;
             await discardAgentWorktree(workspaceFor(record)); await supervisor.clearWorkspace(record.id);
+          } else if (action.type === "delete") {
+            if (!await ctx.ui.confirm(`Delete agent record ${record.name}?`, "The agent record and mail will be deleted. Its native session file will be retained.")) continue;
+            await supervisor.deleteRecord(record.id);
           } else if (action.type === "resume") {
             if (!ctx.model || !record.sessionFile) throw new Error(`Agent '${record.id}' has no native session to resume`);
             const definition = agents.get(record.agent); if (!definition) throw new Error(`Unknown subagent role '${record.agent}'`);
@@ -854,6 +857,25 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       await discardAgentWorktree(workspaceFor(record));
       await supervisor!.clearWorkspace(record.id);
       return { content: [{ type: "text", text: `Discarded worktree for agent ${record.id}.` }], details: { id: record.id } };
+    },
+  });
+
+  pi.registerTool({
+    name: "delete_agent_record",
+    label: "delete agent record",
+    description: "Delete one terminal, worktree-free agent record after explicit human confirmation. Native session files are retained.",
+    parameters: cancelSchema,
+    executionMode: "sequential",
+    async execute(_call, params, _signal, _update, ctx) {
+      const supervisor = await supervisorPromise;
+      const record = supervisor?.get(params.id);
+      if (!record) throw new Error(`Unknown agent '${params.id}'`);
+      if (!ctx.hasUI || !await ctx.ui.confirm(
+        `Delete agent record ${record.name}?`,
+        "The agent record and mail will be deleted. Its native session file will be retained.",
+      )) throw new Error("Human confirmation denied");
+      await supervisor!.deleteRecord(record.id);
+      return { content: [{ type: "text", text: `Deleted agent record ${record.id}. Native session retained.` }], details: { id: record.id } };
     },
   });
 

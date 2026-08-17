@@ -10,7 +10,7 @@ import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 export type AgentsUiAction =
   | { type: "close" | "refresh" }
   | { type: "message" | "resume"; id: string; message: string }
-  | { type: "interrupt" | "diff" | "apply" | "discard"; id: string };
+  | { type: "interrupt" | "diff" | "apply" | "discard" | "delete"; id: string };
 
 export interface AgentsUiState {
   selectedId?: string;
@@ -145,6 +145,7 @@ export class AgentsView implements Focusable {
       else if (data === "d" && current.worktree) return this.finish({ type: "diff", id: current.id });
       else if (data === "a" && current.worktree && !ACTIVE.has(current.status)) return this.finish({ type: "apply", id: current.id });
       else if (data === "x" && current.worktree && !ACTIVE.has(current.status)) return this.finish({ type: "discard", id: current.id });
+      else if (data === "z" && !current.worktree && !ACTIVE.has(current.status)) return this.finish({ type: "delete", id: current.id });
     }
     this.editor.focused = this.focused && !!this.inputMode;
     this.tui.requestRender();
@@ -188,7 +189,7 @@ export class AgentsView implements Focusable {
       lines.push(...rendered.slice(-available));
     }
     lines.push("");
-    lines.push(line(this.theme.fg("dim", "↑↓ select · enter/open · m message · i interrupt · r resume · f refresh · d diff · a apply · x discard · esc close")));
+    lines.push(line(this.theme.fg("dim", "↑↓ select · enter/open · m message · i interrupt · r resume · f refresh · d diff · a apply · x discard · z delete · esc close")));
     if (this.inputMode) lines.push(...this.editor.render(safeWidth).slice(0, Math.max(1, maxRows - lines.length)));
     return lines.slice(0, maxRows);
   }
