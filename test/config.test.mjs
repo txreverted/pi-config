@@ -8,12 +8,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
-const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
+const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
+const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
+const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const skillPath = "skills/ponytail/SKILL.md";
+const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
   "./extensions/tools.ts",
@@ -107,10 +109,11 @@ test("extension source uses only approved special UI glyphs", async () => {
 test("package contents include runtime resources and exclude repository-only state", async () => {
   const cache = await mkdtemp(join(tmpdir(), "pi-config-pack-cache-"));
   try {
-    const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "--cache", cache], {
+    const result = spawnSync(executable("npm"), ["pack", "--dry-run", "--json", "--ignore-scripts", "--cache", cache], {
       cwd: fileURLToPath(new URL("../", import.meta.url)),
       encoding: "utf8",
       timeout: 30_000,
+      shell: process.platform === "win32",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const names = new Set(JSON.parse(result.stdout)[0].files.map((file) => file.path));
@@ -136,31 +139,34 @@ test("production tarball installs without dev dependencies and loads through Pi"
   const temporary = await mkdtemp(join(tmpdir(), "pi-config-production-install-"));
   const application = join(temporary, "application");
   try {
-    const packed = spawnSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", temporary], {
+    const packed = spawnSync(executable("npm"), ["pack", "--json", "--ignore-scripts", "--pack-destination", temporary], {
       cwd: root,
       encoding: "utf8",
       timeout: 30_000,
+      shell: process.platform === "win32",
     });
     assert.equal(packed.status, 0, packed.stderr || packed.stdout);
     const tarball = join(temporary, JSON.parse(packed.stdout)[0].filename);
     await mkdir(application);
     await writeFile(join(application, "package.json"), '{"private":true,"type":"module"}\n');
 
-    const installed = spawnSync("npm", [
+    const installed = spawnSync(executable("npm"), [
       "install", "--prefer-offline", "--ignore-scripts", "--omit=dev", "--legacy-peer-deps", "--no-audit", "--no-fund", "--no-package-lock", tarball,
     ], {
       cwd: application,
       encoding: "utf8",
       timeout: 120_000,
+      shell: process.platform === "win32",
     });
     assert.equal(installed.status, 0, installed.stderr || installed.stdout);
 
     const packagePath = join(application, "node_modules", ...packageJson.name.split("/"));
-    const loaded = spawnSync("pi", ["-e", packagePath, "--list-models", "__pi_config_production_install__"], {
+    const loaded = spawnSync(executable("pi"), ["-e", packagePath, "--list-models", "__pi_config_production_install__"], {
       cwd: application,
       encoding: "utf8",
       env: { ...process.env, PI_OFFLINE: "1" },
       timeout: 30_000,
+      shell: process.platform === "win32",
     });
     assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
     assert.match(loaded.stdout, /No models (?:matching|available)/);
@@ -178,8 +184,9 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
+  assert.match(workflow, /- run: npm run check/);
   assert.match(workflow, /npm run test:windows/);
-  assert.doesNotMatch(workflow, /test-name-pattern/);
+  assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
   for (const path of [...promptPaths, skillPath]) await access(new URL(`../${path}`, import.meta.url));
