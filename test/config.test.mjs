@@ -12,48 +12,33 @@ const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
 const promptNames = ["r-docs", "r-git", "r-impl"];
-const skillNames = ["ponytail"];
-const roleNames = ["Explore", "researcher", "reviewer", "worker"];
-const runtimeMarkdownPaths = [
-  ...promptNames.map((name) => `prompts/${name}.md`),
-  ...roleNames.map((name) => `subagents/prompts/${name}.md`),
-  ...skillNames.map((name) => `skills/${name}/SKILL.md`),
+const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
+const skillPath = "skills/ponytail/SKILL.md";
+
+const extensions = [
+  "./extensions/tools.ts",
+  "./extensions/web.ts",
+  "./extensions/ask.ts",
+  "./extensions/todo.ts",
+  "./extensions/goal.ts",
+  "./extensions/concise.ts",
+  "./extensions/ponytail.ts",
 ];
-const themeNames = ["neutral"];
-const themes = await Promise.all(themeNames.map(async (name) =>
-  JSON.parse(await readFile(new URL(`../themes/${name}.json`, import.meta.url), "utf8"))
-));
 
 test("only frozen-scope resources are enabled", async () => {
-  assert.deepEqual(packageJson.pi.extensions, [
-    "./extensions/tools.ts",
-    "./extensions/web.ts",
-    "./extensions/ask.ts",
-    "./extensions/subagents.ts",
-    "./extensions/todo.ts",
-    "./extensions/goal.ts",
-    "./extensions/concise.ts",
-    "./extensions/ponytail.ts",
-  ]);
+  assert.deepEqual(packageJson.pi, { extensions, prompts: ["./prompts"] });
+  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
+  assert.deepEqual(packageJson.dependencies, { linkedom: "0.18.13" });
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": ">=0.84.2",
     "@earendil-works/pi-coding-agent": ">=0.84.2",
     "@earendil-works/pi-tui": ">=0.84.2",
     typebox: ">=1.3.14",
   });
-  assert.equal(packageJson.pi.skills, undefined);
-  assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
-  assert.deepEqual(packageJson.pi.themes, themeNames.map((name) => `./themes/${name}.json`));
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
-  assert.deepEqual((await readdir(new URL("../skills/", import.meta.url))).sort(), skillNames);
-  for (const skill of skillNames) {
-    await access(new URL(`../skills/${skill}/SKILL.md`, import.meta.url));
-  }
-  const ponytailSkill = await readFile(new URL("../skills/ponytail/SKILL.md", import.meta.url), "utf8");
+  assert.deepEqual(await readdir(new URL("../skills/", import.meta.url)), ["ponytail"]);
+  const ponytailSkill = await readFile(new URL(`../${skillPath}`, import.meta.url), "utf8");
   assert.match(ponytailSkill, /disable-model-invocation: true/);
-  await access(new URL("../extensions/subagents.ts", import.meta.url));
-  await access(new URL("../extensions/subagents-core.ts", import.meta.url));
 });
 
 test("workflow prompts load and expand through Pi's built-in templates", async () => {
@@ -112,13 +97,12 @@ test("package contents include runtime resources and exclude repository-only sta
     for (const path of [
       "package.json",
       "README.md",
-      ...packageJson.pi.extensions.map((path) => path.replace(/^\.\//, "")),
-      ...packageJson.pi.themes.map((path) => path.replace(/^\.\//, "")),
+      ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
-      "subagents/registry.ts",
-      ...runtimeMarkdownPaths,
+      ...promptPaths,
+      skillPath,
     ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|\.github)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^(?:test|subagents|themes|\.github)\//.test(path)), false);
     for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
       assert.equal(names.has(path), false, path);
     }
@@ -152,10 +136,7 @@ test("production tarball installs without dev dependencies and loads through Pi"
     assert.equal(installed.status, 0, installed.stderr || installed.stdout);
 
     const packagePath = join(application, "node_modules", ...packageJson.name.split("/"));
-    const loaded = spawnSync("pi", [
-      "-e", packagePath,
-      "--list-models", "__pi_config_production_install__",
-    ], {
+    const loaded = spawnSync("pi", ["-e", packagePath, "--list-models", "__pi_config_production_install__"], {
       cwd: application,
       encoding: "utf8",
       env: { ...process.env, PI_OFFLINE: "1" },
@@ -168,37 +149,7 @@ test("production tarball installs without dev dependencies and loads through Pi"
   }
 });
 
-test("theme stays neutral except for added and removed diff lines", () => {
-  const luminance = (hex) => {
-    const [r, g, b] = hex.match(/\w\w/g).map((value) => Number.parseInt(value, 16) / 255)
-      .map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const contrast = (foreground, background) => {
-    const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
-    return (lighter + 0.05) / (darker + 0.05);
-  };
-
-  assert.deepEqual(themes.map(({ name }) => name), themeNames);
-  const theme = themes[0];
-  const resolved = (token) => theme.vars[theme.colors[token]] ?? theme.colors[token];
-  assert.equal(resolved("userMessageBg"), "#000000");
-  assert.equal(new Set(["success", "error", "warning"].map(resolved)).size, 3);
-  assert.equal(new Set(["userMessageBg", "customMessageBg", "toolSuccessBg", "toolErrorBg"].map(resolved)).size, 4);
-  assert.equal(resolved("toolPendingBg"), resolved("toolSuccessBg"));
-  assert.notEqual(resolved("toolPendingBg"), resolved("userMessageBg"));
-  for (const token of ["text", "muted", "dim", "thinkingText", "syntaxComment"]) {
-    assert.ok(contrast(resolved(token), theme.vars.base) >= 4.5, token);
-  }
-  for (const token of Object.keys(theme.colors)) {
-    if (token === "toolDiffAdded" || token === "toolDiffRemoved") continue;
-    const [red, green, blue] = resolved(token).match(/\w\w/g);
-    assert.equal(red, green, token);
-    assert.equal(green, blue, token);
-  }
-});
-
-test("CI checks pushes and the human guide links runtime resources and safety facts", async () => {
+test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /^on:\n  push:\n  pull_request:/m);
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
@@ -211,28 +162,17 @@ test("CI checks pushes and the human guide links runtime resources and safety fa
   assert.doesNotMatch(workflow, /test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
-  assert.match(readme, /\]\(extensions\/[^)]+\)/);
-  assert.match(readme, /\]\(test\/[^)]+\)/);
-  for (const path of runtimeMarkdownPaths) await access(new URL(`../${path}`, import.meta.url));
+  for (const path of [...promptPaths, skillPath]) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
-  assert.match(readme, /\]\(subagents\/prompts\/\)/);
   assert.match(readme, /\]\(skills\/ponytail\/SKILL\.md\)/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
-
+  assert.doesNotMatch(readme, /subagents|web_fetch|themes\//i);
   for (const pattern of [
-    /worker.*local user's privileges/i,
-    /context, not operating-system permissions/i,
-    /Subagents have no total time, token, cost, turn, or tool-call ceiling/,
-    /They stop after prolonged inactivity/,
+    /Goal mode has no automatic run ceiling/,
     /It can use every active tool and provider quota/,
     /Never send secrets or private code through `web_search`/,
-    /Never pass signed URLs or private query tokens to `web_fetch`/,
-    /It fails closed when an HTTP proxy is configured/,
     /built-in `grep` and `find`/,
-    /clean parent checkout/,
-    /Goal mode has no automatic run ceiling/,
     /PI_LIVE_WEB=1/,
-    /File-tool checks do not constrain Bash filesystem or network access/,
   ]) assert.match(readme, pattern);
 });
 

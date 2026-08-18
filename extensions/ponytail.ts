@@ -12,7 +12,6 @@ import {
   type PonytailMode,
   type PonytailSessionMode,
 } from "./ponytail-core.ts";
-import { MAX_SUBAGENT_TASK_CHARS } from "./subagents-core.ts";
 import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
 
 const STATUS_NAME = "pi-config-ponytail";
@@ -127,23 +126,6 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   pi.on("agent_settled", () => {
     active = false;
     syncStatus();
-  });
-
-  pi.on("tool_call", (event) => {
-    if (currentMode === "off" || event.toolName !== "subagent") return;
-    const input = event.input as { tasks?: unknown };
-    if (!Array.isArray(input.tasks)) return;
-    const records = input.tasks.flatMap((task) =>
-      task && typeof task === "object" && typeof (task as { task?: unknown }).task === "string"
-        ? [task as { task: string }]
-        : [],
-    );
-    const suffix = `\n\n--- Active parent coding policy ---\n${buildPonytailInstructions(SKILL_BODY, currentMode)}`;
-    const pending = records.filter((record) => record.task.trim() && !record.task.endsWith(suffix));
-    if (pending.some((record) => record.task.length + suffix.length > MAX_SUBAGENT_TASK_CHARS)) {
-      return { block: true, reason: "Subagent task is too long to include the active Ponytail policy; shorten the task." };
-    }
-    for (const record of pending) record.task = `${record.task}${suffix}`;
   });
 
   pi.on("before_agent_start", (event) => {

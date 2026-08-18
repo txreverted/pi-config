@@ -1,16 +1,10 @@
 import { spawnSync } from "node:child_process";
 
 const patterns = [
-  "worker worktrees reject dirty parent checkouts",
-  "read-only agent tools remain inside their delegated workspace",
-  "writable policy runs tools without approval",
   "bounded process keeps small output in memory",
   "bounded process enforces timeouts and cancellation",
 ];
-const files = [
-  "test/subagents-worktree.test.mjs",
-  "test/tools-core.test.mjs",
-];
+const files = ["test/tools-core.test.mjs"];
 if (spawnSync("jq", ["--version"], { encoding: "utf8" }).status === 0) {
   patterns.push("jq executes shell-free input", "jq excludes parent secrets");
   files.push("test/tools-extension.test.mjs");
