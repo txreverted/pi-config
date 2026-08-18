@@ -27,8 +27,8 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 - The TUI hides the startup header, keeps Pi's editor, and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
-- `web_search` needs no API key.
-- `jq` executes the local command and retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
+- `web_search` needs no API key. It blocks likely credentials and asks before sending code-like queries.
+- `jq` bounds input, time, output, concurrency, and monitored working-set memory. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
 ## Safety
 
@@ -59,5 +59,7 @@ Live checks use external services.
 ```bash
 PI_LIVE_WEB=1 npm run test:live-web
 ```
+
+CI runs this check weekly and on manual dispatch. Failures are non-blocking provider-drift signals.
 
 Test UI changes in an interactive terminal.
