@@ -82,14 +82,14 @@ Prefer Pi built-ins, platform features, command-line tools, and small local impl
 
    Read repository instructions. Understand architecture, runtime paths, config, tests, and dependencies.
 
-   Score out of 10:
+   Score out each of 10:
 
-   - Correctness: 3
-   - Simplicity: 2
-   - Maintainability: 2
-   - Tests: 1
-   - Performance: 1
-   - Security: 1
+   - Correctness
+   - Simplicity
+   - Maintainability
+   - Tests
+   - Performance
+   - Security
 
    Report strengths and findings ranked by impact.
 
