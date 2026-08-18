@@ -9,8 +9,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { safeDisplayText } from "../text-safety.ts";
-import type { AgentResultPayload } from "./core.ts";
+import { AGENT_RESULT_LIMITS, validateAgentResultPayload } from "./core.ts";
 
 const SAFE_READ_TOOLS = new Set(["read", "grep", "find", "ls", "git_diff", "agent_result"]);
 
@@ -79,20 +78,16 @@ export default function subagentChildExtension(pi: ExtensionAPI): void {
     description: "Return the bounded final delegated-task result. Call alone when finished or blocked.",
     parameters: Type.Object({
       status: StringEnum(["succeeded", "blocked"] as const),
-      summary: Type.String({ minLength: 1, maxLength: 8_000 }),
-      evidence: Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), { maxItems: 20 }),
-      question: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+      summary: Type.String({ minLength: 1, maxLength: AGENT_RESULT_LIMITS.summaryChars }),
+      evidence: Type.Array(
+        Type.String({ minLength: 1, maxLength: AGENT_RESULT_LIMITS.evidenceChars }),
+        { maxItems: AGENT_RESULT_LIMITS.evidenceItems },
+      ),
+      question: Type.Optional(Type.String({ minLength: 1, maxLength: AGENT_RESULT_LIMITS.questionChars })),
     }, { additionalProperties: false }),
     executionMode: "sequential",
     async execute(_id, params) {
-      const result: AgentResultPayload = {
-        status: params.status,
-        summary: safeDisplayText(params.summary).trim(),
-        evidence: params.evidence.map((item) => safeDisplayText(item).trim()).filter(Boolean),
-        ...(params.question ? { question: safeDisplayText(params.question).trim() } : {}),
-      };
-      if (!result.summary) throw new Error("Agent result summary is required");
-      if (result.status === "blocked" && !result.question) throw new Error("Blocked agent results require a question");
+      const result = validateAgentResultPayload(params);
       return {
         content: [{ type: "text", text: result.status === "blocked" ? `Blocked: ${result.question}` : result.summary }],
         details: { agentResult: result },

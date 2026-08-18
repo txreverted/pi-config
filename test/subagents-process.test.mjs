@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runChildAgent } from "../extensions/subagents/runner.ts";
+import { formatAgentResults } from "../extensions/subagents/ui.ts";
 
 const task = {
   id: "explore",
@@ -50,6 +51,54 @@ emit({type:"message_end",message:{role:"toolResult",toolName:"agent_result",deta
     assert.equal(result.usage.totalTokens, 15);
     assert.equal(result.model, "test/model");
     assert.ok(updates.some((update) => update.activity === "reading README.md"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("child runner rejects malformed structured completion", async () => {
+  const { root, script } = await fixture(`
+const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
+emit({type:"agent_start"});
+emit({type:"message_end",message:{role:"toolResult",toolName:"agent_result",details:{agentResult:{status:"succeeded",summary:"Missing evidence"}}}});
+`);
+  try {
+    const result = await runChildAgent({
+      task,
+      workspace: root,
+      model: "test/model",
+      thinking: "low",
+      prompt: "Inspect",
+      systemPrompt: "Role",
+      trusted: false,
+      invocation: { command: process.execPath, argsPrefix: [script] },
+    });
+    assert.equal(result.status, "failed");
+    assert.match(result.error, /Invalid child agentResult.*evidence/);
+    assert.doesNotThrow(() => formatAgentResults([result]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an already aborted child run does not spawn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-config-subagent-pre-abort-"));
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runChildAgent({
+      task,
+      workspace: root,
+      model: "test/model",
+      thinking: "low",
+      prompt: "Wait",
+      systemPrompt: "Role",
+      trusted: false,
+      signal: controller.signal,
+      invocation: { command: join(root, "must-not-exist"), argsPrefix: [] },
+    });
+    assert.equal(result.status, "cancelled");
+    assert.match(result.error, /before launch/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
