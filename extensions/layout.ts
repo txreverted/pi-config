@@ -17,11 +17,36 @@ export interface CompactFooterValues {
   elapsedSeconds: number;
   statuses: readonly string[];
   cost: number;
+  costLabel: "sub" | "api";
   contextPercent: number | null | undefined;
   contextWindow: number | undefined;
   autoCompact: boolean;
   model: string | undefined;
   thinking: string | undefined;
+}
+
+export function createAnswerTimer(now: () => number = () => performance.now()) {
+  let startedAt: number | undefined;
+  let elapsedSeconds = 0;
+
+  return {
+    reset() {
+      startedAt = undefined;
+      elapsedSeconds = 0;
+    },
+    start() {
+      startedAt = now();
+      elapsedSeconds = 0;
+    },
+    stop() {
+      if (startedAt === undefined) return;
+      elapsedSeconds = Math.max(0, (now() - startedAt) / 1_000);
+      startedAt = undefined;
+    },
+    elapsedSeconds() {
+      return startedAt === undefined ? elapsedSeconds : Math.max(0, (now() - startedAt) / 1_000);
+    },
+  };
 }
 
 export function formatElapsed(seconds: number): string {
@@ -52,6 +77,15 @@ export function compactCwd(cwd: string, home = process.env.HOME || process.env.U
   const insideHome = fromHome === "" || (fromHome !== ".." && !fromHome.startsWith(`..${sep}`) && !isAbsolute(fromHome));
   if (!insideHome) return cwd;
   return fromHome ? `~${sep}${fromHome}` : "~";
+}
+
+export function getCostLabel(ctx: Pick<ExtensionContext, "model" | "modelRegistry">): "sub" | "api" {
+  const model = ctx.model;
+  if (!model) return "api";
+  const oauth = ctx.modelRegistry.getProvider(model.provider)?.auth.oauth;
+  return model.provider === "kimi-coding" || (ctx.modelRegistry.isUsingOAuth(model) && oauth?.isSubscription === true)
+    ? "sub"
+    : "api";
 }
 
 export function totalSessionCost(entries: readonly SessionEntry[]): number {
@@ -113,7 +147,7 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
       showElapsed ? formatElapsed(values.elapsedSeconds) : "",
       status,
     ].filter(Boolean).join(" ");
-    const right = [showCost ? `$${cost.toFixed(3)}` : "", context, model].filter(Boolean).join(" ");
+    const right = [showCost ? `$${cost.toFixed(3)} (${values.costLabel})` : "", context, model].filter(Boolean).join(" ");
     return { left, right };
   };
 
@@ -132,7 +166,7 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   return joinFooterSides(left, right, safeWidth);
 }
 
-function installLayout(ctx: ExtensionContext): void {
+function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number): void {
   if (ctx.mode !== "tui") return;
   const settings = SettingsManager.create(ctx.cwd, undefined, { projectTrusted: ctx.isProjectTrusted() });
   const autoCompact = settings.getCompactionEnabled();
@@ -156,9 +190,10 @@ function installLayout(ctx: ExtensionContext): void {
           version: VERSION,
           cwd: compactCwd(ctx.sessionManager.getCwd()),
           branch: footerData.getGitBranch(),
-          elapsedSeconds: process.uptime(),
+          elapsedSeconds: answerElapsedSeconds(),
           statuses,
           cost: totalSessionCost(ctx.sessionManager.getEntries()),
+          costLabel: getCostLabel(ctx),
           contextPercent: context?.percent,
           contextWindow: context?.contextWindow ?? ctx.model?.contextWindow,
           autoCompact,
@@ -177,5 +212,12 @@ function installLayout(ctx: ExtensionContext): void {
 }
 
 export default function layoutExtension(pi: ExtensionAPI): void {
-  pi.on("session_start", (_event, ctx) => installLayout(ctx));
+  const answerTimer = createAnswerTimer();
+
+  pi.on("session_start", (_event, ctx) => {
+    answerTimer.reset();
+    installLayout(ctx, answerTimer.elapsedSeconds);
+  });
+  pi.on("before_agent_start", () => answerTimer.start());
+  pi.on("agent_settled", () => answerTimer.stop());
 }
