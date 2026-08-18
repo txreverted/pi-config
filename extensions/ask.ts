@@ -3,6 +3,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   ASK_LIMITS,
+  AskState,
   CUSTOM_CHOICE,
   boundCustomAnswer,
   formatAnswers,
@@ -61,66 +62,76 @@ async function customAnswer(ctx: ExtensionContext, prompt: string, signal: Abort
 }
 
 async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AskUiResult> {
-  const answers: AskAnswer[] = [];
+  const state = new AskState(questions);
   const dialogOptions = signal ? { signal } : undefined;
-  for (let questionIndex = 0; questionIndex < questions.length; questionIndex++) {
-    const question = questions[questionIndex];
-    const prompt = title(question, questionIndex, questions.length);
-    if (!question.multiSelect) {
-      while (true) {
-        const choices = question.options.map((option, optionIndex) => optionText(option, optionIndex));
-        const other = `└─ □ ${CUSTOM_CHOICE}`;
-        const selected = await ctx.ui.select(prompt, [...choices, other], dialogOptions);
-        if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
-        if (selected === other) {
-          const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
-          if (answer === null) return { answers: [], cancelled: true };
-          if (!answer) continue;
-          answers.push({ question: question.question, answer, optionIndexes: [], custom: true });
-          break;
-        }
-        const optionIndex = choices.indexOf(selected);
-        const option = question.options[optionIndex];
-        if (!option) throw new Error("Selected answer no longer matches the available options");
-        answers.push({ question: question.question, answer: option.label, optionIndexes: [optionIndex + 1], custom: false });
-        break;
+  let returnToReview = false;
+  const advance = () => {
+    if (returnToReview) {
+      returnToReview = false;
+      state.goTo(questions.length);
+    } else {
+      state.movePage(1);
+    }
+  };
+  while (true) {
+    if (state.review) {
+      const edits = questions.map((question, index) => `Edit ${index + 1}/${questions.length} │ ${question.header}`);
+      const submit = "Submit answers";
+      const selected = await ctx.ui.select("Review answers", [...edits, submit], dialogOptions);
+      if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
+      if (selected === submit) {
+        if (state.allAnswered) return { answers: state.answers(), cancelled: false };
+        continue;
       }
+      const editIndex = edits.indexOf(selected);
+      if (editIndex < 0) throw new Error("Selected review action is invalid");
+      state.goTo(editIndex);
+      returnToReview = true;
       continue;
     }
 
-    const selectedIndexes = new Set<number>();
-    let custom: string | undefined;
-    while (true) {
-      const choices = question.options.map((option, optionIndex) => optionText(option, optionIndex, selectedIndexes.has(optionIndex)));
-      const other = `└─ ${custom ? "■" : "□"} ${CUSTOM_CHOICE}`;
-      const done = `Done (${selectedIndexes.size + (custom ? 1 : 0)} selected)`;
-      const selected = await ctx.ui.select(prompt, [...choices, other, done], dialogOptions);
+    const question = state.question!;
+    const questionIndex = state.page;
+    const prompt = title(question, questionIndex, questions.length);
+    const choices = question.options.map((option, optionIndex) =>
+      optionText(option, optionIndex, state.selectedIndexes.includes(optionIndex)));
+    const other = `└─ ${state.customAnswer ? "■" : "□"} ${CUSTOM_CHOICE}`;
+
+    if (!question.multiSelect) {
+      const selected = await ctx.ui.select(prompt, [...choices, other], dialogOptions);
       if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
-      if (selected === done) {
-        if (!selectedIndexes.size && !custom) continue;
-        const indexes = [...selectedIndexes].sort((a, b) => a - b);
-        const labels = indexes.map((index) => question.options[index].label);
-        if (custom) labels.push(custom);
-        answers.push({
-          question: question.question,
-          answer: labels.join(", "),
-          optionIndexes: indexes.map((index) => index + 1),
-          custom: Boolean(custom),
-        });
-        break;
-      }
       if (selected === other) {
         const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
         if (answer === null) return { answers: [], cancelled: true };
-        custom = answer;
-        continue;
+        if (!answer) continue;
+        state.write(answer);
+      } else {
+        const optionIndex = choices.indexOf(selected);
+        if (optionIndex < 0) throw new Error("Selected answer no longer matches the available options");
+        state.choose(optionIndex);
       }
-      const optionIndex = choices.indexOf(selected);
-      if (optionIndex < 0) throw new Error("Selected answer no longer matches the available options");
-      selectedIndexes.has(optionIndex) ? selectedIndexes.delete(optionIndex) : selectedIndexes.add(optionIndex);
+      advance();
+      continue;
     }
+
+    const done = `Done (${state.selectedIndexes.length + (state.customAnswer ? 1 : 0)} selected)`;
+    const selected = await ctx.ui.select(prompt, [...choices, other, done], dialogOptions);
+    if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
+    if (selected === done) {
+      if (!state.isAnswered(questionIndex)) continue;
+      advance();
+      continue;
+    }
+    if (selected === other) {
+      const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
+      if (answer === null) return { answers: [], cancelled: true };
+      state.write(answer);
+      continue;
+    }
+    const optionIndex = choices.indexOf(selected);
+    if (optionIndex < 0) throw new Error("Selected answer no longer matches the available options");
+    state.choose(optionIndex);
   }
-  return { answers, cancelled: false };
 }
 
 export default function askExtension(pi: ExtensionAPI): void {

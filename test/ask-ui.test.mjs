@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
-import { normalizeQuestions } from "../extensions/ask-core.ts";
-import { AskState, createAskComponent } from "../extensions/ask-ui.ts";
+import { AskState, normalizeQuestions } from "../extensions/ask-core.ts";
+import { createAskComponent } from "../extensions/ask-ui.ts";
 
 const questions = (multiSelect = false) => normalizeQuestions([{
   header: "Targets",
@@ -72,7 +72,7 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
   const rendered = component.render(80).join("\n");
   assert.match(rendered, /< □ Targets >/);
   assert.match(rendered, /> 1\. Web\n {4}Browser application/);
-  assert.match(rendered, /3\. Type something\./);
+  assert.match(rendered, /3\. Other/);
   const special = rendered.match(/[^\x00-\x7f]/gu) ?? [];
   assert.ok(special.every((glyph) => "□■☒⎿├─│└〉".includes(glyph)), special.join(""));
 
@@ -84,6 +84,20 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
     answers: [{ question: "Which targets?", answer: "Web", optionIndexes: [1], custom: false }],
     cancelled: false,
   });
+});
+
+test("number keys select single choices and toggle multiple choices", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  let singleResult;
+  const single = createAskComponent(tui, theme, keybindings, questions(), (value) => { singleResult = value; });
+  single.handleInput("2");
+  single.handleInput("\r");
+  assert.equal(singleResult.answers[0].answer, "CLI");
+
+  const multiple = createAskComponent(tui, theme, keybindings, questions(true), () => {});
+  multiple.handleInput("\x1b[49u");
+  multiple.handleInput("\x1b[50u");
+  assert.equal(multiple.snapshot(false).answers[0].answer, "Web, CLI");
 });
 
 test("multi-select toggles choices and cancellation preserves partial answers", () => {

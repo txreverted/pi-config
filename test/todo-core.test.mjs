@@ -71,6 +71,13 @@ test("all declared bounds are enforced at the core boundary", () => {
   assert.throws(() => apply(snapshot, { action: "create", subject: "Overflow" }), /limited to 25/);
 });
 
+test("todo actions reject irrelevant fields", () => {
+  const snapshot = emptyTodoSnapshot();
+  assert.throws(() => applyTodoAction(snapshot, { action: "list", subject: "ignored" }), /list does not accept: subject/);
+  assert.throws(() => applyTodoAction(snapshot, { action: "clear", id: 1 }), /clear does not accept: id/);
+  assert.throws(() => applyTodoAction(snapshot, { action: "create", id: 1, subject: "Task" }), /create does not accept: id/);
+});
+
 test("snapshot validation rejects malformed persisted state", () => {
   assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "unknown", blockedBy: [] }], nextId: 2 }), /status/);
   assert.throws(() => validateTodoSnapshot({ tasks: [{ id: 1, subject: "A", status: "pending", blockedBy: [] }], nextId: 1 }), /nextId/);
