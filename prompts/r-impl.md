@@ -8,16 +8,16 @@ Scope: ${ARGUMENTS:-entire repository}.
 
 Read repository instructions. Understand architecture, runtime paths, config, tests, and dependencies.
 
-Score out of 10:
+Score each category independently out of 10:
 
-- Correctness: 3
-- Simplicity: 2
-- Maintainability: 2
-- Tests: 1
-- Performance: 1
-- Security: 1
+- Correctness
+- Simplicity
+- Maintainability
+- Tests
+- Performance
+- Security
 
-Report strengths and findings ranked by impact.
+Give evidence and a short rationale for every score. Report strengths and findings ranked by impact.
 
 - Cite exact files and symbols.
 - Separate facts from inference.

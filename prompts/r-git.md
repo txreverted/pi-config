@@ -1,16 +1,16 @@
 ---
-description: Split unstaged work into coherent PRs and merge it
+description: Turn safe working-tree changes into coherent PRs and merge them
 ---
-Process all unstaged and untracked work into the smallest safe set of coherent pull requests.
+Turn safe working-tree changes into the smallest coherent set of pull requests.
 
-Run autonomously. Do not ask before committing, pushing, opening PRs, or merging.
+Invocation authorizes commits, pushes, pull request creation, and merges.
 
-Inspect repository instructions, status, branches, remotes, diffs, untracked files, worktrees, checks, and branch protection first.
+Inspect repository instructions, status, staged and unstaged changes, untracked files, branches, remotes, worktrees, checks, authentication, and branch protection first.
 
 - Preserve existing work.
 - Never reset, discard, or overwrite changes.
-- Preserve unrelated staged changes.
-- Never commit secrets, auth, settings, sessions, transcripts, ignored files, or unrelated work.
+- Include related staged changes and leave unrelated work untouched.
+- Never commit or expose secrets, auth, settings, sessions, transcripts, ignored files, or unrelated work.
 - Group changes by independent intent.
 - Keep tests and required docs with their implementation.
 - Create clear branches and atomic commits.
@@ -21,7 +21,7 @@ Inspect repository instructions, status, branches, remotes, diffs, untracked fil
 - Merge only when repository rules allow it.
 - Never bypass checks, reviews, protection, hooks, or conflicts.
 - Never force-push.
-- Stop when changes cannot be separated safely.
+- Stop when intent, ownership, target, separation, authentication, conflicts, repository rules, or secret safety cannot be verified.
 
 Use `main` when it is the verified target. Otherwise use the default branch.
 

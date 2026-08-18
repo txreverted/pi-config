@@ -92,6 +92,15 @@ function addWrapped(lines: string[], prefix: string, text: string, width: number
   }
 }
 
+function configuredKey(
+  keybindings: KeybindingsManager,
+  binding: Parameters<KeybindingsManager["getKeys"]>[0],
+  fallback: string,
+): string {
+  if (typeof keybindings.getKeys !== "function") return fallback;
+  return String(keybindings.getKeys(binding)[0] ?? fallback);
+}
+
 function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
   if (lines.length <= maxRows) return lines;
   if (maxRows <= 1) return [lines[0]];
@@ -103,7 +112,7 @@ function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
   const body = lines.slice(headerCount, -footerCount);
   const slots = maxRows - header.length - footer.length;
   const focus = Math.max(0, body.findIndex((line) =>
-    line.includes(CURSOR_MARKER) || /(?:^|\s)⎿\s|Ready to submit|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
+    line.includes(CURSOR_MARKER) || /(?:^|\s)>\s|Ready to submit|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
   ));
   const start = Math.max(0, Math.min(focus - Math.floor(slots / 2), body.length - slots));
   return [...header, ...body.slice(start, start + slots), ...footer];
@@ -213,11 +222,18 @@ export function createAskComponent(
     },
     render(width: number): string[] {
       const renderWidth = Math.max(1, Math.floor(width));
+      const confirmKey = configuredKey(keybindings, "tui.select.confirm", "enter");
+      const cancelKey = configuredKey(keybindings, "tui.select.cancel", "escape");
+      const navigationKeys = [...new Set([
+        configuredKey(keybindings, "tui.input.tab", "tab"),
+        configuredKey(keybindings, "tui.select.up", "up"),
+        configuredKey(keybindings, "tui.select.down", "down"),
+      ])].join("/");
       const lines: string[] = [theme.fg("borderMuted", "─".repeat(renderWidth))];
       const tab = (label: string, active: boolean, complete: boolean) => {
         const text = ` ${complete ? "■" : "□"} ${label} `;
         return active
-          ? theme.bg("selectedBg", theme.fg("text", text))
+          ? theme.bg("selectedBg", theme.fg("text", `<${text}>`))
           : theme.fg(complete ? "success" : "muted", text);
       };
       const tabs = questions.map((question, index) => tab(question.header, index === state.page, state.isAnswered(index)));
@@ -228,7 +244,7 @@ export function createAskComponent(
       if (editing) {
         addWrapped(lines, " ", theme.fg("accent", theme.bold("Write your answer")), renderWidth);
         for (const line of editor.render(Math.max(1, renderWidth - 2))) lines.push(truncateToWidth(` ${line}`, renderWidth, ""));
-        addWrapped(lines, " ", theme.fg("dim", "Enter to save │ Esc to go back"), renderWidth);
+        addWrapped(lines, " ", theme.fg("dim", `${confirmKey} to save │ ${cancelKey} to go back`), renderWidth);
       } else if (state.review) {
         addWrapped(lines, " ", theme.fg("accent", theme.bold("Ready to submit")), renderWidth);
         lines.push("");
@@ -237,7 +253,7 @@ export function createAskComponent(
           addWrapped(lines, " ", `${theme.fg("muted", `${question.header}:`)} ${answer?.answer ?? theme.fg("warning", "Unanswered")}`, renderWidth);
         }
         lines.push("");
-        addWrapped(lines, " ", theme.fg(state.allAnswered ? "success" : "warning", state.allAnswered ? "Enter to submit" : "Answer every question before submitting"), renderWidth);
+        addWrapped(lines, " ", theme.fg(state.allAnswered ? "success" : "warning", state.allAnswered ? `${confirmKey} to submit` : "Answer every question before submitting"), renderWidth);
       } else {
         const question = state.question!;
         addWrapped(lines, " ", theme.fg("accent", theme.bold(question.question)), renderWidth);
@@ -245,24 +261,24 @@ export function createAskComponent(
         question.options.forEach((option, index) => {
           const focused = state.cursor === index;
           const selected = state.selectedIndexes.includes(index);
-          const cursor = focused ? theme.fg("accent", "⎿ ") : "  ";
+          const cursor = focused ? theme.fg("accent", "> ") : "  ";
           const mark = question.multiSelect ? `${selected ? "■" : "□"} ` : "";
           const color = focused || selected ? "accent" : "text";
           addWrapped(lines, cursor, theme.fg(color, `${mark}${index + 1}. ${option.label}`), renderWidth);
           addWrapped(lines, question.multiSelect ? "      " : "    ", theme.fg("muted", option.description), renderWidth);
         });
         const customIndex = question.options.length;
-        const customCursor = state.cursor === customIndex ? theme.fg("accent", "⎿ ") : "  ";
+        const customCursor = state.cursor === customIndex ? theme.fg("accent", "> ") : "  ";
         const customMark = question.multiSelect ? `${state.customAnswer ? "■" : "□"} ` : "";
         addWrapped(lines, customCursor, theme.fg(state.cursor === customIndex || state.customAnswer ? "accent" : "text", `${customMark}${customIndex + 1}. Type something.`), renderWidth);
       }
 
       lines.push("");
       const help = state.review
-        ? "Enter to submit │ Tab/Arrow keys to navigate │ Esc to cancel"
+        ? `${confirmKey} to submit │ ${navigationKeys} to navigate │ ${cancelKey} to cancel`
         : state.question?.multiSelect
-          ? "Space to toggle │ Enter to continue │ Tab/Arrow keys to navigate │ Esc to cancel"
-          : "Enter to select │ Tab/Arrow keys to navigate │ Esc to cancel";
+          ? `space to toggle │ ${confirmKey} to continue │ ${navigationKeys} to navigate │ ${cancelKey} to cancel`
+          : `${confirmKey} to select │ ${navigationKeys} to navigate │ ${cancelKey} to cancel`;
       addWrapped(lines, " ", theme.fg("dim", help), renderWidth);
       lines.push(theme.fg("borderMuted", "─".repeat(renderWidth)));
       const bounded = lines.map((line) => truncateToWidth(line, renderWidth, ""));

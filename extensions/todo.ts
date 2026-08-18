@@ -42,7 +42,7 @@ function taskLine(task: TodoTask): string {
 }
 
 export function formatTodoOutput(action: TodoAction["action"], snapshot: TodoSnapshot, task?: TodoTask, count?: number): string {
-  if (action === "list") return snapshot.tasks.length ? snapshot.tasks.map(taskLine).join("\n") : "No todos.";
+  if (action === "list") return snapshot.tasks.length ? snapshot.tasks.map((task) => taskLine(task)).join("\n") : "No todos.";
   if (action === "get" && task) {
     return [taskLine(task), task.description && `Description: ${task.description}`, task.activeForm && `Active form: ${task.activeForm}`]
       .filter(Boolean)
@@ -95,10 +95,10 @@ export default function todoExtension(pi: ExtensionAPI): void {
         const shown = unfinished.slice(0, shownCount);
         const lines = [
           theme.fg("accent", theme.bold(summary)),
-          ...shown.map((task, index) => `${index === 0 ? "⎿ " : "  "}${taskLine(task)}`),
+          ...shown.map(taskLine),
         ];
         if (unfinished.length > shown.length && bodyRows > shown.length) {
-          lines.push(theme.fg("dim", `${shown.length ? "  " : "⎿ "}${unfinished.length - shown.length} more`));
+          lines.push(theme.fg("dim", `${unfinished.length - shown.length} more`));
         }
         return lines.map(row);
       },
