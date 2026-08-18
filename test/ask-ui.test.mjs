@@ -16,8 +16,16 @@ const questions = (multiSelect = false) => normalizeQuestions([{
 
 const theme = {
   fg: (_color, text) => text,
-  bg: (color, text) => color === "selectedBg" ? `[${text}]` : text,
+  bg: (_color, text) => text,
   bold: (text) => text,
+};
+
+const defaultKeys = {
+  "tui.select.confirm": ["enter"],
+  "tui.select.cancel": ["escape"],
+  "tui.select.up": ["up"],
+  "tui.select.down": ["down"],
+  "tui.input.tab": ["tab"],
 };
 
 const keybindings = {
@@ -28,6 +36,7 @@ const keybindings = {
       (action === "tui.select.down" && data === "\x1b[B") ||
       (action === "tui.input.tab" && data === "\t");
   },
+  getKeys(action) { return defaultKeys[action] ?? []; },
 };
 
 test("question state supports multi-select, custom answers, and backtracking", () => {
@@ -61,14 +70,14 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
   assert.equal(component.focused, true);
 
   const rendered = component.render(80).join("\n");
-  assert.match(rendered, /\[ □ Targets \]/);
-  assert.match(rendered, /⎿ 1\. Web\n {4}Browser application/);
+  assert.match(rendered, /< □ Targets >/);
+  assert.match(rendered, /> 1\. Web\n {4}Browser application/);
   assert.match(rendered, /3\. Type something\./);
   const special = rendered.match(/[^\x00-\x7f]/gu) ?? [];
-  assert.ok(special.every((glyph) => "□■☒⎿├─│└".includes(glyph)), special.join(""));
+  assert.ok(special.every((glyph) => "□■☒⎿├─│└〉".includes(glyph)), special.join(""));
 
   component.handleInput("\r");
-  assert.match(component.render(80).join("\n"), /\[ ■ Submit \]/);
+  assert.match(component.render(80).join("\n"), /< ■ Submit >/);
   assert.match(component.render(80).join("\n"), /Ready to submit/);
   component.handleInput("\r");
   assert.deepEqual(result, {
@@ -121,6 +130,28 @@ test("custom editor submits or cancels without leaking drafts", () => {
   assert.deepEqual(cancelled.answers, []);
 });
 
+test("active tabs and help stay explicit without color or default keybindings", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  const rebound = {
+    matches: keybindings.matches,
+    getKeys(action) {
+      return {
+        "tui.select.confirm": ["ctrl+g"],
+        "tui.select.cancel": ["ctrl+x"],
+        "tui.select.up": ["k"],
+        "tui.select.down": ["j"],
+        "tui.input.tab": ["ctrl+n"],
+      }[action] ?? [];
+    },
+  };
+  const rendered = createAskComponent(tui, theme, rebound, questions(), () => {}).render(80).join("\n");
+  assert.match(rendered, /< □ Targets >/);
+  assert.match(rendered, /> 1\. Web/);
+  assert.match(rendered, /ctrl\+g to select/);
+  assert.match(rendered, /ctrl\+n\/k\/j to navigate/);
+  assert.match(rendered, /ctrl\+x to cancel/);
+});
+
 test("enhanced keyboard sequences navigate and toggle choices", () => {
   const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
   let result;
@@ -145,7 +176,7 @@ test("questionnaire rendering stays within narrow and short terminals", () => {
     const lines = component.render(32);
     assert.ok(lines.length <= Math.max(1, rows - 2), `height ${rows}: ${lines.length}`);
     assert.ok(lines.every((line) => visibleWidth(line) <= 32), `width overflow at ${rows}`);
-    if (rows === 8) assert.match(lines.join("\n"), /⎿ 1\./);
+    if (rows === 8) assert.match(lines.join("\n"), /> 1\./);
   }
 
   const tui = { terminal: { rows: 10, columns: 32 }, requestRender() {} };

@@ -26,8 +26,12 @@ const extensions = [
 ];
 
 test("only frozen-scope resources are enabled", async () => {
-  assert.deepEqual(packageJson.pi, { extensions, prompts: ["./prompts"] });
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "subagents", "themes", "README.md"]);
+  assert.deepEqual(packageJson.pi, {
+    extensions,
+    prompts: ["./prompts"],
+    skills: ["./skills/ponytail/SKILL.md"],
+  });
+  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
   assert.deepEqual(packageJson.dependencies, { linkedom: "0.18.13" });
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": ">=0.84.2",
@@ -60,23 +64,39 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
       { name: "r-docs", description: "Audit and simplify repository documentation", argumentHint: "[scope]" },
-      { name: "r-git", description: "Split unstaged work into coherent PRs and merge it", argumentHint: undefined },
+      { name: "r-git", description: "Turn safe working-tree changes into coherent PRs and merge them", argumentHint: undefined },
       { name: "r-impl", description: "Evidence-based implementation audit", argumentHint: "[scope]" },
     ]);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
-    assert.match(expandPromptTemplate("/r-docs", loaded.prompts), /Scope: entire repository\./);
+    const docs = expandPromptTemplate("/r-docs", loaded.prompts);
+    assert.match(docs, /Scope: entire repository\./);
+    assert.match(docs, /Inventory every `\.md` file in scope/);
     assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
-    assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
-    assert.match(expandPromptTemplate("/r-git", loaded.prompts), /^Process all unstaged and untracked work/);
+
+    const implementation = expandPromptTemplate("/r-impl extensions tests", loaded.prompts);
+    assert.match(implementation, /Scope: extensions tests\./);
+    assert.match(implementation, /Score each category independently out of 10/);
+    for (const category of ["Correctness", "Simplicity", "Maintainability", "Tests", "Performance", "Security"]) {
+      assert.match(implementation, new RegExp(`^- ${category}$`, "m"));
+    }
+    assert.match(implementation, /evidence and a short rationale for every score/i);
+    assert.doesNotMatch(implementation, /Correctness: 3|Tests: 1/);
+
+    const git = expandPromptTemplate("/r-git", loaded.prompts);
+    assert.match(git, /^Turn safe working-tree changes/);
+    assert.match(git, /staged and unstaged changes, untracked files/);
+    assert.match(git, /Invocation authorizes commits, pushes, pull request creation, and merges/);
+    assert.match(git, /Stop when intent, ownership, target, separation, authentication, conflicts, repository rules, or secret safety cannot be verified/);
+    assert.doesNotMatch(git, /^Process all unstaged and untracked work/);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
 });
 
 test("extension source uses only approved special UI glyphs", async () => {
-  const approved = new Set(Array.from("□■☒⎿├─│└"));
+  const approved = new Set(Array.from("□■☒⎿├─│└〉"));
   const files = (await readdir(new URL("../extensions/", import.meta.url))).filter((name) => name.endsWith(".ts"));
   for (const file of files) {
     const source = await readFile(new URL(`../extensions/${file}`, import.meta.url), "utf8");
