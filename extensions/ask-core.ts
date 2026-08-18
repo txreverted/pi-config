@@ -32,6 +32,74 @@ export interface AskAnswer {
 
 export const CUSTOM_CHOICE = "Other";
 
+export class AskState {
+  page = 0;
+  cursor = 0;
+  readonly questions: readonly AskQuestion[];
+  private readonly selected = new Map<number, Set<number>>();
+  private readonly custom = new Map<number, string>();
+
+  constructor(questions: readonly AskQuestion[]) { this.questions = questions; }
+
+  get review(): boolean { return this.page === this.questions.length; }
+  get question(): AskQuestion | undefined { return this.questions[this.page]; }
+  get selectedIndexes(): readonly number[] { return [...(this.selected.get(this.page) ?? [])].sort((a, b) => a - b); }
+  get customAnswer(): string | undefined { return this.custom.get(this.page); }
+
+  goTo(page: number): void {
+    if (!Number.isInteger(page) || page < 0 || page > this.questions.length) return;
+    this.page = page;
+    this.cursor = 0;
+  }
+
+  movePage(delta: number): void {
+    this.goTo((this.page + delta + this.questions.length + 1) % (this.questions.length + 1));
+  }
+
+  choose(index: number): void {
+    const question = this.question;
+    if (!question || index < 0 || index >= question.options.length) return;
+    if (!question.multiSelect) {
+      this.selected.set(this.page, new Set([index]));
+      this.custom.delete(this.page);
+      return;
+    }
+    const indexes = this.selected.get(this.page) ?? new Set<number>();
+    indexes.has(index) ? indexes.delete(index) : indexes.add(index);
+    this.selected.set(this.page, indexes);
+  }
+
+  write(value: unknown): void {
+    if (!this.question) return;
+    const answer = boundCustomAnswer(value);
+    if (answer) this.custom.set(this.page, answer);
+    else this.custom.delete(this.page);
+    if (!this.question.multiSelect) this.selected.delete(this.page);
+  }
+
+  isAnswered(index: number): boolean {
+    return (this.selected.get(index)?.size ?? 0) > 0 || Boolean(this.custom.get(index));
+  }
+
+  get allAnswered(): boolean { return this.questions.every((_question, index) => this.isAnswered(index)); }
+
+  answers(): AskAnswer[] {
+    return this.questions.flatMap((question, questionIndex) => {
+      const indexes = [...(this.selected.get(questionIndex) ?? [])].sort((a, b) => a - b);
+      const custom = this.custom.get(questionIndex);
+      const labels = indexes.map((index) => question.options[index]?.label).filter((label): label is string => Boolean(label));
+      if (custom) labels.push(custom);
+      if (!labels.length) return [];
+      return [{
+        question: question.question,
+        answer: labels.join(", "),
+        optionIndexes: indexes.map((index) => index + 1),
+        custom: Boolean(custom),
+      }];
+    });
+  }
+}
+
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const RESERVED_LABELS = new Set(["other", "type something", "write a different answer"]);
 
