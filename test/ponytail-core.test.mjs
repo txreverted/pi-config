@@ -61,33 +61,17 @@ test("config paths ignore empty and relative XDG roots", () => withConfigEnviron
   assert.doesNotMatch(ponytailConfigPath(), /relative-config/);
 }));
 
-test("default and booleans resolve from environment before the preserved config", () => withConfigEnvironment(() => {
+test("default resolves from environment before preserved config fields", () => withConfigEnvironment(() => {
   const path = ponytailConfigPath();
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify({ defaultMode: "lite", quietStartup: true, hideStatus: true, other: 7 }));
 
   assert.equal(readPonytailDefaultMode(), "lite");
-  assert.deepEqual(loadPonytailSettings(), {
-    defaultMode: "lite",
-    quietStartup: true,
-    hideStatus: true,
-    errors: [],
-  });
+  assert.deepEqual(loadPonytailSettings(), { defaultMode: "lite", errors: [] });
 
   process.env.PONYTAIL_DEFAULT_MODE = "ultra";
-  process.env.PONYTAIL_QUIET_STARTUP = "false";
-  process.env.PONYTAIL_HIDE_STATUS = "0";
   assert.equal(readPonytailDefaultMode(), "ultra");
-  assert.deepEqual(loadPonytailSettings(), {
-    defaultMode: "ultra",
-    quietStartup: false,
-    hideStatus: false,
-    errors: [],
-  });
-
-  process.env.PONYTAIL_HIDE_STATUS = "flase";
-  assert.match(loadPonytailSettings().errors.join("; "), /must be one of/);
-  process.env.PONYTAIL_HIDE_STATUS = "0";
+  assert.deepEqual(loadPonytailSettings(), { defaultMode: "ultra", errors: [] });
 
   assert.equal(writePonytailDefaultMode("full"), "full");
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), {
@@ -96,18 +80,6 @@ test("default and booleans resolve from environment before the preserved config"
     hideStatus: true,
     other: 7,
   });
-}));
-
-test("Ponytail hides its persistent status unless explicitly enabled", () => withConfigEnvironment(() => {
-  assert.deepEqual(loadPonytailSettings(), {
-    defaultMode: "full",
-    quietStartup: false,
-    hideStatus: true,
-    errors: [],
-  });
-
-  process.env.PONYTAIL_HIDE_STATUS = "0";
-  assert.equal(loadPonytailSettings().hideStatus, false);
 }));
 
 test("saving a default refuses to destroy malformed configuration", () => withConfigEnvironment(() => {
@@ -149,6 +121,7 @@ test("real instructions keep common safety rules and isolate every mode scope", 
     }
     assert.doesNotMatch(instructions, /## Intensity|add a response cache/i);
     assert.match(instructions, /## Safety floor/);
-    assert.match(instructions, /Do not apply Ponytail's implementation or output restrictions to non-coding requests/);
+    assert.match(instructions, /Do not apply Ponytail to non-coding requests/);
+    assert.doesNotMatch(instructions, /## Output|three short lines/);
   }
 });

@@ -1,6 +1,9 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { watchFile, unwatchFile } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
+  CONFIG_DIR_NAME,
+  getAgentDir,
   SettingsManager,
   VERSION,
   type ExtensionAPI,
@@ -42,6 +45,9 @@ export function createAnswerTimer(now: () => number = () => performance.now()) {
       if (startedAt === undefined) return;
       elapsedSeconds = Math.max(0, (now() - startedAt) / 1_000);
       startedAt = undefined;
+    },
+    isRunning() {
+      return startedAt !== undefined;
     },
     elapsedSeconds() {
       return startedAt === undefined ? elapsedSeconds : Math.max(0, (now() - startedAt) / 1_000);
@@ -140,6 +146,8 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   let showVersion = true;
   let showCost = true;
   let showLocation = true;
+  let showContext = true;
+  let showModel = true;
   const build = () => {
     const left = [
       showVersion ? `pi v${values.version}` : "",
@@ -147,7 +155,11 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
       showElapsed ? formatElapsed(values.elapsedSeconds) : "",
       status,
     ].filter(Boolean).join(" ");
-    const right = [showCost ? `$${cost.toFixed(3)} (${values.costLabel})` : "", context, model].filter(Boolean).join(" ");
+    const right = [
+      showCost ? `$${cost.toFixed(3)} (${values.costLabel})` : "",
+      showContext ? context : "",
+      showModel ? model : "",
+    ].filter(Boolean).join(" ");
     return { left, right };
   };
 
@@ -156,6 +168,8 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
     () => { showVersion = false; },
     () => { showCost = false; },
     () => { if (status) showLocation = false; },
+    () => { if (status) showModel = false; },
+    () => { if (status) showContext = false; },
   ]) {
     const { left, right } = build();
     if (visibleWidth(left) + (left && right ? 1 : 0) + visibleWidth(right) <= safeWidth) break;
@@ -166,10 +180,20 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   return joinFooterSides(left, right, safeWidth);
 }
 
-function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number): void {
+function installLayout(
+  ctx: ExtensionContext,
+  answerElapsedSeconds: () => number,
+  answerRunning: () => boolean,
+  sessionCost: () => number,
+  registerTicker: (ticker: (running: boolean) => void) => void,
+): void {
   if (ctx.mode !== "tui") return;
-  const settings = SettingsManager.create(ctx.cwd, undefined, { projectTrusted: ctx.isProjectTrusted() });
-  const autoCompact = settings.getCompactionEnabled();
+  const readAutoCompact = () => SettingsManager.create(
+    ctx.cwd,
+    undefined,
+    { projectTrusted: ctx.isProjectTrusted() },
+  ).getCompactionEnabled();
+  let autoCompact = readAutoCompact();
 
   ctx.ui.setHeader(() => ({
     render: () => [],
@@ -178,8 +202,29 @@ function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number
 
   ctx.ui.setFooter((tui, theme, footerData: ReadonlyFooterDataProvider) => {
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
-    const timer = setInterval(() => tui.requestRender(), 1_000);
-    timer.unref?.();
+    let timer: NodeJS.Timeout | undefined;
+    const setTicker = (running: boolean) => {
+      if (running && timer === undefined) {
+        timer = setInterval(() => tui.requestRender(), 1_000);
+        timer.unref?.();
+      } else if (!running && timer !== undefined) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    registerTicker(setTicker);
+    setTicker(answerRunning());
+    const settingsPaths = [
+      join(getAgentDir(), "settings.json"),
+      ...(ctx.isProjectTrusted() ? [join(ctx.cwd, CONFIG_DIR_NAME, "settings.json")] : []),
+    ];
+    const refreshSettings = () => {
+      const next = readAutoCompact();
+      if (next === autoCompact) return;
+      autoCompact = next;
+      tui.requestRender();
+    };
+    for (const path of settingsPaths) watchFile(path, { interval: 1_000, persistent: false }, refreshSettings);
     return {
       render(width: number): string[] {
         const context = ctx.getContextUsage();
@@ -192,7 +237,7 @@ function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number
           branch: footerData.getGitBranch(),
           elapsedSeconds: answerElapsedSeconds(),
           statuses,
-          cost: totalSessionCost(ctx.sessionManager.getEntries()),
+          cost: sessionCost(),
           costLabel: getCostLabel(ctx),
           contextPercent: context?.percent,
           contextWindow: context?.contextWindow ?? ctx.model?.contextWindow,
@@ -204,7 +249,9 @@ function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number
       },
       invalidate() {},
       dispose() {
-        clearInterval(timer);
+        setTicker(false);
+        registerTicker(() => {});
+        for (const path of settingsPaths) unwatchFile(path, refreshSettings);
         unsubscribe();
       },
     };
@@ -213,11 +260,33 @@ function installLayout(ctx: ExtensionContext, answerElapsedSeconds: () => number
 
 export default function layoutExtension(pi: ExtensionAPI): void {
   const answerTimer = createAnswerTimer();
+  let sessionCost = 0;
+  let setFooterTicker: (running: boolean) => void = () => {};
+  const refreshSessionCost = (ctx: ExtensionContext) => {
+    if (ctx.mode === "tui") sessionCost = totalSessionCost(ctx.sessionManager.getEntries());
+  };
 
   pi.on("session_start", (_event, ctx) => {
     answerTimer.reset();
-    installLayout(ctx, answerTimer.elapsedSeconds);
+    refreshSessionCost(ctx);
+    installLayout(
+      ctx,
+      answerTimer.elapsedSeconds,
+      answerTimer.isRunning,
+      () => sessionCost,
+      (ticker) => { setFooterTicker = ticker; },
+    );
   });
-  pi.on("before_agent_start", () => answerTimer.start());
-  pi.on("agent_settled", () => answerTimer.stop());
+  pi.on("session_tree", (_event, ctx) => refreshSessionCost(ctx));
+  pi.on("session_compact", (_event, ctx) => refreshSessionCost(ctx));
+  pi.on("turn_end", (_event, ctx) => refreshSessionCost(ctx));
+  pi.on("before_agent_start", () => {
+    answerTimer.start();
+    setFooterTicker(true);
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    answerTimer.stop();
+    setFooterTicker(false);
+    refreshSessionCost(ctx);
+  });
 }

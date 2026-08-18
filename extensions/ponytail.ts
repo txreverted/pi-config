@@ -27,33 +27,22 @@ const SKILL_BODY = (() => {
 export default function ponytailExtension(pi: ExtensionAPI): void {
   let configuredDefault: PonytailMode = DEFAULT_PONYTAIL_MODE;
   let currentMode: PonytailSessionMode = configuredDefault;
-  let active = false;
-  let quietStartup = false;
-  let hideStatus = true;
   let context: ExtensionContext | undefined;
 
   const syncStatus = () => {
-    const state = active ? "active" : "idle";
-    context?.ui.setStatus(
-      STATUS_NAME,
-      hideStatus || currentMode === "off" ? undefined : `ponytail: ${currentMode} (${state})`,
-    );
+    context?.ui.setStatus(STATUS_NAME, currentMode === "off" ? undefined : `ponytail: ${currentMode}`);
   };
 
-  const loadSettings = (ctx: ExtensionContext): boolean => {
+  const loadSettings = (ctx: ExtensionContext) => {
     const settings = loadPonytailSettings();
     configuredDefault = settings.defaultMode;
-    quietStartup = settings.quietStartup;
-    hideStatus = settings.hideStatus;
     if (settings.errors.length > 0) {
       ctx.ui.notify(normalizeDisplayText(safeDisplayLine(`Could not load some Ponytail settings; using defaults: ${settings.errors.join("; ")}`, 500)), "error");
     }
-    return settings.errors.length === 0;
   };
 
   const restoreMode = (ctx: ExtensionContext) => {
     currentMode = resolvePonytailSessionMode(ctx.sessionManager.getBranch(), configuredDefault);
-    active = false;
     syncStatus();
   };
 
@@ -66,6 +55,11 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("ponytail", {
     description: "Set Ponytail mode (lite, full, ultra, off), show status, or save default <mode>",
+    getArgumentCompletions: (prefix) => {
+      const values = ["lite", "full", "ultra", "off", "status", "default lite", "default full", "default ultra", "default off"];
+      const matches = values.filter((value) => value.startsWith(prefix.toLowerCase()));
+      return matches.length ? matches.map((value) => ({ value, label: value })) : null;
+    },
     handler: async (args, ctx) => {
       const command = parsePonytailCommand(args, configuredDefault);
       if (command.type === "status") {
@@ -101,9 +95,8 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     context = ctx;
-    const loaded = loadSettings(ctx);
+    loadSettings(ctx);
     restoreMode(ctx);
-    if (loaded && !quietStartup) ctx.ui.notify(normalizeDisplayText(`Ponytail loaded: ${currentMode}`), "info");
   });
 
   pi.on("session_tree", (_event, ctx) => {
@@ -116,16 +109,6 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
       setMode("off", ctx);
       return { action: "handled" };
     }
-  });
-
-  pi.on("agent_start", () => {
-    active = true;
-    syncStatus();
-  });
-
-  pi.on("agent_settled", () => {
-    active = false;
-    syncStatus();
   });
 
   pi.on("before_agent_start", (event) => {
