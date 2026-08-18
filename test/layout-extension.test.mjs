@@ -219,7 +219,10 @@ test("layout refreshes the auto-compaction indicator while the session is open",
     assert.match(footer.render(160)[0], /\(auto\)/);
 
     writeFileSync(join(agentDir, "settings.json"), '{"compaction":{"enabled":false}}\n');
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    const deadline = Date.now() + 5_000;
+    while (/\(auto\)/.test(footer.render(160)[0]) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     assert.doesNotMatch(footer.render(160)[0], /\(auto\)/);
   } finally {
     footer?.dispose();
