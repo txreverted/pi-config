@@ -10,8 +10,56 @@ import {
   type ExtensionContext,
   type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import { safeDisplayLine } from "./text-safety.ts";
+
+type ComponentContainer = Component & { children: Component[] };
+type AdjustableSpacer = Component & { setLines(lines: number): void };
+
+function isComponentContainer(component: Component): component is ComponentContainer {
+  return Array.isArray((component as Partial<ComponentContainer>).children);
+}
+
+function isAdjustableSpacer(component: Component | undefined): component is AdjustableSpacer {
+  return typeof (component as Partial<AdjustableSpacer> | undefined)?.setLines === "function";
+}
+
+function findParentContainer(components: readonly Component[], target: Component): ComponentContainer | undefined {
+  for (const component of components) {
+    if (!isComponentContainer(component)) continue;
+    if (component.children.includes(target)) return component;
+    const parent = findParentContainer(component.children, target);
+    if (parent) return parent;
+  }
+  return undefined;
+}
+
+// ponytail: Pi 0.84.2 has no startup-spacing API; remove when setHeader owns its surrounding space.
+export function compactStartupSpacing(
+  tui: Pick<TUI, "children">,
+  header: Component,
+  adjustedSpacers: Set<AdjustableSpacer>,
+): void {
+  const headerContainer = findParentContainer(tui.children, header);
+  if (!headerContainer) return;
+  const headerIndex = headerContainer.children.indexOf(header);
+  for (const spacer of [headerContainer.children[headerIndex - 1], headerContainer.children[headerIndex + 1]]) {
+    if (!isAdjustableSpacer(spacer)) continue;
+    spacer.setLines(0);
+    adjustedSpacers.add(spacer);
+  }
+
+  const documentContainer = findParentContainer(tui.children, headerContainer);
+  if (!documentContainer) return;
+  const containerIndex = documentContainer.children.indexOf(headerContainer);
+  const resources = documentContainer.children[containerIndex + 1];
+  const chat = documentContainer.children[containerIndex + 2];
+  if (!resources || !chat || !isComponentContainer(resources) || !isComponentContainer(chat)) return;
+  const trailingSpacer = resources.children.at(-1);
+  if (!isAdjustableSpacer(trailingSpacer)) return;
+  trailingSpacer.setLines(chat.children.length === 0 ? 0 : 1);
+  adjustedSpacers.add(trailingSpacer);
+}
 
 export interface CompactFooterValues {
   version: string;
@@ -195,10 +243,25 @@ function installLayout(
   ).getCompactionEnabled();
   let autoCompact = readAutoCompact();
 
-  ctx.ui.setHeader(() => ({
-    render: () => [],
-    invalidate() {},
-  }));
+  ctx.ui.setHeader((tui) => {
+    const adjustedSpacers = new Set<AdjustableSpacer>();
+    const header: Component & { dispose(): void } = {
+      render: () => {
+        compactStartupSpacing(tui, header, adjustedSpacers);
+        return [];
+      },
+      invalidate() {},
+      dispose() {
+        for (const spacer of adjustedSpacers) spacer.setLines(1);
+        adjustedSpacers.clear();
+      },
+    };
+    queueMicrotask(() => {
+      compactStartupSpacing(tui, header, adjustedSpacers);
+      tui.requestRender();
+    });
+    return header;
+  });
 
   ctx.ui.setFooter((tui, theme, footerData: ReadonlyFooterDataProvider) => {
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
