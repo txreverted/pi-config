@@ -9,15 +9,11 @@ export const DEFAULT_PONYTAIL_MODE: PonytailMode = "full";
 
 interface PonytailConfig {
   defaultMode?: unknown;
-  quietStartup?: unknown;
-  hideStatus?: unknown;
   [key: string]: unknown;
 }
 
 export interface PonytailSettings {
   defaultMode: PonytailMode;
-  quietStartup: boolean;
-  hideStatus: boolean;
   errors: string[];
 }
 
@@ -74,22 +70,6 @@ function readConfigForWrite(path: string): PonytailConfig {
   }
 }
 
-function environmentBoolean(name: string): boolean | undefined {
-  const raw = process.env[name];
-  if (raw === undefined) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  if (["1", "true", "yes"].includes(normalized)) return true;
-  if (["0", "false", "no"].includes(normalized)) return false;
-  throw new Error(`${name} must be one of: 1, true, yes, 0, false, no`);
-}
-
-function configBoolean(config: PonytailConfig, key: "quietStartup" | "hideStatus"): boolean {
-  const value = config[key];
-  if (value === undefined) return key === "hideStatus";
-  if (typeof value === "boolean") return value;
-  throw new Error(`Ponytail config ${key} must be a boolean`);
-}
-
 export function loadPonytailSettings(): PonytailSettings {
   const errors: string[] = [];
   let config: PonytailConfig = {};
@@ -116,21 +96,7 @@ export function loadPonytailSettings(): PonytailSettings {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
-  const booleanSetting = (environmentName: string, key: "quietStartup" | "hideStatus"): boolean => {
-    try {
-      return environmentBoolean(environmentName) ?? configBoolean(config, key);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      return key === "hideStatus";
-    }
-  };
-
-  return {
-    defaultMode,
-    quietStartup: booleanSetting("PONYTAIL_QUIET_STARTUP", "quietStartup"),
-    hideStatus: booleanSetting("PONYTAIL_HIDE_STATUS", "hideStatus"),
-    errors: [...new Set(errors)],
-  };
+  return { defaultMode, errors: [...new Set(errors)] };
 }
 
 export function readPonytailDefaultMode(): PonytailMode {

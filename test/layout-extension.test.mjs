@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -34,10 +34,13 @@ test("answer timer runs only for the current answer and resets for the next prom
   const timer = createAnswerTimer(() => now);
 
   assert.equal(timer.elapsedSeconds(), 0);
+  assert.equal(timer.isRunning(), false);
   timer.start();
+  assert.equal(timer.isRunning(), true);
   now = 2_500;
   assert.equal(timer.elapsedSeconds(), 1.5);
   timer.stop();
+  assert.equal(timer.isRunning(), false);
   now = 5_000;
   assert.equal(timer.elapsedSeconds(), 1.5);
   timer.start();
@@ -71,15 +74,18 @@ test("compact footer matches the wide layout and never exceeds narrow terminals"
 });
 
 test("compact footer prioritizes extension status and sanitizes it", () => {
-  const line = formatCompactFooter({
+  const prioritized = {
     ...values,
     cwd: "~/a/very/long/project/directory/that/will/not/fit",
     statuses: ["goal:\nactive"],
-  }, 60);
+  };
+  const line = formatCompactFooter(prioritized, 60);
 
   assert.equal(visibleWidth(line), 60);
   assert.match(line, /goal: active/);
   assert.doesNotMatch(line, /pi v|1m30|\$0\.000/);
+  assert.equal(formatCompactFooter(prioritized, 20), "goal: active");
+  assert.equal(formatCompactFooter(prioritized, 12), "goal: active");
 });
 
 test("cost label distinguishes subscription-backed auth from API access", () => {
@@ -108,7 +114,7 @@ test("session cost includes assistant, tool, compaction, and branch-summary usag
   assert.equal(totalSessionCost(entries), 2);
 });
 
-test("layout installs only in TUI mode and disposes footer resources", () => {
+test("layout installs only in TUI mode, caches cost, and disposes footer resources", () => {
   const events = new Map();
   layoutExtension({ on(name, handler) { events.set(name, handler); } });
   const sessionStart = events.get("session_start");
@@ -128,6 +134,7 @@ test("layout installs only in TUI mode and disposes footer resources", () => {
   try {
     let headerFactory;
     let footerFactory;
+    let entryReads = 0;
     const context = {
       mode: "tui",
       cwd: agentDir,
@@ -141,7 +148,7 @@ test("layout installs only in TUI mode and disposes footer resources", () => {
       thinkingLevel: "high",
       sessionManager: {
         getCwd: () => agentDir,
-        getEntries: () => [],
+        getEntries: () => { entryReads++; return []; },
       },
       ui: {
         setHeader(factory) { headerFactory = factory; },
@@ -162,12 +169,63 @@ test("layout installs only in TUI mode and disposes footer resources", () => {
       },
     );
     const lines = footer.render(80);
+    footer.render(80);
     assert.equal(lines.length, 1);
     assert.equal(visibleWidth(lines[0]), 80);
     assert.match(lines[0], /goal: active/);
+    assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
     footer.dispose();
     assert.equal(unsubscribed, true);
   } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("layout refreshes the auto-compaction indicator while the session is open", async () => {
+  const events = new Map();
+  layoutExtension({ on(name, handler) { events.set(name, handler); } });
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-config-layout-settings-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  let footer;
+  try {
+    let footerFactory;
+    const context = {
+      mode: "tui",
+      cwd: agentDir,
+      isProjectTrusted: () => false,
+      getContextUsage: () => ({ percent: 0, contextWindow: 100_000 }),
+      model: undefined,
+      modelRegistry: {},
+      thinkingLevel: "off",
+      sessionManager: { getCwd: () => agentDir, getEntries: () => [] },
+      ui: {
+        setHeader() {},
+        setFooter(factory) { footerFactory = factory; },
+      },
+    };
+    events.get("session_start")({}, context);
+    footer = footerFactory(
+      { requestRender() {} },
+      { fg: (_color, text) => text },
+      {
+        getGitBranch: () => null,
+        getExtensionStatuses: () => new Map(),
+        onBranchChange: () => () => {},
+      },
+    );
+    assert.match(footer.render(160)[0], /\(auto\)/);
+
+    writeFileSync(join(agentDir, "settings.json"), '{"compaction":{"enabled":false}}\n');
+    const deadline = Date.now() + 5_000;
+    while (/\(auto\)/.test(footer.render(160)[0]) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.doesNotMatch(footer.render(160)[0], /\(auto\)/);
+  } finally {
+    footer?.dispose();
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     rmSync(agentDir, { recursive: true, force: true });
