@@ -214,7 +214,10 @@ test("agent_patch directly inspects and applies a recovered worker patch", async
     }, undefined, undefined, ctx);
     workspace = undefined;
     assert.equal(applied.details.patchState, "applied");
-    assert.equal(await readFile(join(root, "src", "a.ts"), "utf8"), "export const a = '\u001b[31m';\n");
+    assert.equal(
+      (await readFile(join(root, "src", "a.ts"), "utf8")).replaceAll("\r\n", "\n"),
+      "export const a = '\u001b[31m';\n",
+    );
   } finally {
     if (workspace) await discardWorkerWorkspace(workspace).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
