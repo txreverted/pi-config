@@ -20,8 +20,8 @@ Treat [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) as the frozen product scope. Read
 - `README.md` is the only human guide.
 - `DESIRED_CONFIG.md` holds the frozen product scope. Never edit it.
 - `AGENTS.md` holds agent rules.
-- `subagents/prompts/*.md` and `skills/*/SKILL.md` are runtime code.
-- Keep one file per command, role, or skill.
+- `prompts/*.md` and `skills/*/SKILL.md` files are runtime code.
+- Keep one file per command or skill.
 - Write present facts. No roadmap. No history.
 - Use short sentences and exact paths.
 - Link to source and tests. Do not copy implementation detail.

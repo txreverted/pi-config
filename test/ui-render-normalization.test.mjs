@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import askExtension from "../extensions/ask.ts";
 import goalExtension from "../extensions/goal.ts";
-import subagentsExtension from "../extensions/subagents.ts";
 import todoExtension from "../extensions/todo.ts";
 import toolsExtension from "../extensions/tools.ts";
 import webExtension from "../extensions/web.ts";
@@ -34,8 +33,7 @@ test("config tool renderers collapse repeated display-only blank rows without ad
   const cases = [
     [askExtension, ["ask_user_question"]],
     [toolsExtension, ["jq"]],
-    [webExtension, ["web_search", "web_fetch"]],
-    [subagentsExtension, ["subagent"]],
+    [webExtension, ["web_search"]],
     [todoExtension, ["todo"]],
     [goalExtension, ["goal_complete", "goal_wait"]],
   ];
