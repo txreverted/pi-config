@@ -6,6 +6,7 @@ import {
   normalizeAgentWave,
   resolveInside,
   SUBAGENT_LIMITS,
+  validateAgentResultPayload,
 } from "../extensions/subagents/core.ts";
 import {
   restoreCoordinatedTodoSnapshot,
@@ -57,6 +58,21 @@ test("dependent todos cannot share a wave", () => {
     title: "Blocked",
     tasks: [{ ...baseTask("one"), todoId: 1 }, { ...baseTask("two"), todoId: 2 }],
   }, todos), /blocked|Dependent/);
+});
+
+test("child result payload validation is strict and byte bounded", () => {
+  assert.deepEqual(validateAgentResultPayload({
+    status: "succeeded",
+    summary: "Done",
+    evidence: ["src/a.ts"],
+  }), { status: "succeeded", summary: "Done", evidence: ["src/a.ts"] });
+  assert.throws(() => validateAgentResultPayload({ status: "succeeded", summary: "Done" }), /evidence/);
+  assert.throws(() => validateAgentResultPayload({ status: "blocked", summary: "Need input", evidence: [] }), /question/);
+  assert.throws(() => validateAgentResultPayload({
+    status: "succeeded",
+    summary: "x".repeat(8_000),
+    evidence: ["😀".repeat(500), "😀".repeat(500), "😀".repeat(500)],
+  }), /bytes/);
 });
 
 test("context packets are bounded and contain task ownership", () => {

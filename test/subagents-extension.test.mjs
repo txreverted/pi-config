@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import subagentsExtension from "../extensions/subagents/index.ts";
+import subagentsExtension, { formatPatchPage } from "../extensions/subagents/index.ts";
 import subagentChildExtension from "../extensions/subagents/child.ts";
 
 function harness() {
@@ -24,6 +24,25 @@ function harness() {
   };
   return { pi, tools, commands, events, emitted };
 }
+
+test("worker patch pages preserve UTF-8 and render unsafe controls visibly", () => {
+  const patch = "a😀\u001b[31mred\u001b[0m\u202e\n";
+  const complete = formatPatchPage(patch, 0, 1_000);
+  assert.match(complete.text, /a😀\\x1b\[31mred\\x1b\[0m\\u202e/);
+  assert.doesNotMatch(complete.text, /[\u001b\u202e�]/);
+  assert.equal(complete.nextOffset, undefined);
+
+  const aligned = formatPatchPage("a😀b", 2, 1);
+  assert.equal(aligned.offset, 1);
+  assert.match(aligned.text, /aligned to UTF-8 byte 1/);
+  assert.match(aligned.text, /\n😀$/);
+  assert.equal(aligned.nextOffset, 5);
+  assert.doesNotMatch(aligned.text, /�/);
+
+  const bounded = formatPatchPage("\u001b".repeat(20_000), 0, 50_000);
+  assert.ok(Buffer.byteLength(bounded.text, "utf8") <= 50 * 1024);
+  assert.ok(bounded.nextOffset > 0);
+});
 
 test("subagent extension exposes one parallel batch and one patch lifecycle tool", () => {
   const h = harness();

@@ -8,6 +8,7 @@ import {
   emptyUsage,
   normalizeUsage,
   SUBAGENT_LIMITS,
+  validateAgentResultPayload,
   type AgentProgress,
   type AgentResultPayload,
   type AgentRunResult,
@@ -102,6 +103,17 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
     try { options.onUpdate?.({ ...progress, usage: { ...progress.usage, cost: { ...progress.usage.cost } } }); } catch {}
   };
   publish();
+  if (options.signal?.aborted) {
+    return {
+      ...progress,
+      status: "cancelled",
+      activity: "cancelled",
+      endedAt: Date.now(),
+      objective: options.task.objective,
+      error: "Subagent was cancelled before launch",
+      changedFiles: [],
+    };
+  }
 
   const runDir = await mkdtemp(join(tmpdir(), "pi-config-agent-"));
   await chmod(runDir, 0o700);
@@ -200,7 +212,12 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
       if (message.role === "toolResult" && message.toolName === "agent_result") {
         const details = message.details;
         if (details && typeof details === "object" && (details as Record<string, unknown>).agentResult) {
-          payload = (details as { agentResult: AgentResultPayload }).agentResult;
+          try {
+            payload = validateAgentResultPayload((details as Record<string, unknown>).agentResult);
+          } catch (cause) {
+            payload = undefined;
+            error = `Invalid child agentResult: ${cause instanceof Error ? cause.message : String(cause)}`;
+          }
         }
       }
     }

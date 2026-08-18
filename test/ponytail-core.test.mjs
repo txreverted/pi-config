@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -80,6 +80,24 @@ test("default resolves from environment before preserved config fields", () => w
     hideStatus: true,
     other: 7,
   });
+}));
+
+test("saving a default does not follow a predictable temporary-file symlink", {
+  skip: process.platform === "win32" && "Creating file symlinks may require elevated Windows privileges",
+}, () => withConfigEnvironment((root) => {
+  const path = ponytailConfigPath();
+  const victim = join(root, "victim.txt");
+  const predictable = `${path}.${process.pid}.tmp`;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(victim, "unchanged\n");
+  symlinkSync(victim, predictable);
+
+  assert.equal(writePonytailDefaultMode("full"), "full");
+  assert.equal(readFileSync(victim, "utf8"), "unchanged\n");
+  assert.deepEqual(
+    readdirSync(dirname(path)).filter((name) => name.startsWith("config.json.") && name.endsWith(".tmp")),
+    [`config.json.${process.pid}.tmp`],
+  );
 }));
 
 test("saving a default refuses to destroy malformed configuration", () => withConfigEnvironment(() => {
