@@ -225,6 +225,8 @@ function installLayout(
       tui.requestRender();
     };
     for (const path of settingsPaths) watchFile(path, { interval: 1_000, persistent: false }, refreshSettings);
+    const initialSettingsRefresh = setTimeout(refreshSettings, 1_000);
+    initialSettingsRefresh.unref?.();
     return {
       render(width: number): string[] {
         const context = ctx.getContextUsage();
@@ -251,6 +253,7 @@ function installLayout(
       dispose() {
         setTicker(false);
         registerTicker(() => {});
+        clearTimeout(initialSettingsRefresh);
         for (const path of settingsPaths) unwatchFile(path, refreshSettings);
         unsubscribe();
       },
