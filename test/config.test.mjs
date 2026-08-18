@@ -26,9 +26,10 @@ const extensions = [
   "./extensions/layout.ts",
   "./extensions/concise.ts",
   "./extensions/ponytail.ts",
+  "./extensions/subagents/index.ts",
 ];
 
-test("only frozen-scope resources are enabled", async () => {
+test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.pi, {
     extensions,
     prompts: ["./prompts"],
@@ -100,9 +101,10 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
 
 test("extension source uses only approved special UI glyphs", async () => {
   const approved = new Set(Array.from("□■☒⎿├─│└〉"));
-  const files = (await readdir(new URL("../extensions/", import.meta.url))).filter((name) => name.endsWith(".ts"));
+  const extensionRoot = fileURLToPath(new URL("../extensions/", import.meta.url));
+  const files = (await readdir(extensionRoot, { recursive: true })).filter((name) => name.endsWith(".ts"));
   for (const file of files) {
-    const source = await readFile(new URL(`../extensions/${file}`, import.meta.url), "utf8");
+    const source = await readFile(join(extensionRoot, file), "utf8");
     for (const glyph of source.match(/[^\x00-\x7f]/gu) ?? []) assert.ok(approved.has(glyph), `${file}: ${glyph}`);
   }
 });
@@ -123,10 +125,13 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
+      "extensions/coordination-core.ts",
+      "extensions/subagents/index.ts",
+      "extensions/subagents/child.ts",
       ...promptPaths,
       skillPath,
     ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|subagents|themes|\.github)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^(?:test|themes|\.github)\//.test(path)), false);
     for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
       assert.equal(names.has(path), false, path);
     }
@@ -189,6 +194,8 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
   assert.match(workflow, /npm run test:windows/);
+  assert.equal(packageJson.scripts["test:live-subagent"], "node --experimental-strip-types test/live-subagent.mjs");
+  assert.match(readme, /PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model>/);
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
@@ -196,7 +203,8 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(readme, /\]\(prompts\/\)/);
   assert.match(readme, /\]\(skills\/ponytail\/SKILL\.md\)/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
-  assert.doesNotMatch(readme, /subagents|web_fetch|themes\//i);
+  assert.match(readme, /parallel_agents/);
+  assert.doesNotMatch(readme, /web_fetch|themes\//i);
   for (const pattern of [
     /Goal mode has no automatic run ceiling/,
     /It can use every active tool and provider quota/,

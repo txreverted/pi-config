@@ -17,7 +17,6 @@ Use [`README.md`](README.md) as the repo map. Then read code and tests. Code win
 ## Markdown
 
 - `README.md` is the only human guide.
-- `DESIRED_CONFIG.md` holds the frozen product scope. Never edit it.
 - `AGENTS.md` holds agent rules.
 - `prompts/*.md` and `skills/*/SKILL.md` files are runtime code.
 - Keep one file per command or skill.
