@@ -14,24 +14,22 @@ import {
 } from "./ponytail-core.ts";
 import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
 
-const STATUS_NAME = "pi-config-ponytail";
 const FALLBACK_SKILL = `# Ponytail\n\nUse the smallest correct solution: YAGNI, existing code, standard library, native platform features, installed dependencies, then minimum new code. Never remove validation, data-loss protection, security, or accessibility.`;
-const SKILL_BODY = (() => {
+
+export function loadPonytailSkill(path = new URL("../skills/ponytail/SKILL.md", import.meta.url)): { body: string; error?: string } {
   try {
-    return readFileSync(new URL("../skills/ponytail/SKILL.md", import.meta.url), "utf8");
-  } catch {
-    return FALLBACK_SKILL;
+    return { body: readFileSync(path, "utf8") };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { body: FALLBACK_SKILL, error: `Could not load Ponytail skill; using fallback: ${detail}` };
   }
-})();
+}
+
+const skill = loadPonytailSkill();
 
 export default function ponytailExtension(pi: ExtensionAPI): void {
   let configuredDefault: PonytailMode = DEFAULT_PONYTAIL_MODE;
   let currentMode: PonytailSessionMode = configuredDefault;
-  let context: ExtensionContext | undefined;
-
-  const syncStatus = () => {
-    context?.ui.setStatus(STATUS_NAME, currentMode === "off" ? undefined : `ponytail: ${currentMode}`);
-  };
 
   const loadSettings = (ctx: ExtensionContext) => {
     const settings = loadPonytailSettings();
@@ -43,13 +41,11 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
 
   const restoreMode = (ctx: ExtensionContext) => {
     currentMode = resolvePonytailSessionMode(ctx.sessionManager.getBranch(), configuredDefault);
-    syncStatus();
   };
 
   const setMode = (mode: PonytailSessionMode, ctx?: ExtensionContext) => {
     currentMode = mode;
     pi.appendEntry("ponytail-mode", { mode });
-    syncStatus();
     ctx?.ui.notify(normalizeDisplayText(`Ponytail mode set to ${mode}.`), "info");
   };
 
@@ -94,13 +90,12 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
-    context = ctx;
+    if (skill.error) ctx.ui.notify(normalizeDisplayText(safeDisplayLine(skill.error, 500)), "error");
     loadSettings(ctx);
     restoreMode(ctx);
   });
 
   pi.on("session_tree", (_event, ctx) => {
-    context = ctx;
     restoreMode(ctx);
   });
 
@@ -113,12 +108,7 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", (event) => {
     if (currentMode === "off") return;
-    const instructions = buildPonytailInstructions(SKILL_BODY, currentMode);
+    const instructions = buildPonytailInstructions(skill.body, currentMode);
     return { systemPrompt: event.systemPrompt ? `${event.systemPrompt}\n\n${instructions}` : instructions };
-  });
-
-  pi.on("session_shutdown", (_event, ctx) => {
-    ctx.ui.setStatus(STATUS_NAME, undefined);
-    context = undefined;
   });
 }

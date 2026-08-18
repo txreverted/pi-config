@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import ponytailExtension from "../extensions/ponytail.ts";
+import ponytailExtension, { loadPonytailSkill } from "../extensions/ponytail.ts";
 import { ponytailConfigPath } from "../extensions/ponytail-core.ts";
 
 function createHarness() {
@@ -42,7 +42,7 @@ function createContext(branch = [], statuses = [], idle = true) {
 
 async function withEnvironment(run) {
   const root = mkdtempSync(join(tmpdir(), "pi-config-ponytail-extension-"));
-  const names = ["XDG_CONFIG_HOME", "PONYTAIL_DEFAULT_MODE", "PONYTAIL_HIDE_STATUS", "PONYTAIL_QUIET_STARTUP"];
+  const names = ["XDG_CONFIG_HOME", "PONYTAIL_DEFAULT_MODE"];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   process.env.XDG_CONFIG_HOME = root;
   for (const name of names.slice(1)) delete process.env[name];
@@ -62,15 +62,21 @@ test("extension registers only the Ponytail mode command", () => withEnvironment
   assert.deepEqual([...commands.keys()], ["ponytail"]);
 }));
 
-test("Ponytail shows a fixed mode status without a startup toast", () => withEnvironment(async () => {
+test("Ponytail stays silent when the skill and settings load", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context, notices } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
-  assert.deepEqual(harness.statuses.at(-1), { name: "pi-config-ponytail", value: "ponytail: full" });
+  assert.deepEqual(harness.statuses, []);
   assert.deepEqual(notices, []);
 }));
 
-test("session mode persists, injects isolated instructions, and updates fixed status", () => withEnvironment(async () => {
+test("skill load failures use the fallback and retain an error for the UI", () => {
+  const skill = loadPonytailSkill(new URL("./missing-ponytail-skill.md", import.meta.url));
+  assert.match(skill.body, /^# Ponytail/);
+  assert.match(skill.error, /Could not load Ponytail skill; using fallback/);
+});
+
+test("session mode persists and injects isolated instructions without a status", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
@@ -82,7 +88,7 @@ test("session mode persists, injects isolated instructions, and updates fixed st
   assert.match(injected.systemPrompt, /challenge speculative requirements/i);
   assert.doesNotMatch(injected.systemPrompt, /Build the request, then mention/i);
 
-  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra");
+  assert.deepEqual(harness.statuses, []);
   assert.equal(harness.events.has("agent_start"), false);
   assert.equal(harness.events.has("agent_settled"), false);
 }));
