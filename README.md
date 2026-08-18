@@ -6,16 +6,17 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 
 | Feature | Source | Tests |
 |---|---|---|
-| Package | [`package.json`](package.json) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
+| Package and CI | [`package.json`](package.json), [`.github/workflows/check.yml`](.github/workflows/check.yml) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs), [`test/windows-portability.mjs`](test/windows-portability.mjs) |
 | Repository workflows | [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
-| Command-line tools | [`extensions/tools.ts`](extensions/tools.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs) |
-| Web search | [`extensions/web.ts`](extensions/web.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs) |
-| User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
-| Todos | [`extensions/todo.ts`](extensions/todo.ts) | [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs) |
-| Goal mode | [`extensions/goal.ts`](extensions/goal.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs) |
+| Command-line tools | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs), [`test/tools-core.test.mjs`](test/tools-core.test.mjs) |
+| Web search | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs), [`test/web-core.test.mjs`](test/web-core.test.mjs), [`test/live-web.mjs`](test/live-web.mjs) |
+| User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
+| Todos | [`extensions/todo.ts`](extensions/todo.ts), [`extensions/todo-core.ts`](extensions/todo-core.ts) | [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs), [`test/todo-core.test.mjs`](test/todo-core.test.mjs) |
+| Goal mode | [`extensions/goal.ts`](extensions/goal.ts), [`extensions/goal-core.ts`](extensions/goal-core.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs), [`test/goal-core.test.mjs`](test/goal-core.test.mjs) |
 | Compact layout | [`extensions/layout.ts`](extensions/layout.ts) | [`test/layout-extension.test.mjs`](test/layout-extension.test.mjs) |
 | Caveman output | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
-| Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts), [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs) |
+| Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts), [`extensions/ponytail-core.ts`](extensions/ponytail-core.ts), [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs), [`test/ponytail-core.test.mjs`](test/ponytail-core.test.mjs) |
+| Display safety | [`extensions/text-safety.ts`](extensions/text-safety.ts) | [`test/text-safety.test.mjs`](test/text-safety.test.mjs), [`test/ui-render-normalization.test.mjs`](test/ui-render-normalization.test.mjs) |
 
 ## Use
 
@@ -51,7 +52,7 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-[`.github/workflows/check.yml`](.github/workflows/check.yml) runs Linux checks. Windows runs typechecking and `npm run test:windows`.
+[`.github/workflows/check.yml`](.github/workflows/check.yml) runs `npm run check` on Ubuntu and Windows. Windows also runs `npm run test:windows`.
 
 Live checks use external services.
 
