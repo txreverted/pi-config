@@ -2,8 +2,6 @@
 
 Use [`README.md`](README.md) as the repo map. Then read code and tests. Code wins.
 
-Treat [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) as the frozen product scope. Read it. Never edit it.
-
 ## Work
 
 - Keep the diff small.
