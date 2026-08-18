@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, visibleWidth } from "@earendil-works/pi-tui";
 import layoutExtension, {
   compactCwd,
+  compactStartupSpacing,
   createAnswerTimer,
   formatCompactFooter,
   formatElapsed,
@@ -102,6 +103,33 @@ test("cost label distinguishes subscription-backed auth from API access", () => 
   assert.equal(getCostLabel(context("kimi-coding", false, false)), "sub");
 });
 
+test("startup spacing collapses only redundant header and empty-chat spacers", () => {
+  const adjustedSpacers = new Set();
+  const header = { render: () => [], invalidate() {} };
+  const headerContainer = new Container();
+  headerContainer.addChild(new Spacer(1));
+  headerContainer.addChild(header);
+  headerContainer.addChild(new Spacer(1));
+  const resources = new Container();
+  resources.addChild(new Text("resources", 0, 0));
+  resources.addChild(new Spacer(1));
+  const chat = new Container();
+  const document = new Container();
+  document.addChild(headerContainer);
+  document.addChild(resources);
+  document.addChild(chat);
+  const tui = { children: [document] };
+
+  compactStartupSpacing(tui, header, adjustedSpacers);
+  assert.deepEqual(headerContainer.render(80), []);
+  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), ["resources"]);
+
+  chat.addChild(new Text("message", 0, 0));
+  compactStartupSpacing(tui, header, adjustedSpacers);
+  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), ["resources", ""]);
+  assert.equal(adjustedSpacers.size, 3);
+});
+
 test("session cost includes assistant, tool, compaction, and branch-summary usage", () => {
   const usage = (total) => ({ cost: { total } });
   const entries = [
@@ -157,7 +185,9 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     };
     sessionStart({}, context);
 
-    assert.deepEqual(headerFactory().render(80), []);
+    const headerTui = { children: [], requestRender() {} };
+    const header = headerFactory(headerTui);
+    assert.deepEqual(header.render(80), []);
     let unsubscribed = false;
     const footer = footerFactory(
       { requestRender() {} },
@@ -175,6 +205,7 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     assert.match(lines[0], /goal: active/);
     assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
     footer.dispose();
+    header.dispose();
     assert.equal(unsubscribed, true);
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
