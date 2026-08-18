@@ -185,7 +185,7 @@ test("jq sanitizes terminal controls in displayed and retained output", async ()
   assert.match(result.content[0].text, /safe/);
   assert.ok(result.details.fullOutputPath);
   assert.doesNotMatch(await readFile(result.details.fullOutputPath, "utf8"), /[\u001b\u0007]/);
-  assert.equal((await stat(result.details.fullOutputPath)).mode & 0o077, 0);
+  if (process.platform !== "win32") assert.equal((await stat(result.details.fullOutputPath)).mode & 0o077, 0);
 
   await pi.handlers.get("session_shutdown")();
   await assert.rejects(() => stat(result.details.fullOutputPath));
