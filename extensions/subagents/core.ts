@@ -61,6 +61,13 @@ export interface AgentResultPayload {
   question?: string;
 }
 
+export const AGENT_RESULT_LIMITS = {
+  summaryChars: 8_000,
+  evidenceItems: 20,
+  evidenceChars: 1_000,
+  questionChars: 1_000,
+} as const;
+
 export interface UsageSummary extends Usage {}
 
 export interface AgentProgress {
@@ -134,6 +141,44 @@ export function normalizeUsage(value: unknown): UsageSummary {
       total: number(cost.total),
     },
   };
+}
+
+export function validateAgentResultPayload(value: unknown): AgentResultPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("agentResult must be an object");
+  const input = value as Record<string, unknown>;
+  const unexpected = Object.keys(input).filter((key) => !["status", "summary", "evidence", "question"].includes(key));
+  if (unexpected.length) throw new Error(`agentResult contains unexpected fields: ${unexpected.join(", ")}`);
+  if (input.status !== "succeeded" && input.status !== "blocked") throw new Error("agentResult status is invalid");
+  if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > AGENT_RESULT_LIMITS.summaryChars) {
+    throw new Error(`agentResult summary must contain 1-${AGENT_RESULT_LIMITS.summaryChars} characters`);
+  }
+  if (!Array.isArray(input.evidence) || input.evidence.length > AGENT_RESULT_LIMITS.evidenceItems) {
+    throw new Error(`agentResult evidence must contain at most ${AGENT_RESULT_LIMITS.evidenceItems} items`);
+  }
+  const evidence = input.evidence.map((item) => {
+    if (typeof item !== "string" || !item.trim() || item.length > AGENT_RESULT_LIMITS.evidenceChars) {
+      throw new Error(`agentResult evidence items must contain 1-${AGENT_RESULT_LIMITS.evidenceChars} characters`);
+    }
+    return safeDisplayText(item).trim();
+  });
+  const question = input.question;
+  if (question !== undefined && (typeof question !== "string" || !question.trim() || question.length > AGENT_RESULT_LIMITS.questionChars)) {
+    throw new Error(`agentResult question must contain 1-${AGENT_RESULT_LIMITS.questionChars} characters`);
+  }
+  const result: AgentResultPayload = {
+    status: input.status,
+    summary: safeDisplayText(input.summary).trim(),
+    evidence,
+    ...(typeof question === "string" ? { question: safeDisplayText(question).trim() } : {}),
+  };
+  if (!result.summary || evidence.some((item) => !item) || (question !== undefined && !result.question)) {
+    throw new Error("agentResult text is empty after display-safety normalization");
+  }
+  if (result.status === "blocked" && !result.question) throw new Error("Blocked agent results require a question");
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > SUBAGENT_LIMITS.resultBytes) {
+    throw new Error(`agentResult must be at most ${SUBAGENT_LIMITS.resultBytes} bytes`);
+  }
+  return result;
 }
 
 export function addUsage(left: UsageSummary, right: UsageSummary): UsageSummary {

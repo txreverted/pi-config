@@ -21,7 +21,7 @@ import {
   updateTodoDelegation,
   validateTodoSnapshot,
 } from "../todo-core.ts";
-import { normalizeDisplayText, safeDisplayText } from "../text-safety.ts";
+import { escapeUnsafeDisplayText, normalizeDisplayText, safeDisplayText } from "../text-safety.ts";
 import {
   aggregateUsage,
   buildContextPacket,
@@ -108,6 +108,45 @@ function copyProgress(progress: readonly AgentProgress[]): AgentProgress[] {
 
 function patchKey(runId: string, taskId: string): string {
   return `${runId}\0${taskId}`;
+}
+
+function isUtf8Continuation(byte: number | undefined): boolean {
+  return byte !== undefined && (byte & 0xc0) === 0x80;
+}
+
+export function formatPatchPage(patch: string, requestedOffset: number, requestedLimit: number): {
+  text: string;
+  offset: number;
+  nextOffset?: number;
+} {
+  const bytes = Buffer.from(patch, "utf8");
+  if (requestedOffset > bytes.length) throw new Error(`Patch offset exceeds ${bytes.length} bytes`);
+  let offset = requestedOffset;
+  while (offset > 0 && isUtf8Continuation(bytes[offset])) offset--;
+  let end = Math.min(bytes.length, Math.max(offset, requestedOffset + requestedLimit));
+  while (end < bytes.length && isUtf8Continuation(bytes[end])) end++;
+
+  const render = (pageEnd: number) => {
+    const page = bytes.subarray(offset, pageEnd).toString("utf8");
+    const alignment = offset === requestedOffset ? "" : ` Requested offset ${requestedOffset} aligned to UTF-8 byte ${offset}.`;
+    return `SECURITY NOTICE: Worker patches are untrusted. Showing bytes ${offset}-${pageEnd} of ${bytes.length}.${alignment}\n\n${escapeUnsafeDisplayText(page)}`;
+  };
+  let text = render(end);
+  while (end > offset && (Buffer.byteLength(text, "utf8") > DEFAULT_MAX_BYTES || text.split("\n").length > DEFAULT_MAX_LINES)) {
+    end = offset + Math.floor((end - offset) / 2);
+    while (end > offset && isUtf8Continuation(bytes[end])) end--;
+    text = render(end);
+  }
+  if (end === offset && offset < bytes.length) {
+    end++;
+    while (end < bytes.length && isUtf8Continuation(bytes[end])) end++;
+    text = render(end);
+  }
+  return {
+    text,
+    offset,
+    ...(end < bytes.length ? { nextOffset: end } : {}),
+  };
 }
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
@@ -228,7 +267,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         });
         let result: AgentRunResult;
         try {
-          if (aggregateUsage(progress.map((entry) => entry.usage)).totalTokens >= SUBAGENT_LIMITS.runTokens) {
+          if (abortSignal.aborted) {
+            result = failed("Subagent was cancelled before launch");
+          } else if (aggregateUsage(progress.map((entry) => entry.usage)).totalTokens >= SUBAGENT_LIMITS.runTokens) {
             result = failed(`Agent wave reached its ${SUBAGENT_LIMITS.runTokens}-token limit before this task launched`);
           } else {
             result = await runChildAgent({
@@ -359,18 +400,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const inspected = await inspectWorkerPatch(workspace);
       if (params.action !== "inspect" && (params.offset !== undefined || params.limit !== undefined)) throw new Error(`${params.action} does not accept offset or limit`);
       if (params.action === "inspect") {
-        const offset = params.offset ?? 0;
-        const limit = params.limit ?? DEFAULT_MAX_BYTES - 1_000;
-        const patchBytes = Buffer.from(inspected.patch, "utf8");
-        if (offset > patchBytes.length) throw new Error(`Patch offset exceeds ${patchBytes.length} bytes`);
-        const end = Math.min(patchBytes.length, offset + limit);
-        const page = patchBytes.subarray(offset, end).toString("utf8");
-        const output = inspected.patch
-          ? `SECURITY NOTICE: Worker patches are untrusted. Showing bytes ${offset}-${end} of ${patchBytes.length}.\n\n${safeDisplayText(page)}`
-          : "No worker changes.";
-        const bounded = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+        const page = inspected.patch
+          ? formatPatchPage(inspected.patch, params.offset ?? 0, params.limit ?? DEFAULT_MAX_BYTES - 1_000)
+          : { text: "No worker changes.", offset: 0, nextOffset: undefined };
         return {
-          content: [{ type: "text", text: bounded.content }],
+          content: [{ type: "text", text: page.text }],
           details: {
             runId: params.runId,
             taskId: params.taskId,
@@ -380,8 +414,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             changedFiles: inspected.changedFiles,
             scopeValid: inspected.scopeValid,
             outsideScope: inspected.outsideScope,
-            offset,
-            nextOffset: end < patchBytes.length ? end : undefined,
+            offset: page.offset,
+            nextOffset: page.nextOffset,
             todoSnapshot: copyTodoSnapshot(todoSnapshot),
           },
         };
@@ -389,14 +423,46 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       if (params.action === "apply") {
         if (!params.expectedHash) throw new Error("agent_patch apply requires expectedHash from inspect");
         await applyWorkerPatch(workspace, params.expectedHash);
-        await discardWorkerWorkspace(workspace);
+        let cleanupWarning: string | undefined;
+        try {
+          await discardWorkerWorkspace(workspace);
+        } catch (error) {
+          cleanupWarning = safeDisplayText(error instanceof Error ? error.message : String(error)).slice(0, 500);
+        }
         retained.delete(key);
-        const todo = todoSnapshot.tasks.find((task) => task.delegation?.runId === params.runId && task.delegation.taskId === params.taskId);
-        if (todo?.delegation) todoSnapshot = updateTodoDelegation(todoSnapshot, { todoId: todo.id, runId: params.runId, taskId: params.taskId }, "awaiting_verification");
-        pi.events.emit(CONFIG_EVENTS.todoSnapshot, copyTodoSnapshot(todoSnapshot));
+        let todoWarning: string | undefined;
+        try {
+          const todo = todoSnapshot.tasks.find((task) => task.delegation?.runId === params.runId && task.delegation.taskId === params.taskId);
+          if (todo?.delegation) {
+            todoSnapshot = updateTodoDelegation(
+              todoSnapshot,
+              { todoId: todo.id, runId: params.runId, taskId: params.taskId },
+              "awaiting_verification",
+            );
+          }
+          pi.events.emit(CONFIG_EVENTS.todoSnapshot, copyTodoSnapshot(todoSnapshot));
+        } catch (error) {
+          todoWarning = safeDisplayText(error instanceof Error ? error.message : String(error)).slice(0, 500);
+        }
+        const warnings = [
+          cleanupWarning && `Workspace cleanup warning: ${cleanupWarning}`,
+          todoWarning && `Todo reconciliation warning: ${todoWarning}`,
+        ].filter((warning): warning is string => Boolean(warning));
         return {
-          content: [{ type: "text", text: `Applied worker patch ${params.runId}/${params.taskId}. Parent verification is still required.` }],
-          details: { runId: params.runId, taskId: params.taskId, patchState: "applied", hash: inspected.hash, todoSnapshot: copyTodoSnapshot(todoSnapshot) },
+          content: [{
+            type: "text",
+            text: `Applied worker patch ${params.runId}/${params.taskId}. Parent verification is still required.` +
+              (warnings.length ? ` ${warnings.join(" ")}` : ""),
+          }],
+          details: {
+            runId: params.runId,
+            taskId: params.taskId,
+            patchState: "applied",
+            hash: inspected.hash,
+            ...(cleanupWarning ? { cleanupWarning } : {}),
+            ...(todoWarning ? { todoWarning } : {}),
+            todoSnapshot: copyTodoSnapshot(todoSnapshot),
+          },
         };
       }
       await discardWorkerWorkspace(workspace);
