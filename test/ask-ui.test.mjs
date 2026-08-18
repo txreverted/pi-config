@@ -16,6 +16,7 @@ const questions = (multiSelect = false) => normalizeQuestions([{
 
 const theme = {
   fg: (_color, text) => text,
+  bg: (color, text) => color === "selectedBg" ? `[${text}]` : text,
   bold: (text) => text,
 };
 
@@ -60,13 +61,15 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
   assert.equal(component.focused, true);
 
   const rendered = component.render(80).join("\n");
-  assert.match(rendered, /⎿ ├─ □ Web/);
-  assert.match(rendered, /└─ □ Other/);
+  assert.match(rendered, /\[ □ Targets \]/);
+  assert.match(rendered, /⎿ 1\. Web\n {4}Browser application/);
+  assert.match(rendered, /3\. Type something\./);
   const special = rendered.match(/[^\x00-\x7f]/gu) ?? [];
   assert.ok(special.every((glyph) => "□■☒⎿├─│└".includes(glyph)), special.join(""));
 
   component.handleInput("\r");
-  assert.match(component.render(80).join("\n"), /Review answers/);
+  assert.match(component.render(80).join("\n"), /\[ ■ Submit \]/);
+  assert.match(component.render(80).join("\n"), /Ready to submit/);
   component.handleInput("\r");
   assert.deepEqual(result, {
     answers: [{ question: "Which targets?", answer: "Web", optionIndexes: [1], custom: false }],
@@ -124,7 +127,7 @@ test("enhanced keyboard sequences navigate and toggle choices", () => {
   const component = createAskComponent(tui, theme, keybindings, questions(true), (value) => { result = value; });
 
   component.handleInput("\x1b[1;1C");
-  assert.match(component.render(80).join("\n"), /Review answers/);
+  assert.match(component.render(80).join("\n"), /Ready to submit/);
   component.handleInput("\x1b[1;1D");
   component.handleInput("\x1b[32u");
   component.handleInput("\x1b");
@@ -132,7 +135,7 @@ test("enhanced keyboard sequences navigate and toggle choices", () => {
 
   const shifted = createAskComponent(tui, theme, keybindings, questions(), () => {});
   shifted.handleInput("\x1b[9;2u");
-  assert.match(shifted.render(80).join("\n"), /Review answers/);
+  assert.match(shifted.render(80).join("\n"), /Ready to submit/);
 });
 
 test("questionnaire rendering stays within narrow and short terminals", () => {
@@ -142,7 +145,7 @@ test("questionnaire rendering stays within narrow and short terminals", () => {
     const lines = component.render(32);
     assert.ok(lines.length <= Math.max(1, rows - 2), `height ${rows}: ${lines.length}`);
     assert.ok(lines.every((line) => visibleWidth(line) <= 32), `width overflow at ${rows}`);
-    if (rows === 8) assert.match(lines.join("\n"), /⎿ ├─/);
+    if (rows === 8) assert.match(lines.join("\n"), /⎿ 1\./);
   }
 
   const tui = { terminal: { rows: 10, columns: 32 }, requestRender() {} };

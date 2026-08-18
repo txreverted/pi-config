@@ -107,13 +107,13 @@ test("todo publishes a bounded native Pi widget", async () => {
   const mixedUpdate = ctx.widgets.at(-1);
   assert.equal(mixedUpdate.name, "pi-config-todo");
   assert.equal(mixedUpdate.options.placement, "aboveEditor");
-  const theme = { fg: (_color, text) => text };
+  const theme = { fg: (_color, text) => text, bold: (text) => text };
   const mixed = mixedUpdate.factory({ terminal: { rows: 30 } }, theme).render(80);
   assert.deepEqual(mixed.slice(0, 4), [
     " Todos: 1/10 completed",
-    "  ├─ ■ #2 Task 1 │ Working",
-    "  ├─ □ #3 Task 2",
-    "  ├─ □ #4 Task 3",
+    " ⎿ ■ #2 Task 1 │ Working",
+    "   □ #3 Task 2",
+    "   □ #4 Task 3",
   ]);
 
   for (const rows of [4, 9, 12]) {
