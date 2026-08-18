@@ -8,9 +8,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
-const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-const workflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
+const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
+const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
+const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const skillPath = "skills/ponytail/SKILL.md";
