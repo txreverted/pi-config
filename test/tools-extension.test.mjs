@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-import toolsExtension, { sanitizeRetainedOutput } from "../extensions/tools.ts";
+import toolsExtension, { retainBoundedOutput, sanitizeRetainedOutput } from "../extensions/tools.ts";
 
 function fakePi(initialActive = ["read", "grep", "find"]) {
   const tools = new Map();
@@ -102,9 +102,10 @@ test("jq excludes parent secrets from its child environment", async () => {
   }
 });
 
-test("jq bounds combined stdout and stderr output", async () => {
+test("jq bounds combined stdout and stderr output", async (t) => {
   const pi = fakePi();
   toolsExtension(pi);
+  t.after(() => pi.handlers.get("session_shutdown")());
   const jq = pi.tools.get("jq");
   for (const filter of [
     "(\"x\" * 50000), (range(0; 3000) | debug | empty)",
@@ -119,6 +120,56 @@ test("jq bounds combined stdout and stderr output", async () => {
     assert.ok(result.content[0].text.split("\n").length <= DEFAULT_MAX_LINES);
     assert.match(result.content[0].text, /Combined jq output truncated/);
   }
+});
+
+test("jq reports stderr-triggered combined output limits", async () => {
+  const pi = fakePi();
+  toolsExtension(pi);
+  const result = await pi.tools.get("jq").execute("jq-stderr-limit", {
+    filter: "range(0; 800000) | debug | empty",
+    nullInput: true,
+  }, undefined, undefined, { cwd: process.cwd() });
+
+  assert.equal(result.details.outputLimitReached, 10 * 1024 * 1024);
+  assert.equal(result.details.fullOutputPath, undefined);
+  assert.match(result.content[0].text, /combined stdout\/stderr hard limit/);
+});
+
+test("retained jq output enforces its aggregate byte limit", async (t) => {
+  const first = await mkdtemp(join(tmpdir(), "pi-jq-retain-first-"));
+  const second = await mkdtemp(join(tmpdir(), "pi-jq-retain-second-"));
+  t.after(() => Promise.all([first, second].map((path) => rm(path, { recursive: true, force: true }))));
+  const firstPath = join(first, "output.txt");
+  const secondPath = join(second, "output.txt");
+  await writeFile(firstPath, "123456");
+  await writeFile(secondPath, "123456");
+  const retained = new Map();
+
+  assert.equal(await retainBoundedOutput(retained, firstPath, 6, 10, 10), 0);
+  assert.equal(await retainBoundedOutput(retained, secondPath, 6, 10, 10), 1);
+  await assert.rejects(() => stat(firstPath));
+  assert.equal((await stat(secondPath)).isFile(), true);
+});
+
+test("jq evicts oldest retained outputs at the session file limit", async (t) => {
+  const pi = fakePi();
+  toolsExtension(pi);
+  t.after(() => pi.handlers.get("session_shutdown")());
+  const paths = [];
+  let latest;
+  for (let index = 0; index < 11; index++) {
+    latest = await pi.tools.get("jq").execute(`jq-retain-${index}`, {
+      filter: "range(0; 2100)",
+      nullInput: true,
+      rawOutput: true,
+    }, undefined, undefined, { cwd: process.cwd() });
+    paths.push(latest.details.fullOutputPath);
+  }
+
+  await assert.rejects(() => stat(paths[0]));
+  for (const path of paths.slice(1)) assert.equal((await stat(path)).isFile(), true);
+  assert.equal(latest.details.evictedRetainedOutputs, 1);
+  assert.match(latest.content[0].text, /Evicted 1 older retained jq output file/);
 });
 
 test("jq sanitizes terminal controls in displayed and retained output", async () => {

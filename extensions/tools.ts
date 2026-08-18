@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
@@ -17,6 +17,8 @@ import {
 } from "./tools-core.ts";
 
 const JQ_OUTPUT_HARD_LIMIT_BYTES = 10 * 1024 * 1024;
+const JQ_RETAINED_OUTPUT_LIMIT_BYTES = 50 * 1024 * 1024;
+const JQ_RETAINED_OUTPUT_LIMIT_FILES = 10;
 const COMBINED_TRUNCATION_NOTICE = "[Combined jq output truncated to stay within Pi's tool output limits.]";
 const JQ_ENVIRONMENT_KEYS = new Set([
   "PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ",
@@ -28,6 +30,7 @@ interface OutputDetails {
   truncation?: TruncationResult;
   fullOutputPath?: string;
   outputLimitReached?: number;
+  evictedRetainedOutputs?: number;
 }
 
 const jqSchema = Type.Object({
@@ -84,30 +87,34 @@ function jqEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.Pro
   ));
 }
 
-function truncationNotice(result: BoundedProcessResult, retainedOutputs: Set<string>): string | undefined {
-  if (!result.truncation || !result.fullOutputPath) return undefined;
-  retainedOutputs.add(result.fullOutputPath);
-  const truncation = result.truncation;
-  const savedOutput = result.outputLimitReached
-    ? `Captured stdout saved to: ${safeDisplayLine(result.fullOutputPath)}`
-    : `Full stdout saved to: ${safeDisplayLine(result.fullOutputPath)}`;
-  const hardLimit = result.outputLimitReached
-    ? ` Processing stopped after reaching the ${formatSize(result.outputLimitReached)} hard output limit.`
-    : "";
-  return `[Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} captured lines ` +
-    `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)} captured). ` +
-    `${savedOutput}.${hardLimit}]`;
+function processNotices(result: BoundedProcessResult, evictedRetainedOutputs: number): string[] {
+  const notices: string[] = [];
+  if (result.truncation && result.fullOutputPath) {
+    const truncation = result.truncation;
+    const savedOutput = result.outputLimitReached
+      ? `Captured stdout saved to: ${safeDisplayLine(result.fullOutputPath)}`
+      : `Full stdout saved to: ${safeDisplayLine(result.fullOutputPath)}`;
+    notices.push(`[Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} captured lines ` +
+      `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)} captured). ${savedOutput}.]`);
+  }
+  if (result.outputLimitReached) {
+    notices.push(`[Processing stopped after reaching the ${formatSize(result.outputLimitReached)} combined stdout/stderr hard limit.]`);
+  }
+  if (evictedRetainedOutputs > 0) {
+    notices.push(`[Evicted ${evictedRetainedOutputs} older retained jq output file(s) to enforce session limits.]`);
+  }
+  return notices;
 }
 
-function boundedJqOutput(result: BoundedProcessResult, retainedOutputs: Set<string>): string {
+function boundedJqOutput(result: BoundedProcessResult, evictedRetainedOutputs: number): string {
   const output = safeDisplayText(appendStderr(result.stdout, result.stderr)) || "jq produced no output";
-  const processNotice = truncationNotice(result, retainedOutputs);
-  const complete = processNotice ? `${output}\n\n${processNotice}` : output;
+  const notices = processNotices(result, evictedRetainedOutputs).join("\n");
+  const complete = notices ? `${output}\n\n${notices}` : output;
   if (Buffer.byteLength(complete, "utf8") <= DEFAULT_MAX_BYTES && complete.split("\n").length <= DEFAULT_MAX_LINES) {
     return complete;
   }
 
-  const footer = `${processNotice ? `\n\n${processNotice}` : ""}\n\n${COMBINED_TRUNCATION_NOTICE}`;
+  const footer = `${notices ? `\n\n${notices}` : ""}\n\n${COMBINED_TRUNCATION_NOTICE}`;
   const truncated = truncateHead(output, {
     maxBytes: DEFAULT_MAX_BYTES - Buffer.byteLength(footer, "utf8"),
     maxLines: DEFAULT_MAX_LINES - footer.split("\n").length,
@@ -115,8 +122,29 @@ function boundedJqOutput(result: BoundedProcessResult, retainedOutputs: Set<stri
   return `${truncated.content}${footer}`;
 }
 
+export async function retainBoundedOutput(
+  retainedOutputs: Map<string, number>,
+  path: string,
+  size: number,
+  maximumFiles: number,
+  maximumBytes: number,
+): Promise<number> {
+  retainedOutputs.set(path, size);
+  let totalBytes = [...retainedOutputs.values()].reduce((total, outputSize) => total + outputSize, 0);
+  let evicted = 0;
+  while (retainedOutputs.size > maximumFiles || totalBytes > maximumBytes) {
+    const oldest = retainedOutputs.entries().next().value as [string, number] | undefined;
+    if (!oldest) break;
+    await removeBoundedOutput(oldest[0]);
+    retainedOutputs.delete(oldest[0]);
+    totalBytes -= oldest[1];
+    evicted++;
+  }
+  return evicted;
+}
+
 export default function toolsExtension(pi: ExtensionAPI): void {
-  const retainedOutputs = new Set<string>();
+  const retainedOutputs = new Map<string, number>();
 
   pi.on("session_start", () => {
     const active = pi.getActiveTools();
@@ -127,7 +155,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "jq",
     label: "jq",
-    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes and ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of stdout. Output is streamed with bounded memory and truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; sanitized captured stdout is saved to a mode-0600 temporary file when truncated.`,
+    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes and ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of combined stdout/stderr. Output is streamed with bounded memory and truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; up to ${JQ_RETAINED_OUTPUT_LIMIT_FILES} sanitized mode-0600 output files totaling ${formatSize(JQ_RETAINED_OUTPUT_LIMIT_BYTES)} are retained per session.`,
     promptSnippet: "Query and transform JSON with jq filters",
     promptGuidelines: ["Use jq for structured JSON queries and transformations instead of parsing JSON with shell text tools."],
     parameters: jqSchema,
@@ -163,15 +191,26 @@ export default function toolsExtension(pi: ExtensionAPI): void {
         if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
         throw processError(result);
       }
-      if (result.fullOutputPath) await sanitizeRetainedOutput(result.fullOutputPath);
+      let evictedRetainedOutputs = 0;
+      if (result.fullOutputPath) {
+        await sanitizeRetainedOutput(result.fullOutputPath);
+        evictedRetainedOutputs = await retainBoundedOutput(
+          retainedOutputs,
+          result.fullOutputPath,
+          (await stat(result.fullOutputPath)).size,
+          JQ_RETAINED_OUTPUT_LIMIT_FILES,
+          JQ_RETAINED_OUTPUT_LIMIT_BYTES,
+        );
+      }
 
       return {
-        content: [{ type: "text", text: boundedJqOutput(result, retainedOutputs) }],
+        content: [{ type: "text", text: boundedJqOutput(result, evictedRetainedOutputs) }],
         details: {
           exitCode: result.code,
           truncation: result.truncation,
           fullOutputPath: result.fullOutputPath,
           outputLimitReached: result.outputLimitReached,
+          evictedRetainedOutputs: evictedRetainedOutputs || undefined,
         } satisfies OutputDetails,
       };
     },
@@ -182,7 +221,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
-    const outputs = [...retainedOutputs];
+    const outputs = [...retainedOutputs.keys()];
     retainedOutputs.clear();
     await Promise.all(outputs.map((path) => removeBoundedOutput(path).catch(() => {})));
   });

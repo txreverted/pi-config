@@ -25,7 +25,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
 - `web_search` needs no API key.
-- `jq` executes the local command. Pi's built-in `grep` and `find` are active.
+- `jq` executes the local command and retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
 ## Safety
 

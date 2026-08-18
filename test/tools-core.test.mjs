@@ -49,6 +49,24 @@ test("bounded process stops at a hard stdout limit", async () => {
   await removeBoundedOutput(result.fullOutputPath);
 });
 
+test("bounded process applies the hard output limit to stderr and combined streams", async () => {
+  const hardLimit = 64 * 1024;
+  for (const script of [
+    "process.stderr.write('e'.repeat(128 * 1024))",
+    "process.stdout.write('o'.repeat(48 * 1024)); process.stderr.write('e'.repeat(48 * 1024))",
+  ]) {
+    const result = await runBoundedProcess(process.execPath, ["-e", script], {
+      cwd: process.cwd(),
+      maxOutputBytes: hardLimit,
+      tempPrefix: "pi-tools-test-combined-limit",
+    });
+
+    assert.equal(result.outputLimitReached, hardLimit);
+    assert.ok(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) <= hardLimit + 128);
+    if (result.fullOutputPath) await removeBoundedOutput(result.fullOutputPath);
+  }
+});
+
 test("bounded process reports executable startup failures", async () => {
   await assert.rejects(
     () => runBoundedProcess("__pi_config_missing_executable__", [], {
