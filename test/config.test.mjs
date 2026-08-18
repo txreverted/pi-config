@@ -183,6 +183,8 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /node: \["22\.19\.0", "22\.x"\]/);
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
   assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /schedule:\n    - cron: "17 9 \* \* 1"/);
+  assert.match(workflow, /live-web:[\s\S]*continue-on-error: true[\s\S]*PI_LIVE_WEB: "1"/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
@@ -202,6 +204,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
     /retains at most 10 truncated outputs or 50MB per session/,
     /built-in `grep` and `find`/,
     /PI_LIVE_WEB=1/,
+    /weekly and on manual dispatch.*non-blocking provider-drift signals/,
   ]) assert.match(readme, pattern);
 });
 
