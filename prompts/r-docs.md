@@ -8,12 +8,12 @@ Scope: ${ARGUMENTS:-entire repository}.
 
 - Read repository instructions first.
 - Understand current code, config, tests, and behavior.
-- Inventory every `.md` file.
+- Inventory every `.md` file in scope.
 - Classify files as human docs, instructions, frozen scope, or runtime code.
 - Never edit frozen files.
 - Keep, merge, or delete human docs based on unique current value.
 - Remove stale, duplicated, speculative, roadmap, and code-obvious content.
-- Keep one clear entry point.
+- Keep one human guide.
 - Use short sentences, exact paths, commands, examples, and relative links.
 - Verify every technical claim.
 - Do not change source code or runtime Markdown unless explicitly included.

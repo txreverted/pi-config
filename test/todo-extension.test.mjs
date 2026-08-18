@@ -64,7 +64,8 @@ test("todo output labels dependencies without claiming completed tasks still blo
   await tool.execute("call", { action: "update", id: 1, status: "completed" });
   await tool.execute("call", { action: "update", id: 2, status: "in_progress" });
   const listed = await tool.execute("call", { action: "list" });
-  assert.match(listed.content[0].text, /#2 Use result depends on #1/);
+  assert.match(listed.content[0].text, /☒ #1 Prepare/);
+  assert.match(listed.content[0].text, /■ #2 Use result depends on #1/);
   assert.doesNotMatch(listed.content[0].text, /blocked by #1/);
 });
 
@@ -111,9 +112,9 @@ test("todo publishes a bounded native Pi widget", async () => {
   const mixed = mixedUpdate.factory({ terminal: { rows: 30 } }, theme).render(80);
   assert.deepEqual(mixed.slice(0, 4), [
     " Todos: 1/10 completed",
-    " ⎿ ■ #2 Task 1 │ Working",
-    "   □ #3 Task 2",
-    "   □ #4 Task 3",
+    " ■ #2 Task 1 │ Working",
+    " □ #3 Task 2",
+    " □ #4 Task 3",
   ]);
 
   for (const rows of [4, 9, 12]) {

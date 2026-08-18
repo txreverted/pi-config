@@ -10,8 +10,6 @@
     "extensions",
     "prompts",
     "skills",
-    "subagents",
-    "themes",
     "README.md"
   ],
   "scripts": {
@@ -37,6 +35,9 @@
     ],
     "prompts": [
       "./prompts"
+    ],
+    "skills": [
+      "./skills/ponytail/SKILL.md"
     ]
   },
   "dependencies": {

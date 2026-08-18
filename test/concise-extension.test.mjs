@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import conciseExtension, { CONCISE_RESPONSE_POLICY } from "../extensions/concise.ts";
 import ponytailExtension from "../extensions/ponytail.ts";
 
-test("concise policy is always appended without replacing the base prompt", () => {
+test("Caveman policy is always appended without replacing the base prompt", () => {
   const handlers = new Map();
   conciseExtension({ on(event, handler) { handlers.set(event, handler); } });
 
   const result = handlers.get("before_agent_start")({ systemPrompt: "BASE" });
-  assert.match(result.systemPrompt, /^BASE\n\nCONCISE RESPONSE POLICY/);
-  assert.match(result.systemPrompt, /Preserve exact code, commands/);
+  assert.match(result.systemPrompt, /^BASE\n\nCAVEMAN OUTPUT POLICY/);
+  assert.match(result.systemPrompt, /Prefer short words and fragments when clear/);
+  assert.match(result.systemPrompt, /Preserve exact code, commands, paths/);
   assert.match(result.systemPrompt, /security warnings, irreversible actions/);
   assert.match(result.systemPrompt, /documentation that is short, direct, concrete/i);
   assert.match(result.systemPrompt, /persisted artifacts/i);
@@ -17,7 +18,7 @@ test("concise policy is always appended without replacing the base prompt", () =
   assert.equal(result.systemPrompt.endsWith(CONCISE_RESPONSE_POLICY), true);
 });
 
-test("concise policy composes before Ponytail and remains when Ponytail is off", async () => {
+test("Caveman policy composes before Ponytail and remains when Ponytail is off", async () => {
   const handlers = new Map();
   const commands = new Map();
   const pi = {
