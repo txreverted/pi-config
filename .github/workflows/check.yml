@@ -33,9 +33,6 @@ jobs:
         run: npm audit --omit=dev
       - if: matrix.pi == 'latest'
         run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
-      - if: runner.os != 'Windows'
-        run: npm run check
-      - if: runner.os == 'Windows'
-        run: npm run typecheck
+      - run: npm run check
       - if: runner.os == 'Windows'
         run: npm run test:windows
