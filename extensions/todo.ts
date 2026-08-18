@@ -32,7 +32,7 @@ const Parameters = Type.Object({
   activeForm: Type.Optional(Type.String({ maxLength: TODO_LIMITS.activeForm, description: "Short present-tense activity shown while in progress" })),
   status: Type.Optional(StringEnum(TODO_STATUSES)),
   blockedBy: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { maxItems: TODO_LIMITS.blockers })),
-});
+}, { additionalProperties: false });
 
 function taskLine(task: TodoTask): string {
   const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
@@ -70,13 +70,20 @@ export function restoreTodoSnapshot(ctx: ExtensionContext): TodoSnapshot {
 
 export default function todoExtension(pi: ExtensionAPI): void {
   let snapshot = emptyTodoSnapshot();
-  let collapsed = false;
   let latestContext: ExtensionContext | undefined;
 
   const syncWidget = (ctx?: ExtensionContext) => {
     latestContext = ctx ?? latestContext;
     if (latestContext?.mode !== "tui") return;
-    const unfinished = snapshot.tasks.filter((task) => task.status !== "completed");
+    const completed = new Set(snapshot.tasks.filter((task) => task.status === "completed").map((task) => task.id));
+    const unfinished = snapshot.tasks
+      .filter((task) => task.status !== "completed")
+      .sort((left, right) => {
+        const rank = (task: TodoTask) => task.status === "in_progress"
+          ? 0
+          : task.blockedBy.every((id) => completed.has(id)) ? 1 : 2;
+        return rank(left) - rank(right) || left.id - right.id;
+      });
     if (!unfinished.length) {
       latestContext.ui.setWidget(WIDGET_NAME, undefined);
       return;
@@ -88,7 +95,6 @@ export default function todoExtension(pi: ExtensionAPI): void {
         const contentWidth = Math.max(0, safeWidth - 1);
         const row = (text: string) => ` ${truncateToWidth(text, contentWidth, "")}`;
         const summary = `Todos: ${snapshot.tasks.length - unfinished.length}/${snapshot.tasks.length} completed`;
-        if (collapsed) return [row(theme.fg("muted", `${summary} (collapsed)`))];
         const bodyRows = Math.max(0, Math.max(1, (tui.terminal?.rows ?? 30) - 8) - 1);
         let shownCount = Math.min(WIDGET_TASK_LINES, bodyRows, unfinished.length);
         if (unfinished.length > shownCount && shownCount === bodyRows) shownCount = Math.max(0, shownCount - 1);
@@ -144,18 +150,8 @@ export default function todoExtension(pi: ExtensionAPI): void {
         ctx.ui.notify(normalizeDisplayText(output), "info");
         return;
       }
-      collapsed = false;
       syncWidget(ctx);
       ctx.ui.notify(normalizeDisplayText(output), "info");
-    },
-  });
-
-  pi.registerShortcut("ctrl+shift+t", {
-    description: "Collapse or expand the todo widget",
-    handler: async (ctx) => {
-      if (ctx.mode !== "tui") return;
-      collapsed = !collapsed;
-      syncWidget(ctx);
     },
   });
 

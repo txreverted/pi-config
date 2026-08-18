@@ -13,74 +13,11 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { boundCustomAnswer, type AskAnswer, type AskQuestion } from "./ask-core.ts";
+import { AskState, type AskAnswer, type AskQuestion } from "./ask-core.ts";
 
 export interface AskUiResult {
   answers: AskAnswer[];
   cancelled: boolean;
-}
-
-export class AskState {
-  page = 0;
-  cursor = 0;
-  readonly questions: readonly AskQuestion[];
-  private readonly selected = new Map<number, Set<number>>();
-  private readonly custom = new Map<number, string>();
-
-  constructor(questions: readonly AskQuestion[]) { this.questions = questions; }
-
-  get review(): boolean { return this.page === this.questions.length; }
-  get question(): AskQuestion | undefined { return this.questions[this.page]; }
-  get selectedIndexes(): readonly number[] { return [...(this.selected.get(this.page) ?? [])].sort((a, b) => a - b); }
-  get customAnswer(): string | undefined { return this.custom.get(this.page); }
-
-  movePage(delta: number): void {
-    this.page = (this.page + delta + this.questions.length + 1) % (this.questions.length + 1);
-    this.cursor = 0;
-  }
-
-  choose(index: number): void {
-    const question = this.question;
-    if (!question || index < 0 || index >= question.options.length) return;
-    if (!question.multiSelect) {
-      this.selected.set(this.page, new Set([index]));
-      this.custom.delete(this.page);
-      return;
-    }
-    const indexes = this.selected.get(this.page) ?? new Set<number>();
-    indexes.has(index) ? indexes.delete(index) : indexes.add(index);
-    this.selected.set(this.page, indexes);
-  }
-
-  write(value: unknown): void {
-    if (!this.question) return;
-    const answer = boundCustomAnswer(value);
-    if (answer) this.custom.set(this.page, answer);
-    else this.custom.delete(this.page);
-    if (!this.question.multiSelect) this.selected.delete(this.page);
-  }
-
-  isAnswered(index: number): boolean {
-    return (this.selected.get(index)?.size ?? 0) > 0 || Boolean(this.custom.get(index));
-  }
-
-  get allAnswered(): boolean { return this.questions.every((_question, index) => this.isAnswered(index)); }
-
-  answers(): AskAnswer[] {
-    return this.questions.flatMap((question, questionIndex) => {
-      const indexes = [...(this.selected.get(questionIndex) ?? [])].sort((a, b) => a - b);
-      const custom = this.custom.get(questionIndex);
-      const labels = indexes.map((index) => question.options[index]?.label).filter((label): label is string => Boolean(label));
-      if (custom) labels.push(custom);
-      if (!labels.length) return [];
-      return [{
-        question: question.question,
-        answer: labels.join(", "),
-        optionIndexes: indexes.map((index) => index + 1),
-        custom: Boolean(custom),
-      }];
-    });
-  }
 }
 
 function addWrapped(lines: string[], prefix: string, text: string, width: number): void {
@@ -115,7 +52,11 @@ function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
     line.includes(CURSOR_MARKER) || /(?:^|\s)>\s|Ready to submit|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
   ));
   const start = Math.max(0, Math.min(focus - Math.floor(slots / 2), body.length - slots));
-  return [...header, ...body.slice(start, start + slots), ...footer];
+  const visible = body.slice(start, start + slots);
+  if (slots >= 3 && start > 0) visible[0] = theme.fg("dim", " ... more above");
+  if (slots >= 3 && start + slots < body.length) visible[visible.length - 1] = theme.fg("dim", " ... more below");
+  const width = visibleWidth(lines[0] ?? "");
+  return [...header, ...visible.map((line) => truncateToWidth(line, width, "")), ...footer];
 }
 
 export function createAskComponent(
@@ -193,6 +134,22 @@ export function createAskComponent(
       }
 
       const question = state.question!;
+      const rawNumber = /^[1-9]$/.test(data) ? Number(data) : undefined;
+      const kittyNumber = /^\u001b\[(4[9]|5[0-7])(?:;1)?u$/.exec(data);
+      const numberKey = rawNumber ?? (kittyNumber ? Number(kittyNumber[1]) - 48 : undefined);
+      if (numberKey !== undefined) {
+        const index = numberKey - 1;
+        if (index > question.options.length) return;
+        if (index === question.options.length) {
+          editing = true;
+          editor.setText(state.customAnswer ?? "");
+        } else {
+          state.choose(index);
+          if (!question.multiSelect) state.movePage(1);
+        }
+        refresh();
+        return;
+      }
       const customIndex = question.options.length;
       if (keybindings.matches(data, "tui.select.up")) {
         state.cursor = Math.max(0, state.cursor - 1);
@@ -270,7 +227,7 @@ export function createAskComponent(
         const customIndex = question.options.length;
         const customCursor = state.cursor === customIndex ? theme.fg("accent", "> ") : "  ";
         const customMark = question.multiSelect ? `${state.customAnswer ? "■" : "□"} ` : "";
-        addWrapped(lines, customCursor, theme.fg(state.cursor === customIndex || state.customAnswer ? "accent" : "text", `${customMark}${customIndex + 1}. Type something.`), renderWidth);
+        addWrapped(lines, customCursor, theme.fg(state.cursor === customIndex || state.customAnswer ? "accent" : "text", `${customMark}${customIndex + 1}. Other`), renderWidth);
       }
 
       lines.push("");

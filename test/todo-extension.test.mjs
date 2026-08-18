@@ -100,11 +100,12 @@ test("a malformed final result retains the latest validated todo snapshot", asyn
 
 test("todo publishes a bounded native Pi widget", async () => {
   const { tool, commands, shortcuts, events } = setup();
+  assert.equal(shortcuts.size, 0);
   const ctx = context();
   events.get("session_start")({}, ctx.value);
   for (let index = 0; index < 10; index++) await tool.execute("call", { action: "create", subject: `Task ${index}` });
   await tool.execute("call", { action: "update", id: 1, status: "completed" });
-  await tool.execute("call", { action: "update", id: 2, status: "in_progress", activeForm: "Working" });
+  await tool.execute("call", { action: "update", id: 10, status: "in_progress", activeForm: "Working" });
   const mixedUpdate = ctx.widgets.at(-1);
   assert.equal(mixedUpdate.name, "pi-config-todo");
   assert.equal(mixedUpdate.options.placement, "aboveEditor");
@@ -112,9 +113,9 @@ test("todo publishes a bounded native Pi widget", async () => {
   const mixed = mixedUpdate.factory({ terminal: { rows: 30 } }, theme).render(80);
   assert.deepEqual(mixed.slice(0, 4), [
     " Todos: 1/10 completed",
-    " ■ #2 Task 1 │ Working",
+    " ■ #10 Task 9 │ Working",
+    " □ #2 Task 1",
     " □ #3 Task 2",
-    " □ #4 Task 3",
   ]);
 
   for (const rows of [4, 9, 12]) {
@@ -124,11 +125,6 @@ test("todo publishes a bounded native Pi widget", async () => {
       assert.ok(short.every((line) => visibleWidth(line) <= width));
     }
   }
-
-  await shortcuts.get("ctrl+shift+t").handler(ctx.value);
-  const collapsed = ctx.widgets.at(-1).factory({ terminal: { rows: 30 } }, theme).render(80);
-  assert.equal(collapsed.length, 1);
-  await shortcuts.get("ctrl+shift+t").handler(ctx.value);
 
   for (let id = 1; id <= 10; id++) await tool.execute("call", { action: "update", id, status: "completed" });
   assert.deepEqual(ctx.widgets.at(-1), { name: "pi-config-todo", factory: undefined, options: undefined });

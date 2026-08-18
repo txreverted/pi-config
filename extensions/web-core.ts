@@ -14,7 +14,6 @@ export interface SearchResult {
 
 export interface SearchResponse {
   results: SearchResult[];
-  rawText?: string;
 }
 
 export type SearchProvider = "exa-mcp" | "duckduckgo";
@@ -74,10 +73,14 @@ interface McpEnvelope {
 
 function parseMcpEnvelope(body: string): McpEnvelope | null {
   const payloads = body
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trim())
-    .filter((line) => line && line !== "[DONE]");
+    .split(/\r?\n\r?\n/)
+    .map((event) => event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim())
+    .filter((payload) => payload && payload !== "[DONE]");
 
   if (payloads.length === 0) payloads.push(body.trim());
 
@@ -163,7 +166,7 @@ export function parseExaSearchText(text: string, limit = 5): SearchResponse {
     if (results.length >= limit) break;
   }
 
-  return results.length > 0 ? { results } : { results: [], rawText: cleanSnippet(text, 8_000) };
+  return { results };
 }
 
 export async function searchExa(query: string, limit = 5, signal?: AbortSignal): Promise<SearchResponse> {
@@ -266,18 +269,19 @@ function shortError(error: unknown): string {
 }
 
 export async function searchWeb(query: string, limit = 5, signal?: AbortSignal): Promise<WebSearchResponse> {
+  const overallSignal = combinedSignal(signal, SEARCH_TIMEOUT_MS);
   try {
-    return { ...(await searchExa(query, limit, signal)), provider: "exa-mcp", attemptedProviders: ["exa-mcp"] };
+    return { ...(await searchExa(query, limit, overallSignal)), provider: "exa-mcp", attemptedProviders: ["exa-mcp"] };
   } catch (exaError) {
-    if (signal?.aborted) throw abortError(signal);
+    if (overallSignal.aborted) throw abortError(overallSignal);
     try {
       return {
-        ...(await searchDuckDuckGo(query, limit, signal)),
+        ...(await searchDuckDuckGo(query, limit, overallSignal)),
         provider: "duckduckgo",
         attemptedProviders: ["exa-mcp", "duckduckgo"],
       };
     } catch (duckDuckGoError) {
-      if (signal?.aborted) throw abortError(signal);
+      if (overallSignal.aborted) throw abortError(overallSignal);
       throw new Error(`Keyless web search failed (Exa: ${shortError(exaError)}; DuckDuckGo: ${shortError(duckDuckGoError)})`);
     }
   }
