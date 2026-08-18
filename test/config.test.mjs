@@ -22,6 +22,7 @@ const extensions = [
   "./extensions/ask.ts",
   "./extensions/todo.ts",
   "./extensions/goal.ts",
+  "./extensions/layout.ts",
   "./extensions/concise.ts",
   "./extensions/ponytail.ts",
 ];
