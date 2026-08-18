@@ -13,6 +13,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
 | Todos | [`extensions/todo.ts`](extensions/todo.ts) | [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs) |
 | Goal mode | [`extensions/goal.ts`](extensions/goal.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs) |
+| Compact layout | [`extensions/layout.ts`](extensions/layout.ts) | [`test/layout-extension.test.mjs`](test/layout-extension.test.mjs) |
 | Caveman output | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
 | Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts), [`skills/ponytail/SKILL.md`](skills/ponytail/SKILL.md) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs) |
 
@@ -22,6 +23,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 - `ask_user_question` asks one to four structured questions with a Claude Code-like UI in TUI or RPC mode. Every question includes a custom answer.
 - `/goal <objective>` continues while active. Use `status`, `pause`, `resume`, `edit`, or `clear`. A failed turn pauses safely. `goal_wait` waits for input or an optional deadline without completing the goal.
 - `/ponytail` accepts `lite`, `full`, `ultra`, `off`, `status`, or `default <mode>`.
+- The TUI hides the startup header, keeps Pi's editor, and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
 - `web_search` needs no API key.
