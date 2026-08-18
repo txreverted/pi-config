@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import webExtension, { formatSearchResults } from "../extensions/web.ts";
+import webExtension, { classifySearchQuery, formatSearchResults } from "../extensions/web.ts";
 
 function loadTools() {
   const tools = new Map();
@@ -11,7 +11,8 @@ function loadTools() {
 test("extension registers only keyless web search", () => {
   const tools = loadTools();
   assert.deepEqual([...tools.keys()], ["web_search"]);
-  assert.match(tools.get("web_search").description, /Every query is sent to Exa.*may also be sent.*DuckDuckGo/);
+  assert.match(tools.get("web_search").description, /Every approved query is sent to Exa.*may also be sent.*DuckDuckGo/);
+  assert.match(tools.get("web_search").description, /secrets are blocked.*code-like queries require.*confirmation/i);
 });
 
 test("web search details report every attempted provider", async () => {
@@ -27,6 +28,71 @@ test("web search details report every attempted provider", async () => {
     const result = await tools.get("web_search").execute("search", { query: "provider routing", limit: 1 });
     assert.equal(result.details.provider, "duckduckgo");
     assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "duckduckgo"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search blocks likely secrets before network access", async () => {
+  const tools = loadTools();
+  const credential = `AKIA${"A".repeat(16)}`;
+  assert.equal(classifySearchQuery(`find ${credential}`), "secret");
+  let fetched = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetched = true; return new Response(); };
+  try {
+    await assert.rejects(
+      () => tools.get("web_search").execute("search", { query: `find ${credential}` }),
+      /blocked.*likely credential/i,
+    );
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("code-like web queries require interactive approval", async () => {
+  const tools = loadTools();
+  const query = "const privateValue = loadProjectData();";
+  assert.equal(classifySearchQuery(query), "code");
+  await assert.rejects(
+    () => tools.get("web_search").execute("search", { query }),
+    /requires TUI or RPC approval/,
+  );
+
+  let confirmation;
+  let fetched = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetched = true;
+    return new Response(JSON.stringify({
+      result: { content: [{ type: "text", text: "Title: Approved\nURL: https://example.com/\nText: Result" }] },
+    }), { status: 200 });
+  };
+  try {
+    const context = {
+      hasUI: true,
+      mode: "rpc",
+      ui: {
+        confirm: async (title, message) => {
+          confirmation = { title, message };
+          return true;
+        },
+      },
+    };
+    const result = await tools.get("web_search").execute("search", { query }, undefined, undefined, context);
+    assert.equal(fetched, true);
+    assert.match(confirmation.title, /code-like text/);
+    assert.match(confirmation.message, /const privateValue/);
+    assert.equal(result.details.resultCount, 1);
+
+    fetched = false;
+    context.ui.confirm = async () => false;
+    await assert.rejects(
+      () => tools.get("web_search").execute("search", { query }, undefined, undefined, context),
+      /not approved/,
+    );
+    assert.equal(fetched, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -38,6 +38,7 @@ test("jq executes shell-free input and enforces exclusive input modes", async ()
   const pi = fakePi();
   toolsExtension(pi);
   const jq = pi.tools.get("jq");
+  assert.equal(jq.executionMode, "sequential");
   const result = await jq.execute("jq-test", {
     filter: ".items | add",
     input: JSON.stringify({ items: [2, 3] }),
@@ -46,6 +47,19 @@ test("jq executes shell-free input and enforces exclusive input modes", async ()
   await assert.rejects(
     () => jq.execute("jq-test", { filter: ".", input: "{}", files: ["package.json"] }, undefined, undefined, { cwd: process.cwd() }),
     /either input or files/,
+  );
+});
+
+test("jq bounds aggregate variable input before spawning", async () => {
+  const pi = fakePi();
+  toolsExtension(pi);
+  await assert.rejects(
+    () => pi.tools.get("jq").execute("jq-bounds", {
+      filter: ".",
+      nullInput: true,
+      variables: Array.from({ length: 17 }, (_, index) => ({ name: `v${index}`, value: "x".repeat(64 * 1024) })),
+    }, undefined, undefined, { cwd: process.cwd() }),
+    /variable values must total at most 1\.0MB/,
   );
 });
 
