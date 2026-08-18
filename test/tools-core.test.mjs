@@ -84,6 +84,37 @@ test("bounded process reports executable startup failures", async () => {
   );
 });
 
+test("bounded process rejects invalid resource bounds before spawning", async () => {
+  for (const options of [
+    { maxOutputBytes: 0 },
+    { maxMemoryBytes: 0 },
+    { memoryPollMs: 0 },
+    { timeoutMs: 0 },
+  ]) {
+    await assert.rejects(
+      () => runBoundedProcess(process.execPath, ["-e", "process.stdout.write('no')"], {
+        cwd: process.cwd(),
+        tempPrefix: "pi-tools-test-invalid-bound",
+        ...options,
+      }),
+      /positive integer/,
+    );
+  }
+});
+
+test("bounded process terminates when the working-set monitor crosses its limit", async () => {
+  await assert.rejects(
+    () => runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      cwd: process.cwd(),
+      maxMemoryBytes: 1,
+      memoryPollMs: 1,
+      memoryUsage: async () => 2,
+      tempPrefix: "pi-tools-test-memory-limit",
+    }),
+    /exceeded the 1-byte memory limit/,
+  );
+});
+
 test("bounded process enforces timeouts and cancellation", async () => {
   const immediateController = new AbortController();
   const immediate = runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {

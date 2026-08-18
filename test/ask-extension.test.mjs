@@ -85,6 +85,37 @@ test("RPC supports multi-select and an automatic custom answer", async () => {
   assert.equal(result.details.answers[0].custom, true);
 });
 
+test("RPC review can revise an earlier answer", async () => {
+  const { tool } = setup();
+  const questions = [
+    input().questions[0],
+    {
+      header: "Target",
+      question: "Which target?",
+      options: [
+        { label: "Web", description: "Browser" },
+        { label: "CLI", description: "Terminal" },
+      ],
+      multiSelect: false,
+    },
+  ];
+  let step = 0;
+  const result = await tool.execute("call", { questions }, undefined, undefined, {
+    mode: "rpc",
+    hasUI: true,
+    ui: {
+      select: async (_title, choices) => {
+        step++;
+        if (step <= 2) return choices[0];
+        if (step === 3) return choices[0];
+        if (step === 4) return choices[1];
+        return choices.at(-1);
+      },
+    },
+  });
+  assert.deepEqual(result.details.answers.map(({ answer }) => answer), ["Complete", "Web"]);
+});
+
 test("RPC display and custom answers are sanitized", async () => {
   const { tool } = setup();
   let shownTitle;
@@ -101,8 +132,8 @@ test("RPC display and custom answers are sanitized", async () => {
     hasUI: true,
     ui: {
       select: async (title, choices) => {
-        shownTitle = title;
-        shownChoices = choices;
+        shownTitle ??= title;
+        shownChoices ??= choices;
         return choices.at(-1);
       },
       input: async () => "custom\u001b]52;c;payload\u0007\nanswer",

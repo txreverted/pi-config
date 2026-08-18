@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,6 +13,9 @@ import {
 
 const DEFAULT_PROCESS_TIMEOUT_MS = 2 * 60_000;
 export const DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_PROCESS_MAX_MEMORY_BYTES = 256 * 1024 * 1024;
+// ponytail: RSS polling is not a kernel hard cap; upgrade when a maintained cross-platform limiter can constrain native jq.
+const DEFAULT_MEMORY_POLL_MS = 250;
 const STDERR_MAX_BYTES = 16 * 1024;
 const CAPTURE_PADDING_BYTES = 4;
 const KILL_GRACE_MS = 2_000;
@@ -33,11 +36,35 @@ export interface BoundedProcessOptions {
   timeoutMs?: number;
   tempPrefix?: string;
   maxOutputBytes?: number;
+  maxMemoryBytes?: number;
+  memoryPollMs?: number;
+  memoryUsage?: (pid: number) => Promise<number | undefined>;
   env?: NodeJS.ProcessEnv;
 }
 
 export async function removeBoundedOutput(fullOutputPath: string): Promise<void> {
   await rm(dirname(fullOutputPath), { recursive: true, force: true });
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
+  return value;
+}
+
+async function processMemoryBytes(pid: number): Promise<number | undefined> {
+  const command = process.platform === "win32" ? "powershell.exe" : "ps";
+  const args = process.platform === "win32"
+    ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).WorkingSet64`]
+    : ["-o", "rss=", "-p", String(pid)];
+  return new Promise((resolve) => {
+    execFile(command, args, { encoding: "utf8", timeout: 2_000 }, (error, stdout) => {
+      if (error) return resolve(undefined);
+      const measured = Number(String(stdout).trim());
+      resolve(Number.isFinite(measured) && measured >= 0
+        ? process.platform === "win32" ? measured : measured * 1024
+        : undefined);
+    });
+  });
 }
 
 function terminateProcess(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -91,12 +118,15 @@ export async function runBoundedProcess(
     throw new Error(`Failed to start ${command}: command paths and arguments cannot contain NUL bytes`);
   }
 
+  const maxOutputBytes = positiveInteger(options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES, "maxOutputBytes");
+  const maxMemoryBytes = positiveInteger(options.maxMemoryBytes ?? DEFAULT_PROCESS_MAX_MEMORY_BYTES, "maxMemoryBytes");
+  const memoryPollMs = positiveInteger(options.memoryPollMs ?? DEFAULT_MEMORY_POLL_MS, "memoryPollMs");
+  const memoryUsage = options.memoryUsage ?? processMemoryBytes;
   const tempDir = await mkdtemp(join(tmpdir(), `${options.tempPrefix ?? `pi-${basename(command)}`}-`));
   const fullOutputPath = join(tempDir, "output.txt");
   const outputStream = createWriteStream(fullOutputPath, { flags: "wx", mode: 0o600 });
   const captureLimit = DEFAULT_MAX_BYTES + CAPTURE_PADDING_BYTES;
   const captured: Buffer[] = [];
-  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES;
   let capturedBytes = 0;
   let stdoutBytes = 0;
   let outputBytes = 0;
@@ -106,8 +136,11 @@ export async function runBoundedProcess(
   let stderrBytes = 0;
   let streamError: Error | undefined;
   let spawnError: Error | undefined;
-  let stopReason: "aborted" | "timed_out" | "stream_error" | "output_limit" | undefined;
+  let stopReason: "aborted" | "timed_out" | "stream_error" | "output_limit" | "memory_limit" | undefined;
   let killTimer: NodeJS.Timeout | undefined;
+  let memoryTimer: NodeJS.Timeout | undefined;
+  let checkingMemory = false;
+  let childClosed = false;
 
   const child = spawn(command, [...args], {
     cwd: options.cwd,
@@ -152,7 +185,7 @@ export async function runBoundedProcess(
       child.stdout.pause();
       outputStream.once("drain", () => child.stdout.resume());
     }
-    if (portion.length < chunk.length) requestStop("output_limit");
+    if (outputBytes >= maxOutputBytes || portion.length < chunk.length) requestStop("output_limit");
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
@@ -162,7 +195,7 @@ export async function runBoundedProcess(
     outputBytes += portion.length;
     stderrBytes += portion.length;
     stderr = appendTail(stderr, portion, STDERR_MAX_BYTES);
-    if (portion.length < chunk.length) requestStop("output_limit");
+    if (outputBytes >= maxOutputBytes || portion.length < chunk.length) requestStop("output_limit");
   });
   child.once("error", (error) => {
     spawnError = error;
@@ -171,9 +204,22 @@ export async function runBoundedProcess(
   const onAbort = () => requestStop("aborted");
   options.signal?.addEventListener("abort", onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
-  const timeoutMs = Math.max(1, options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS);
+  const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS, "timeoutMs");
   const timeout = setTimeout(() => requestStop("timed_out"), timeoutMs);
   timeout.unref?.();
+  const checkMemory = async () => {
+    if (checkingMemory || stopReason || !child.pid) return;
+    checkingMemory = true;
+    try {
+      const used = await memoryUsage(child.pid);
+      if (!childClosed && used !== undefined && used > maxMemoryBytes) requestStop("memory_limit");
+    } finally {
+      checkingMemory = false;
+    }
+  };
+  memoryTimer = setInterval(() => void checkMemory(), memoryPollMs);
+  memoryTimer.unref?.();
+  void checkMemory();
 
   child.stdin.on("error", () => {
     // The process may close stdin after producing its own useful diagnostic.
@@ -183,12 +229,14 @@ export async function runBoundedProcess(
   let code: number | null = null;
   await new Promise<void>((resolveClose) => {
     child.once("close", (exitCode) => {
+      childClosed = true;
       code = exitCode;
       resolveClose();
     });
   });
 
   clearTimeout(timeout);
+  if (memoryTimer) clearInterval(memoryTimer);
   if (killTimer) clearTimeout(killTimer);
   options.signal?.removeEventListener("abort", onAbort);
   outputStream.end();
@@ -204,6 +252,10 @@ export async function runBoundedProcess(
   if (stopReason === "timed_out") {
     await removeOutput();
     throw new Error(`${command} timed out after ${timeoutMs}ms`);
+  }
+  if (stopReason === "memory_limit") {
+    await removeOutput();
+    throw new Error(`${command} exceeded the ${maxMemoryBytes}-byte memory limit`);
   }
   if (spawnError) {
     await removeOutput();

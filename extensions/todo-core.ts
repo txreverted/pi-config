@@ -132,7 +132,22 @@ export function validateTodoSnapshot(value: unknown): TodoSnapshot {
   return copyTodoSnapshot({ tasks, nextId });
 }
 
+function validateActionFields(input: TodoAction): void {
+  const allowed = new Set<string>(input.action === "create"
+    ? ["action", "subject", "description", "activeForm", "status", "blockedBy"]
+    : input.action === "update"
+      ? ["action", "id", "subject", "description", "activeForm", "status", "blockedBy"]
+      : input.action === "get" || input.action === "delete"
+        ? ["action", "id"]
+        : ["action"]);
+  const irrelevant = Object.entries(input as unknown as Record<string, unknown>)
+    .filter(([name, value]) => value !== undefined && !allowed.has(name))
+    .map(([name]) => name);
+  if (irrelevant.length > 0) throw new Error(`${input.action} does not accept: ${irrelevant.join(", ")}`);
+}
+
 export function applyTodoAction(current: TodoSnapshot, input: TodoAction): TodoChange {
+  validateActionFields(input);
   const snapshot = validateTodoSnapshot(current);
   const find = (id: unknown) => {
     const task = snapshot.tasks.find((candidate) => candidate.id === validId(id));

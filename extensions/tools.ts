@@ -11,12 +11,20 @@ import {
 import { Type } from "typebox";
 import { normalizeDisplayText, safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 import {
+  DEFAULT_PROCESS_MAX_MEMORY_BYTES,
   removeBoundedOutput,
   runBoundedProcess,
   type BoundedProcessResult,
 } from "./tools-core.ts";
 
 const JQ_OUTPUT_HARD_LIMIT_BYTES = 10 * 1024 * 1024;
+const JQ_INPUT_MAX_BYTES = 10 * 1024 * 1024;
+const JQ_FILTER_MAX_CHARS = 16 * 1024;
+const JQ_FILE_LIMIT = 100;
+const JQ_PATH_MAX_CHARS = 4_096;
+const JQ_VARIABLE_LIMIT = 100;
+const JQ_VARIABLE_VALUE_MAX_CHARS = 64 * 1024;
+const JQ_VARIABLE_TOTAL_MAX_BYTES = 1024 * 1024;
 const JQ_RETAINED_OUTPUT_LIMIT_BYTES = 50 * 1024 * 1024;
 const JQ_RETAINED_OUTPUT_LIMIT_FILES = 10;
 const COMBINED_TRUNCATION_NOTICE = "[Combined jq output truncated to stay within Pi's tool output limits.]";
@@ -34,11 +42,12 @@ interface OutputDetails {
 }
 
 const jqSchema = Type.Object({
-  filter: Type.String({ description: "jq filter to evaluate, for example '.items[] | .name'" }),
-  input: Type.Optional(Type.String({ description: "JSON or JSON Lines to pass on stdin" })),
+  filter: Type.String({ minLength: 1, maxLength: JQ_FILTER_MAX_CHARS, description: "jq filter to evaluate, for example '.items[] | .name'" }),
+  input: Type.Optional(Type.String({ maxLength: JQ_INPUT_MAX_BYTES, description: "JSON or JSON Lines to pass on stdin" })),
   files: Type.Optional(
-    Type.Array(Type.String({ description: "JSON file path, relative to the working directory or absolute" }), {
+    Type.Array(Type.String({ minLength: 1, maxLength: JQ_PATH_MAX_CHARS, description: "JSON file path, relative to the working directory or absolute" }), {
       minItems: 1,
+      maxItems: JQ_FILE_LIMIT,
     }),
   ),
   variables: Type.Optional(
@@ -48,9 +57,9 @@ const jqSchema = Type.Object({
           pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
           description: "jq variable name without the leading $",
         }),
-        value: Type.String({ description: "String value passed with --arg" }),
-      }),
-      { description: "String variables passed to jq with --arg" },
+        value: Type.String({ maxLength: JQ_VARIABLE_VALUE_MAX_CHARS, description: "String value passed with --arg" }),
+      }, { additionalProperties: false }),
+      { maxItems: JQ_VARIABLE_LIMIT, description: "String variables passed to jq with --arg" },
     ),
   ),
   rawOutput: Type.Optional(Type.Boolean({ description: "Use raw string output (-r)" })),
@@ -59,6 +68,16 @@ const jqSchema = Type.Object({
   nullInput: Type.Optional(Type.Boolean({ description: "Run the filter once with null input (-n)" })),
   sortKeys: Type.Optional(Type.Boolean({ description: "Sort object keys in output (-S)" })),
 }, { additionalProperties: false });
+
+function validateJqBounds(input: string | undefined, variables: readonly { name: string; value: string }[]): void {
+  if (input !== undefined && Buffer.byteLength(input, "utf8") > JQ_INPUT_MAX_BYTES) {
+    throw new Error(`jq input must be at most ${formatSize(JQ_INPUT_MAX_BYTES)}`);
+  }
+  const variableBytes = variables.reduce((total, variable) => total + Buffer.byteLength(variable.value, "utf8"), 0);
+  if (variableBytes > JQ_VARIABLE_TOTAL_MAX_BYTES) {
+    throw new Error(`jq variable values must total at most ${formatSize(JQ_VARIABLE_TOTAL_MAX_BYTES)}`);
+  }
+}
 
 function processError(result: BoundedProcessResult): Error {
   const diagnostic = safeDisplayLine(result.stderr || result.stdout, 1_000);
@@ -155,10 +174,11 @@ export default function toolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "jq",
     label: "jq",
-    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes and ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of combined stdout/stderr. Output is streamed with bounded memory and truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; up to ${JQ_RETAINED_OUTPUT_LIMIT_FILES} sanitized mode-0600 output files totaling ${formatSize(JQ_RETAINED_OUTPUT_LIMIT_BYTES)} are retained per session.`,
+    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes, ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of combined stdout/stderr, and a best-effort ${formatSize(DEFAULT_PROCESS_MAX_MEMORY_BYTES)} working-set monitor. Input and arguments are bounded. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; up to ${JQ_RETAINED_OUTPUT_LIMIT_FILES} sanitized mode-0600 output files totaling ${formatSize(JQ_RETAINED_OUTPUT_LIMIT_BYTES)} are retained per session.`,
     promptSnippet: "Query and transform JSON with jq filters",
     promptGuidelines: ["Use jq for structured JSON queries and transformations instead of parsing JSON with shell text tools."],
     parameters: jqSchema,
+    executionMode: "sequential",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (params.input !== undefined && params.files !== undefined) {
         throw new Error("jq accepts either input or files, not both");
@@ -169,6 +189,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
       if (params.input === undefined && params.files === undefined && !params.nullInput) {
         throw new Error("jq requires input, files, or nullInput=true");
       }
+      validateJqBounds(params.input, params.variables ?? []);
 
       const args: string[] = [];
       if (params.rawOutput) args.push("--raw-output");

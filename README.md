@@ -21,14 +21,14 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 ## Use
 
 - `todo` manages one branch-local dependency-aware list with a Claude Code-like terminal UI. `/todos` shows it.
-- `ask_user_question` asks one to four structured questions with a Claude Code-like UI in TUI or RPC mode. Every question includes a custom answer.
-- `/goal <objective>` continues while active. Use `status`, `pause`, `resume`, `edit`, or `clear`. A failed turn pauses safely. `goal_wait` waits for input or an optional deadline without completing the goal.
+- `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question includes Other.
+- `/goal <objective>` continues while active. Use `status`, `pause`, `resume`, `edit`, or `clear`. A failed turn pauses safely. `goal_complete` and `goal_wait` must be called without sibling tools.
 - `/ponytail` accepts `lite`, `full`, `ultra`, `off`, `status`, or `default <mode>`. Enabled modes appear in the footer without a startup notification.
 - The TUI hides the startup header, keeps Pi's editor, and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
-- `web_search` needs no API key.
-- `jq` executes the local command and retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
+- `web_search` needs no API key. It blocks likely credentials and asks before sending code-like queries.
+- `jq` bounds input, time, output, concurrency, and monitored working-set memory. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
 ## Safety
 
@@ -59,5 +59,7 @@ Live checks use external services.
 ```bash
 PI_LIVE_WEB=1 npm run test:live-web
 ```
+
+CI runs this check weekly and on manual dispatch. Failures are non-blocking provider-drift signals.
 
 Test UI changes in an interactive terminal.
