@@ -13,7 +13,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { boundCustomAnswer, CUSTOM_CHOICE, type AskAnswer, type AskQuestion } from "./ask-core.ts";
+import { boundCustomAnswer, type AskAnswer, type AskQuestion } from "./ask-core.ts";
 
 export interface AskUiResult {
   answers: AskAnswer[];
@@ -103,7 +103,7 @@ function fitRows(lines: string[], maxRows: number, theme: Theme): string[] {
   const body = lines.slice(headerCount, -footerCount);
   const slots = maxRows - header.length - footer.length;
   const focus = Math.max(0, body.findIndex((line) =>
-    line.includes(CURSOR_MARKER) || /(?:^|\s)⎿\s|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
+    line.includes(CURSOR_MARKER) || /(?:^|\s)⎿\s|Ready to submit|Enter to submit|Enter save/.test(stripTerminalSequences(line)),
   ));
   const start = Math.max(0, Math.min(focus - Math.floor(slots / 2), body.length - slots));
   return [...header, ...body.slice(start, start + slots), ...footer];
@@ -213,21 +213,25 @@ export function createAskComponent(
     },
     render(width: number): string[] {
       const renderWidth = Math.max(1, Math.floor(width));
-      const lines: string[] = [theme.fg("accent", "─".repeat(renderWidth))];
-      const tabs = questions.map((question, index) => {
-        const mark = state.isAnswered(index) ? "■" : "□";
-        return theme.fg(index === state.page ? "accent" : "muted", `${mark} ${question.header}`);
-      });
-      tabs.push(theme.fg(state.review ? "accent" : "muted", "Review"));
-      addWrapped(lines, " ", tabs.join(" │ "), renderWidth);
+      const lines: string[] = [theme.fg("borderMuted", "─".repeat(renderWidth))];
+      const tab = (label: string, active: boolean, complete: boolean) => {
+        const text = ` ${complete ? "■" : "□"} ${label} `;
+        return active
+          ? theme.bg("selectedBg", theme.fg("text", text))
+          : theme.fg(complete ? "success" : "muted", text);
+      };
+      const tabs = questions.map((question, index) => tab(question.header, index === state.page, state.isAnswered(index)));
+      tabs.push(tab("Submit", state.review, state.allAnswered));
+      addWrapped(lines, " ", tabs.join(" "), renderWidth);
       lines.push("");
 
       if (editing) {
-        addWrapped(lines, " ", theme.fg("accent", "Write your answer"), renderWidth);
+        addWrapped(lines, " ", theme.fg("accent", theme.bold("Write your answer")), renderWidth);
         for (const line of editor.render(Math.max(1, renderWidth - 2))) lines.push(truncateToWidth(` ${line}`, renderWidth, ""));
-        addWrapped(lines, " ", theme.fg("dim", "Enter save │ Esc back"), renderWidth);
+        addWrapped(lines, " ", theme.fg("dim", "Enter to save │ Esc to go back"), renderWidth);
       } else if (state.review) {
-        addWrapped(lines, " ", theme.bold("Review answers"), renderWidth);
+        addWrapped(lines, " ", theme.fg("accent", theme.bold("Ready to submit")), renderWidth);
+        lines.push("");
         for (const question of questions) {
           const answer = state.answers().find((candidate) => candidate.question === question.question);
           addWrapped(lines, " ", `${theme.fg("muted", `${question.header}:`)} ${answer?.answer ?? theme.fg("warning", "Unanswered")}`, renderWidth);
@@ -236,21 +240,31 @@ export function createAskComponent(
         addWrapped(lines, " ", theme.fg(state.allAnswered ? "success" : "warning", state.allAnswered ? "Enter to submit" : "Answer every question before submitting"), renderWidth);
       } else {
         const question = state.question!;
-        addWrapped(lines, " ", theme.bold(question.question), renderWidth);
+        addWrapped(lines, " ", theme.fg("accent", theme.bold(question.question)), renderWidth);
         lines.push("");
         question.options.forEach((option, index) => {
-          const mark = state.selectedIndexes.includes(index) ? "■" : "□";
-          const cursor = state.cursor === index ? theme.fg("accent", "⎿ ") : "  ";
-          addWrapped(lines, cursor, `├─ ${mark} ${option.label} │ ${theme.fg("muted", option.description)}`, renderWidth);
+          const focused = state.cursor === index;
+          const selected = state.selectedIndexes.includes(index);
+          const cursor = focused ? theme.fg("accent", "⎿ ") : "  ";
+          const mark = question.multiSelect ? `${selected ? "■" : "□"} ` : "";
+          const color = focused || selected ? "accent" : "text";
+          addWrapped(lines, cursor, theme.fg(color, `${mark}${index + 1}. ${option.label}`), renderWidth);
+          addWrapped(lines, question.multiSelect ? "      " : "    ", theme.fg("muted", option.description), renderWidth);
         });
-        const customMark = state.customAnswer ? "■" : "□";
-        const customCursor = state.cursor === question.options.length ? theme.fg("accent", "⎿ ") : "  ";
-        addWrapped(lines, customCursor, `└─ ${customMark} ${CUSTOM_CHOICE}`, renderWidth);
+        const customIndex = question.options.length;
+        const customCursor = state.cursor === customIndex ? theme.fg("accent", "⎿ ") : "  ";
+        const customMark = question.multiSelect ? `${state.customAnswer ? "■" : "□"} ` : "";
+        addWrapped(lines, customCursor, theme.fg(state.cursor === customIndex || state.customAnswer ? "accent" : "text", `${customMark}${customIndex + 1}. Type something.`), renderWidth);
       }
 
       lines.push("");
-      addWrapped(lines, " ", theme.fg("dim", "Tab/left/right questions │ Up/down choose │ Space toggle │ Enter confirm │ Esc cancel"), renderWidth);
-      lines.push(theme.fg("accent", "─".repeat(renderWidth)));
+      const help = state.review
+        ? "Enter to submit │ Tab/Arrow keys to navigate │ Esc to cancel"
+        : state.question?.multiSelect
+          ? "Space to toggle │ Enter to continue │ Tab/Arrow keys to navigate │ Esc to cancel"
+          : "Enter to select │ Tab/Arrow keys to navigate │ Esc to cancel";
+      addWrapped(lines, " ", theme.fg("dim", help), renderWidth);
+      lines.push(theme.fg("borderMuted", "─".repeat(renderWidth)));
       const bounded = lines.map((line) => truncateToWidth(line, renderWidth, ""));
       return fitRows(bounded, Math.max(1, (tui.terminal?.rows ?? 30) - 2), theme);
     },

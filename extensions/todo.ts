@@ -94,11 +94,11 @@ export default function todoExtension(pi: ExtensionAPI): void {
         if (unfinished.length > shownCount && shownCount === bodyRows) shownCount = Math.max(0, shownCount - 1);
         const shown = unfinished.slice(0, shownCount);
         const lines = [
-          theme.fg("accent", summary),
-          ...shown.map((task) => ` ├─ ${taskLine(task)}`),
+          theme.fg("accent", theme.bold(summary)),
+          ...shown.map((task, index) => `${index === 0 ? "⎿ " : "  "}${taskLine(task)}`),
         ];
         if (unfinished.length > shown.length && bodyRows > shown.length) {
-          lines.push(theme.fg("dim", ` └─ ${unfinished.length - shown.length} more`));
+          lines.push(theme.fg("dim", `${shown.length ? "  " : "⎿ "}${unfinished.length - shown.length} more`));
         }
         return lines.map(row);
       },

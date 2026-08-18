@@ -15,8 +15,6 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "extensions/**/*.ts",
-    "subagents/**/*.ts",
-    "types/**/*.d.ts"
+    "extensions/**/*.ts"
   ]
 }

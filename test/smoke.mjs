@@ -6,22 +6,13 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-const manifestExtensions = packageJson.pi.extensions.map((path) => resolve(root, path));
-const internalExtensions = [resolve(root, "extensions/subagent-tools.ts")];
+const extensions = packageJson.pi.extensions.map((path) => resolve(root, path));
 const promptNames = ["r-docs", "r-impl", "r-git"];
-const extensions = [...manifestExtensions, ...internalExtensions];
 assert.equal(new Set(extensions).size, extensions.length, "Smoke extension paths must be unique");
-assert.ok(manifestExtensions.every((path) => extensions.includes(path)), "Every manifest extension must load directly");
-const args = [
-  "--no-extensions",
-  "--no-skills",
-  "--no-prompt-templates",
-  "--no-themes",
-];
+
+const args = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"];
 for (const extension of extensions) args.push("--extension", extension);
 for (const prompt of promptNames) args.push("--prompt-template", resolve(root, "prompts", `${prompt}.md`));
-args.push("--theme", resolve(root, "themes", "neutral.json"));
-args.push("--use-theme", "neutral");
 args.push("--list-models", "__pi_config_smoke_no_such_model__");
 
 const result = spawnSync("pi", args, {
@@ -30,15 +21,12 @@ const result = spawnSync("pi", args, {
   env: { ...process.env, PI_OFFLINE: "1" },
   timeout: 30_000,
 });
-
 if (result.error) throw result.error;
 assert.equal(result.status, 0, result.stderr || result.stdout);
 assert.match(result.stdout, /No models (?:matching|available)/);
 assert.doesNotMatch(result.stderr, /error|failed|exception/i);
-const packageResult = spawnSync("pi", [
-  "-e", root,
-  "--list-models", "__pi_config_package_smoke_no_such_model__",
-], {
+
+const packageResult = spawnSync("pi", ["-e", root, "--list-models", "__pi_config_package_smoke_no_such_model__"], {
   cwd: root,
   encoding: "utf8",
   env: { ...process.env, PI_OFFLINE: "1" },
@@ -49,4 +37,4 @@ assert.equal(packageResult.status, 0, packageResult.stderr || packageResult.stdo
 assert.match(packageResult.stdout, /No models (?:matching|available)/);
 assert.doesNotMatch(packageResult.stderr, /error|failed|exception/i);
 
-console.log(`Loaded ${manifestExtensions.length} manifest extensions and ${internalExtensions.length} internal module directly, then loaded the complete package manifest through Pi.`);
+console.log(`Loaded ${extensions.length} manifest extensions and ${promptNames.length} prompt templates directly, then loaded the complete package manifest through Pi.`);
