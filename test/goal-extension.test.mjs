@@ -225,6 +225,42 @@ test("automatic continuation has no run or repeated-output ceiling", async () =>
   assert.match(rejected.notices.at(-1).message, /no longer supported/);
 });
 
+test("goal terminal tools block every call in a mixed batch", async () => {
+  const branch = [{
+    type: "message",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "write-1", name: "write", arguments: {} },
+        { type: "toolCall", id: "goal-1", name: "goal_complete", arguments: {} },
+      ],
+    },
+  }];
+  const h = harness(branch);
+  for (const [toolCallId, toolName] of [["write-1", "write"], ["goal-1", "goal_complete"]]) {
+    const blocked = await h.events.get("tool_call")({ toolCallId, toolName, input: {} }, h.context);
+    assert.deepEqual(blocked, {
+      block: true,
+      terminate: true,
+      reason: "goal_complete and goal_wait must be called alone; retry the batch without sibling tools",
+    });
+  }
+
+  branch[0].message.content = [{ type: "toolCall", id: "goal-2", name: "goal_wait", arguments: {} }];
+  assert.equal(await h.events.get("tool_call")({ toolCallId: "goal-2", toolName: "goal_wait", input: {} }, h.context), undefined);
+});
+
+test("a settled goal run without an assistant message pauses safely", async () => {
+  const h = harness();
+  await h.events.get("session_start")({}, h.context);
+  await h.commands.get("goal").handler("Handle missing response", h.context);
+  await startRun(h);
+  await h.events.get("agent_settled")({}, h.context);
+  assert.equal(h.messages.length, 1);
+  assert.match(h.entries.at(-1).data.goal.note, /aborted or failed/);
+  assert.ok(!h.active().includes("goal_complete"));
+});
+
 test("goal tools reject stale ids", async () => {
   const h = harness();
   await h.events.get("session_start")({}, h.context);
