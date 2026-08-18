@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
@@ -121,10 +122,18 @@ export function writePonytailDefaultMode(value: unknown): PonytailMode | undefin
   const config = readConfigForWrite(path);
   config.defaultMode = mode;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(temporary, path);
-  return mode;
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    renameSync(temporary, path);
+    return mode;
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 export function parsePonytailCommand(value: unknown, configuredDefault = DEFAULT_PONYTAIL_MODE): PonytailCommand {
