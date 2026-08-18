@@ -28,7 +28,7 @@ test("bounded process streams complete truncated output to a private temporary f
   assert.equal(result.truncation?.totalLines, 3000);
   assert.ok(result.fullOutputPath);
   assert.equal((await readFile(result.fullOutputPath, "utf8")).split("\n").length, 3001);
-  assert.equal((await stat(result.fullOutputPath)).mode & 0o077, 0);
+  if (process.platform !== "win32") assert.equal((await stat(result.fullOutputPath)).mode & 0o077, 0);
 
   await removeBoundedOutput(result.fullOutputPath);
   await assert.rejects(() => stat(result.fullOutputPath));
