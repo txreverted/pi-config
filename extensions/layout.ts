@@ -10,7 +10,7 @@ import {
   type ExtensionContext,
   type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import { safeDisplayLine } from "./text-safety.ts";
 
 type ComponentContainer = Component & { children: Component[] };
@@ -34,6 +34,22 @@ function findParentContainer(components: readonly Component[], target: Component
   return undefined;
 }
 
+// ponytail: Pi 0.84.2 has no loaded-resource ordering API; remove when startup sections are configurable.
+function moveContextBelowExtensions(resources: ComponentContainer): void {
+  const sectionIndex = (name: string) => resources.children.findIndex(
+    (component) => stripTerminalSequences(component.render(200)[0] ?? "").trim() === `[${name}]`,
+  );
+  const contextIndex = sectionIndex("Context");
+  const extensionsIndex = sectionIndex("Extensions");
+  if (contextIndex < 0 || extensionsIndex < 0 || contextIndex > extensionsIndex) return;
+
+  const contextLength = isAdjustableSpacer(resources.children[contextIndex + 1]) ? 2 : 1;
+  const context = resources.children.splice(contextIndex, contextLength);
+  const movedExtensionsIndex = sectionIndex("Extensions");
+  const insertAt = movedExtensionsIndex + (isAdjustableSpacer(resources.children[movedExtensionsIndex + 1]) ? 2 : 1);
+  resources.children.splice(insertAt, 0, ...context);
+}
+
 // ponytail: Pi 0.84.2 has no startup-spacing API; remove when setHeader owns its surrounding space.
 export function compactStartupSpacing(
   tui: Pick<TUI, "children">,
@@ -55,6 +71,7 @@ export function compactStartupSpacing(
   const resources = documentContainer.children[containerIndex + 1];
   const chat = documentContainer.children[containerIndex + 2];
   if (!resources || !chat || !isComponentContainer(resources) || !isComponentContainer(chat)) return;
+  moveContextBelowExtensions(resources);
   const trailingSpacer = resources.children.at(-1);
   if (!isAdjustableSpacer(trailingSpacer)) return;
   trailingSpacer.setLines(chat.children.length === 0 ? 0 : 1);

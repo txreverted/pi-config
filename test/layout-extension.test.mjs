@@ -103,7 +103,7 @@ test("cost label distinguishes subscription-backed auth from API access", () => 
   assert.equal(getCostLabel(context("kimi-coding", false, false)), "sub");
 });
 
-test("startup spacing collapses only redundant header and empty-chat spacers", () => {
+test("startup layout moves context below extensions and collapses only redundant spacers", () => {
   const adjustedSpacers = new Set();
   const header = { render: () => [], invalidate() {} };
   const headerContainer = new Container();
@@ -111,7 +111,9 @@ test("startup spacing collapses only redundant header and empty-chat spacers", (
   headerContainer.addChild(header);
   headerContainer.addChild(new Spacer(1));
   const resources = new Container();
-  resources.addChild(new Text("resources", 0, 0));
+  resources.addChild(new Text("[Context]\n  AGENTS.md", 0, 0));
+  resources.addChild(new Spacer(1));
+  resources.addChild(new Text("[Extensions]\n  layout.ts", 0, 0));
   resources.addChild(new Spacer(1));
   const chat = new Container();
   const document = new Container();
@@ -122,11 +124,17 @@ test("startup spacing collapses only redundant header and empty-chat spacers", (
 
   compactStartupSpacing(tui, header, adjustedSpacers);
   assert.deepEqual(headerContainer.render(80), []);
-  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), ["resources"]);
+  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), [
+    "[Extensions]",
+    "  layout.ts",
+    "",
+    "[Context]",
+    "  AGENTS.md",
+  ]);
 
   chat.addChild(new Text("message", 0, 0));
   compactStartupSpacing(tui, header, adjustedSpacers);
-  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), ["resources", ""]);
+  assert.equal(resources.render(80).at(-1), "");
   assert.equal(adjustedSpacers.size, 3);
 });
 
