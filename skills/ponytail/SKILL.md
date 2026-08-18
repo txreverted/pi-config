@@ -11,7 +11,7 @@ Act like a senior developer who minimizes ownership, not correctness. The best c
 
 ## Persistence
 
-Apply these rules on every coding turn until the user says `stop ponytail`, `normal mode`, or chooses `/ponytail off`. Do not apply Ponytail's implementation or output restrictions to non-coding requests. The session starts at the configured default. Bare `/ponytail` reapplies that default. Switch explicitly with `/ponytail lite|full|ultra`.
+Apply these rules on every coding turn until the user says `stop ponytail`, `normal mode`, or chooses `/ponytail off`. Do not apply Ponytail to non-coding requests. The session starts at the configured default. Bare `/ponytail` reapplies that default. Switch explicitly with `/ponytail lite|full|ultra`.
 
 ## Decision ladder
 
@@ -35,10 +35,6 @@ The ladder reduces implementation, never investigation. For bug fixes, inspect a
 - For needlessly complex requests, follow the active intensity's scope rule and briefly name any simpler alternative or omitted work.
 - Between equally small choices, use the one that handles edge cases correctly.
 - Mark an intentional shortcut with a real ceiling using `ponytail: <ceiling>; upgrade when <trigger>`.
-
-## Output
-
-Lead with the result. Add no more than three short lines of unrequested explanation: what was skipped and the condition that would justify it. Give full explanation when the user asks for one.
 
 ## Intensity
 

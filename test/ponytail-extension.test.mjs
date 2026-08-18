@@ -62,15 +62,15 @@ test("extension registers only the Ponytail mode command", () => withEnvironment
   assert.deepEqual([...commands.keys()], ["ponytail"]);
 }));
 
-test("Ponytail status is hidden by default", () => withEnvironment(async () => {
+test("Ponytail shows a fixed mode status without a startup toast", () => withEnvironment(async () => {
   const harness = createHarness();
-  const { context } = createContext([], harness.statuses);
+  const { context, notices } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
-  assert.deepEqual(harness.statuses.at(-1), { name: "pi-config-ponytail", value: undefined });
+  assert.deepEqual(harness.statuses.at(-1), { name: "pi-config-ponytail", value: "ponytail: full" });
+  assert.deepEqual(notices, []);
 }));
 
-test("session mode persists, injects isolated instructions, and updates internal status activity", () => withEnvironment(async () => {
-  process.env.PONYTAIL_HIDE_STATUS = "0";
+test("session mode persists, injects isolated instructions, and updates fixed status", () => withEnvironment(async () => {
   const harness = createHarness();
   const { context } = createContext([], harness.statuses);
   await harness.events.get("session_start")({}, context);
@@ -82,11 +82,9 @@ test("session mode persists, injects isolated instructions, and updates internal
   assert.match(injected.systemPrompt, /challenge speculative requirements/i);
   assert.doesNotMatch(injected.systemPrompt, /Build the request, then mention/i);
 
-  await harness.events.get("agent_start")({}, context);
-  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra (active)");
-  assert.equal(harness.events.has("agent_end"), false);
-  await harness.events.get("agent_settled")({}, context);
-  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra (idle)");
+  assert.equal(harness.statuses.at(-1).value, "ponytail: ultra");
+  assert.equal(harness.events.has("agent_start"), false);
+  assert.equal(harness.events.has("agent_settled"), false);
 }));
 
 test("session tree navigation restores the selected branch mode", () => withEnvironment(async () => {
@@ -135,6 +133,14 @@ test("saving a default reports invalid environment overrides without claiming th
   assert.equal(JSON.parse(readFileSync(ponytailConfigPath(), "utf8")).defaultMode, "lite");
   assert.equal(notices.at(-1).level, "warning");
   assert.match(notices.at(-1).message, /saved as lite.*effective default is invalid/i);
+}));
+
+test("command arguments provide mode completion", () => withEnvironment(() => {
+  const harness = createHarness();
+  const complete = harness.commands.get("ponytail").getArgumentCompletions;
+  assert.deepEqual(complete("ult"), [{ value: "ultra", label: "ultra" }]);
+  assert.deepEqual(complete("default f"), [{ value: "default full", label: "default full" }]);
+  assert.equal(complete("missing"), null);
 }));
 
 test("standalone normal mode disables injection without matching ordinary prose", () => withEnvironment(async () => {

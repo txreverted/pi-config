@@ -23,7 +23,7 @@ Private Pi package. [`DESIRED_CONFIG.md`](DESIRED_CONFIG.md) defines its scope. 
 - `todo` manages one branch-local dependency-aware list with a Claude Code-like terminal UI. `/todos` shows it.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question includes Other.
 - `/goal <objective>` continues while active. Use `status`, `pause`, `resume`, `edit`, or `clear`. A failed turn pauses safely. `goal_complete` and `goal_wait` must be called without sibling tools.
-- `/ponytail` accepts `lite`, `full`, `ultra`, `off`, `status`, or `default <mode>`.
+- `/ponytail` accepts `lite`, `full`, `ultra`, `off`, `status`, or `default <mode>`. Enabled modes appear in the footer without a startup notification.
 - The TUI hides the startup header, keeps Pi's editor, and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
