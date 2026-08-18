@@ -12,11 +12,16 @@ function createHarness() {
   const entries = [];
   const messages = [];
   const statuses = [];
+  const bus = new Map();
   const pi = {
     registerCommand(name, options) { commands.set(name, options); },
     on(name, handler) { events.set(name, handler); },
     appendEntry(customType, data) { entries.push({ customType, data }); },
     sendUserMessage(text, options) { messages.push({ text, options }); },
+    events: {
+      on(name, handler) { bus.set(name, handler); },
+      emit(name, value) { bus.get(name)?.(value); },
+    },
   };
   ponytailExtension(pi);
   return { commands, events, entries, messages, statuses };

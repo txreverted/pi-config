@@ -13,6 +13,7 @@ import {
   type PonytailSessionMode,
 } from "./ponytail-core.ts";
 import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
+import { CONFIG_EVENTS } from "./coordination-core.ts";
 
 const FALLBACK_SKILL = `# Ponytail\n\nUse the smallest correct solution: YAGNI, existing code, standard library, native platform features, installed dependencies, then minimum new code. Never remove validation, data-loss protection, security, or accessibility.`;
 
@@ -41,11 +42,13 @@ export default function ponytailExtension(pi: ExtensionAPI): void {
 
   const restoreMode = (ctx: ExtensionContext) => {
     currentMode = resolvePonytailSessionMode(ctx.sessionManager.getBranch(), configuredDefault);
+    pi.events.emit(CONFIG_EVENTS.ponytailMode, currentMode);
   };
 
   const setMode = (mode: PonytailSessionMode, ctx?: ExtensionContext) => {
     currentMode = mode;
     pi.appendEntry("ponytail-mode", { mode });
+    pi.events.emit(CONFIG_EVENTS.ponytailMode, currentMode);
     ctx?.ui.notify(normalizeDisplayText(`Ponytail mode set to ${mode}.`), "info");
   };
 

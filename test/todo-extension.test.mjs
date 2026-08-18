@@ -2,20 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import todoExtension from "../extensions/todo.ts";
+import { CONFIG_EVENTS } from "../extensions/coordination-core.ts";
 
 function setup() {
   const tools = new Map();
   const commands = new Map();
   const shortcuts = new Map();
   const events = new Map();
+  const bus = new Map();
   const pi = {
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     registerShortcut(key, shortcut) { shortcuts.set(key, shortcut); },
     on(name, handler) { events.set(name, handler); },
+    events: {
+      on(name, handler) { bus.set(name, handler); },
+      emit(name, value) { bus.get(name)?.(value); },
+    },
   };
   todoExtension(pi);
-  return { tool: tools.get("todo"), commands, shortcuts, events };
+  return { tool: tools.get("todo"), commands, shortcuts, events, emit: (name, value) => pi.events.emit(name, value) };
 }
 
 function context(branch = [], mode = "tui") {
@@ -96,6 +102,21 @@ test("a malformed final result retains the latest validated todo snapshot", asyn
   events.get("session_start")({}, ctx.value);
   const listed = await tool.execute("call", { action: "list" });
   assert.match(listed.content[0].text, /#1 Keep/);
+});
+
+test("todo widget follows delegated agent progress", async () => {
+  const { events, emit } = setup();
+  const ctx = context();
+  events.get("session_start")({}, ctx.value);
+  const snapshot = {
+    tasks: [{ id: 1, subject: "Parallel task", status: "in_progress", blockedBy: [], delegation: { runId: "run", taskId: "worker", role: "worker", phase: "running" } }],
+    nextId: 2,
+  };
+  emit(CONFIG_EVENTS.todoSnapshot, snapshot);
+  emit(CONFIG_EVENTS.subagentProgress, { runId: "run", tasks: [{ runId: "run", taskId: "worker", todoId: 1, role: "worker", status: "running", activity: "editing src/a.ts" }] });
+  const widget = ctx.widgets.at(-1);
+  const theme = { fg: (_color, text) => text, bold: (text) => text };
+  assert.match(widget.factory({ terminal: { rows: 30 } }, theme).render(80).join("\n"), /Worker: editing src\/a\.ts/);
 });
 
 test("todo publishes a bounded native Pi widget", async () => {
