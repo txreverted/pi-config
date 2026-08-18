@@ -6,9 +6,11 @@ import { join, sep } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import layoutExtension, {
   compactCwd,
+  createAnswerTimer,
   formatCompactFooter,
   formatElapsed,
   formatTokens,
+  getCostLabel,
   totalSessionCost,
 } from "../extensions/layout.ts";
 
@@ -19,12 +21,28 @@ const values = {
   elapsedSeconds: 90,
   statuses: [],
   cost: 0,
+  costLabel: "api",
   contextPercent: 0,
   contextWindow: 272_000,
   autoCompact: true,
   model: "gpt-5.6-sol",
   thinking: "xhigh",
 };
+
+test("answer timer runs only for the current answer and resets for the next prompt", () => {
+  let now = 1_000;
+  const timer = createAnswerTimer(() => now);
+
+  assert.equal(timer.elapsedSeconds(), 0);
+  timer.start();
+  now = 2_500;
+  assert.equal(timer.elapsedSeconds(), 1.5);
+  timer.stop();
+  now = 5_000;
+  assert.equal(timer.elapsedSeconds(), 1.5);
+  timer.start();
+  assert.equal(timer.elapsedSeconds(), 0);
+});
 
 test("compact footer formats elapsed time, tokens, and home-relative paths", () => {
   assert.equal(formatElapsed(0), "0s");
@@ -44,7 +62,7 @@ test("compact footer matches the wide layout and never exceeds narrow terminals"
   const wide = formatCompactFooter(values, 120);
   assert.equal(visibleWidth(wide), 120);
   assert.match(wide, /^pi v0\.84\.2 ~\/Documents\/pi-config\(main\) 1m30/);
-  assert.match(wide, /\$0\.000 0\.0%\/272k \(auto\) gpt-5\.6-sol \(xhigh\)$/);
+  assert.match(wide, /\$0\.000 \(api\) 0\.0%\/272k \(auto\) gpt-5\.6-sol \(xhigh\)$/);
   assert.match(formatCompactFooter({ ...values, contextPercent: null }, 120), /\?\/272k \(auto\)/);
 
   for (let width = 1; width <= 100; width++) {
@@ -64,6 +82,20 @@ test("compact footer prioritizes extension status and sanitizes it", () => {
   assert.doesNotMatch(line, /pi v|1m30|\$0\.000/);
 });
 
+test("cost label distinguishes subscription-backed auth from API access", () => {
+  const context = (provider, isSubscription, usingOAuth = true) => ({
+    model: { provider },
+    modelRegistry: {
+      getProvider: () => ({ auth: { oauth: { isSubscription } } }),
+      isUsingOAuth: () => usingOAuth,
+    },
+  });
+
+  assert.equal(getCostLabel(context("anthropic", true)), "sub");
+  assert.equal(getCostLabel(context("anthropic", true, false)), "api");
+  assert.equal(getCostLabel(context("kimi-coding", false, false)), "sub");
+});
+
 test("session cost includes assistant, tool, compaction, and branch-summary usage", () => {
   const usage = (total) => ({ cost: { total } });
   const entries = [
@@ -80,6 +112,8 @@ test("layout installs only in TUI mode and disposes footer resources", () => {
   const events = new Map();
   layoutExtension({ on(name, handler) { events.set(name, handler); } });
   const sessionStart = events.get("session_start");
+  assert.equal(typeof events.get("before_agent_start"), "function");
+  assert.equal(typeof events.get("agent_settled"), "function");
 
   let rpcHeader = false;
   sessionStart({}, {
@@ -99,7 +133,11 @@ test("layout installs only in TUI mode and disposes footer resources", () => {
       cwd: agentDir,
       isProjectTrusted: () => false,
       getContextUsage: () => ({ percent: 2.5, contextWindow: 100_000, tokens: 2_500 }),
-      model: { id: "model", contextWindow: 100_000, reasoning: true },
+      model: { id: "model", provider: "provider", contextWindow: 100_000, reasoning: true },
+      modelRegistry: {
+        getProvider: () => ({ auth: { oauth: { isSubscription: false } } }),
+        isUsingOAuth: () => false,
+      },
       thinkingLevel: "high",
       sessionManager: {
         getCwd: () => agentDir,
