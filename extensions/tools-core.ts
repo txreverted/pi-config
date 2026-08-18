@@ -99,6 +99,7 @@ export async function runBoundedProcess(
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES;
   let capturedBytes = 0;
   let stdoutBytes = 0;
+  let outputBytes = 0;
   let delimiterCount = 0;
   let endsWithDelimiter = false;
   let stderr: Buffer = Buffer.alloc(0);
@@ -132,9 +133,10 @@ export async function runBoundedProcess(
   child.stdout.on("data", (chunk: Buffer) => {
     if (stopReason === "output_limit") return;
 
-    const remaining = Math.max(0, maxOutputBytes - stdoutBytes);
+    const remaining = Math.max(0, maxOutputBytes - outputBytes);
     const portion = chunk.subarray(0, Math.min(chunk.length, remaining));
     stdoutBytes += portion.length;
+    outputBytes += portion.length;
     for (const byte of portion) {
       if (byte === 0x0a) delimiterCount++;
     }
@@ -154,8 +156,13 @@ export async function runBoundedProcess(
   });
 
   child.stderr.on("data", (chunk: Buffer) => {
-    stderrBytes += chunk.length;
-    stderr = appendTail(stderr, chunk, STDERR_MAX_BYTES);
+    if (stopReason === "output_limit") return;
+    const remaining = Math.max(0, maxOutputBytes - outputBytes);
+    const portion = chunk.subarray(0, Math.min(chunk.length, remaining));
+    outputBytes += portion.length;
+    stderrBytes += portion.length;
+    stderr = appendTail(stderr, portion, STDERR_MAX_BYTES);
+    if (portion.length < chunk.length) requestStop("output_limit");
   });
   child.once("error", (error) => {
     spawnError = error;

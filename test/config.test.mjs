@@ -191,6 +191,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
     /Goal mode has no automatic run ceiling/,
     /It can use every active tool and provider quota/,
     /Never send secrets or private code through `web_search`/,
+    /retains at most 10 truncated outputs or 50MB per session/,
     /built-in `grep` and `find`/,
     /PI_LIVE_WEB=1/,
   ]) assert.match(readme, pattern);
