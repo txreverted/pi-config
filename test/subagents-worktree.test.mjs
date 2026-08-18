@@ -20,6 +20,7 @@ async function repository() {
   await exec("git", ["init", "-q"], { cwd: root });
   await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
   await exec("git", ["config", "user.name", "Test"], { cwd: root });
+  await exec("git", ["config", "core.autocrlf", "false"], { cwd: root });
   await mkdir(join(root, "src"));
   await writeFile(join(root, ".gitignore"), ".pi/\nnode_modules/\n");
   await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n");
