@@ -24,6 +24,41 @@ test("oversized search responses cancel their bodies", async () => {
   }
 });
 
+test("Exa MCP parsing accepts multiline SSE data", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(`data: {"result":
+data: {"content":[{"type":"text","text":"Title: SSE result\\nURL: https://example.com/sse\\nText: Parsed"}]}}\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+  try {
+    assert.deepEqual((await searchExa("sse", 1)).results, [{
+      title: "SSE result",
+      url: "https://example.com/sse",
+      snippet: "Parsed",
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search cancellation does not start its fallback provider", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    controller.abort(new Error("cancelled by test"));
+    throw options.signal.reason;
+  };
+  try {
+    await assert.rejects(() => searchWeb("cancel", 1, controller.signal), /cancelled by test/);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Exa text results are parsed, deduplicated, and restricted to HTTP URLs", () => {
   const parsed = parseExaSearchText(`Title: First result
 URL: https://example.com/a
