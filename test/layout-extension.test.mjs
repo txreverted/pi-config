@@ -171,6 +171,9 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     let headerFactory;
     let footerFactory;
     let entryReads = 0;
+    const entries = [
+      { type: "message", message: { role: "assistant", usage: { cost: { total: 1 } } } },
+    ];
     const context = {
       mode: "tui",
       cwd: agentDir,
@@ -184,7 +187,7 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
       thinkingLevel: "high",
       sessionManager: {
         getCwd: () => agentDir,
-        getEntries: () => { entryReads++; return []; },
+        getEntries: () => { entryReads++; return entries; },
       },
       ui: {
         setHeader(factory) { headerFactory = factory; },
@@ -212,6 +215,18 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     assert.equal(visibleWidth(lines[0]), 80);
     assert.match(lines[0], /goal: active/);
     assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
+
+    entries.push({ type: "message", message: { role: "toolResult", usage: { cost: { total: 0.5 } } } });
+    events.get("turn_end")({}, context);
+    events.get("agent_settled")({}, context);
+    assert.equal(entryReads, 3);
+    assert.match(footer.render(200)[0], /\$1\.500 \(api\)/);
+
+    entries.length = 1;
+    entries[0] = { type: "compaction", usage: { cost: { total: 0.25 } } };
+    events.get("session_tree")({}, context);
+    assert.match(footer.render(200)[0], /\$0\.250 \(api\)/);
+
     footer.dispose();
     header.dispose();
     assert.equal(unsubscribed, true);

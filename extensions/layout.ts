@@ -159,16 +159,16 @@ export function getCostLabel(ctx: Pick<ExtensionContext, "model" | "modelRegistr
     : "api";
 }
 
+function sessionEntryCost(entry: SessionEntry): number {
+  const usage = entry.type === "message"
+    ? entry.message.role === "assistant" || entry.message.role === "toolResult" ? entry.message.usage : undefined
+    : entry.type === "compaction" || entry.type === "branch_summary" ? entry.usage : undefined;
+  const cost = usage?.cost.total;
+  return cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : 0;
+}
+
 export function totalSessionCost(entries: readonly SessionEntry[]): number {
-  let total = 0;
-  for (const entry of entries) {
-    const usage = entry.type === "message"
-      ? entry.message.role === "assistant" || entry.message.role === "toolResult" ? entry.message.usage : undefined
-      : entry.type === "compaction" || entry.type === "branch_summary" ? entry.usage : undefined;
-    const cost = usage?.cost.total;
-    if (cost !== undefined && Number.isFinite(cost) && cost >= 0) total += cost;
-  }
-  return total;
+  return entries.reduce((total, entry) => total + sessionEntryCost(entry), 0);
 }
 
 function joinFooterSides(left: string, right: string, width: number): string {
@@ -344,14 +344,26 @@ function installLayout(
 export default function layoutExtension(pi: ExtensionAPI): void {
   const answerTimer = createAnswerTimer();
   let sessionCost = 0;
+  let processedEntries = 0;
   let setFooterTicker: (running: boolean) => void = () => {};
-  const refreshSessionCost = (ctx: ExtensionContext) => {
-    if (ctx.mode === "tui") sessionCost = totalSessionCost(ctx.sessionManager.getEntries());
+  const refreshSessionCost = (ctx: ExtensionContext, reset = false) => {
+    if (ctx.mode !== "tui") return;
+    const entries = ctx.sessionManager.getEntries();
+    if (reset || entries.length < processedEntries) {
+      sessionCost = 0;
+      processedEntries = 0;
+    }
+    for (let index = processedEntries; index < entries.length; index++) {
+      sessionCost += sessionEntryCost(entries[index]!);
+    }
+    processedEntries = entries.length;
   };
 
   pi.on("session_start", (_event, ctx) => {
     answerTimer.reset();
-    refreshSessionCost(ctx);
+    sessionCost = 0;
+    processedEntries = 0;
+    refreshSessionCost(ctx, true);
     installLayout(
       ctx,
       answerTimer.elapsedSeconds,
