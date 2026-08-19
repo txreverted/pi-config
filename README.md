@@ -26,10 +26,10 @@ Private Pi package. Code and tests define behavior.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. `goal_complete` and `goal_wait` must be called without sibling tools.
 - Ponytail full mode always applies to coding work.
-- The TUI hides the startup header, keeps Pi's editor, and uses a responsive one-line footer.
+- The TUI hides the startup header and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
-- `web_search` needs no API key. It blocks likely credentials. Code-like queries require TUI or RPC approval.
+- `web_search` sends each approved query to Exa's keyless MCP service first. It may fall back to keyless DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
 - `jq` runs sequentially with bounded input, time, and output, plus a best-effort 256MB working-set monitor. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
 ## Safety
