@@ -41,7 +41,6 @@ function treeLines(details: ParallelAgentsDetails, theme: Theme, expanded: boole
     : now;
   const elapsed = started === undefined ? 0 : finished - started;
   const header = [
-    theme.bold("Agents"),
     `${completed}/${details.progress.length} completed`,
     `${tokens(details.usage.totalTokens)} tokens`,
     duration(elapsed),
@@ -55,8 +54,8 @@ function treeLines(details: ParallelAgentsDetails, theme: Theme, expanded: boole
     const stats = task.status === "queued"
       ? "queued"
       : `${task.toolCalls} tool use${task.toolCalls === 1 ? "" : "s"} │ ${tokens(task.usage.totalTokens)} tokens │ ${duration(elapsedMs)}`;
-    const label = `${connector} ${role(task.role)}  ${safeDisplayLine(task.title, 80)} │ ${stats}`;
-    lines.push(theme.fg(rowColor(task), label));
+    const label = `${role(task.role)}  ${safeDisplayLine(task.title, 80)} │ ${stats}`;
+    lines.push(theme.fg("muted", `${connector} `) + theme.fg(rowColor(task), label));
     const activity = safeDisplayLine(task.activity ?? task.status, 160);
     if (activity) lines.push(theme.fg("dim", `${continuation} ⎿ ${activity}`));
     if (!expanded) return;
