@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { removeBoundedOutput, runBoundedProcess } from "../extensions/tools-core.ts";
 
 test("bounded process keeps small output in memory and removes its temporary file", async () => {
@@ -85,20 +87,27 @@ test("bounded process reports executable startup failures", async () => {
 });
 
 test("bounded process rejects invalid resource bounds before spawning", async () => {
-  for (const options of [
-    { maxOutputBytes: 0 },
-    { maxMemoryBytes: 0 },
-    { memoryPollMs: 0 },
-    { timeoutMs: 0 },
-  ]) {
-    await assert.rejects(
-      () => runBoundedProcess(process.execPath, ["-e", "process.stdout.write('no')"], {
-        cwd: process.cwd(),
-        tempPrefix: "pi-tools-test-invalid-bound",
-        ...options,
-      }),
-      /positive integer/,
-    );
+  const tempPrefix = `pi-tools-test-invalid-bound-${process.pid}`;
+  try {
+    for (const options of [
+      { maxOutputBytes: 0 },
+      { maxMemoryBytes: 0 },
+      { memoryPollMs: 0 },
+      { timeoutMs: 0 },
+    ]) {
+      await assert.rejects(
+        () => runBoundedProcess("__pi_config_invalid_bound_must_not_spawn__", [], {
+          cwd: process.cwd(),
+          tempPrefix,
+          ...options,
+        }),
+        /positive integer/,
+      );
+    }
+    assert.deepEqual((await readdir(tmpdir())).filter((name) => name.startsWith(`${tempPrefix}-`)), []);
+  } finally {
+    const leaked = (await readdir(tmpdir())).filter((name) => name.startsWith(`${tempPrefix}-`));
+    await Promise.all(leaked.map((name) => rm(join(tmpdir(), name), { recursive: true, force: true })));
   }
 });
 
