@@ -48,3 +48,14 @@ test("expanded agent rendering shows measured patch state", () => {
   assert.match(text, /files: src\/a\.ts/);
   assert.match(text, /patch: a{12}/);
 });
+
+test("agent rendering falls back when stale nested details are malformed", () => {
+  const stale = {
+    ...details(),
+    progress: [{ id: "old", status: "running" }],
+  };
+  assert.equal(
+    renderAgents(stale, theme, true, "Stored agent result is unavailable.").render(80).join("\n").trimEnd(),
+    "Stored agent result is unavailable.",
+  );
+});
