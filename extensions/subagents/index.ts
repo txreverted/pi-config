@@ -161,7 +161,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "parallel_agents",
     label: "Agents",
-    description: "Run 2-6 substantial independent explorer, worker, or reviewer tasks as one bounded foreground parallel wave. Workers use isolated Git worktrees, require non-overlapping write scopes, and return patches for parent inspection. Use only when parallelism reduces wall time.",
+    description: "Run 2-6 substantial independent explorer, worker, or reviewer tasks as one foreground parallel wave. Started tasks have no token or runtime ceiling and run until completion, cancellation, failure, or an output safety limit. Workers use isolated Git worktrees and return patches for parent inspection.",
     promptSnippet: "Run independent explorer, worker, or reviewer tasks concurrently in isolated contexts",
     promptGuidelines: [
       "Use parallel_agents only when at least two substantial tasks are ready and independent; keep singleton or dependent work in the parent.",
@@ -263,8 +263,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         try {
           if (abortSignal.aborted) {
             result = failed("Subagent was cancelled before launch");
-          } else if (aggregateUsage(progress.map((entry) => entry.usage)).totalTokens >= SUBAGENT_LIMITS.runTokens) {
-            result = failed(`Agent wave reached its ${SUBAGENT_LIMITS.runTokens}-token limit before this task launched`);
           } else {
             result = await runChildAgent({
               task,
