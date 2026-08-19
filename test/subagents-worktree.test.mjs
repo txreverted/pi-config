@@ -10,7 +10,9 @@ import {
   createWorkerWorkspace,
   discardWorkerWorkspace,
   inspectWorkerPatch,
+  MAX_CHANGED_FILES,
   recoverWorkerWorkspace,
+  validateWorkerChangedFiles,
 } from "../extensions/subagents/worktree.ts";
 
 const exec = promisify(execFile);
@@ -68,6 +70,14 @@ test("worker scope violations never touch the parent checkout", async () => {
     if (workspace) await discardWorkerWorkspace(workspace).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("worker changed-file metadata rejects more than the total limit", () => {
+  const tracked = Array.from({ length: MAX_CHANGED_FILES }, (_, index) => `src/${index}.ts`);
+  assert.throws(
+    () => validateWorkerChangedFiles(tracked, ["extra.ts"]),
+    /more than 1000 total files; reduce the worker's changes before inspection/,
+  );
 });
 
 test("workers reject dirty parent checkouts", async () => {

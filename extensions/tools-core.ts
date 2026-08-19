@@ -121,6 +121,7 @@ export async function runBoundedProcess(
   const maxOutputBytes = positiveInteger(options.maxOutputBytes ?? DEFAULT_PROCESS_MAX_OUTPUT_BYTES, "maxOutputBytes");
   const maxMemoryBytes = positiveInteger(options.maxMemoryBytes ?? DEFAULT_PROCESS_MAX_MEMORY_BYTES, "maxMemoryBytes");
   const memoryPollMs = positiveInteger(options.memoryPollMs ?? DEFAULT_MEMORY_POLL_MS, "memoryPollMs");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS, "timeoutMs");
   const memoryUsage = options.memoryUsage ?? processMemoryBytes;
   const tempDir = await mkdtemp(join(tmpdir(), `${options.tempPrefix ?? `pi-${basename(command)}`}-`));
   const fullOutputPath = join(tempDir, "output.txt");
@@ -204,7 +205,6 @@ export async function runBoundedProcess(
   const onAbort = () => requestStop("aborted");
   options.signal?.addEventListener("abort", onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
-  const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS, "timeoutMs");
   const timeout = setTimeout(() => requestStop("timed_out"), timeoutMs);
   timeout.unref?.();
   const checkMemory = async () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runChildAgent } from "../extensions/subagents/runner.ts";
@@ -102,6 +102,34 @@ emit({type:"message_end",message:{role:"toolResult",toolName:"agent_result",deta
     assert.match(result.error, /Invalid child agentResult.*evidence/);
     assert.doesNotThrow(() => formatAgentResults([result]));
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("child runner removes its prompt directory when spawn throws synchronously", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-config-subagent-spawn-error-"));
+  const marker = `prompt-cleanup-${process.pid}-${Date.now()}`;
+  const leaked = [];
+  try {
+    await assert.rejects(runChildAgent({
+      task,
+      workspace: root,
+      model: "test/model",
+      thinking: "low",
+      prompt: "Inspect",
+      systemPrompt: marker,
+      trusted: false,
+      invocation: { command: "\0", argsPrefix: [] },
+    }), { code: "ERR_INVALID_ARG_VALUE" });
+
+    for (const name of (await readdir(tmpdir())).filter((entry) => entry.startsWith("pi-config-agent-"))) {
+      const directory = join(tmpdir(), name);
+      const content = await readFile(join(directory, "system.md"), "utf8").catch(() => undefined);
+      if (content === marker) leaked.push(directory);
+    }
+    assert.deepEqual(leaked, []);
+  } finally {
+    await Promise.all(leaked.map((directory) => rm(directory, { recursive: true, force: true })));
     await rm(root, { recursive: true, force: true });
   }
 });

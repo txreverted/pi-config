@@ -115,36 +115,42 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
   }
 
   const runDir = await mkdtemp(join(tmpdir(), "pi-config-agent-"));
-  await chmod(runDir, 0o700);
-  const promptPath = join(runDir, "system.md");
-  await writeFile(promptPath, options.systemPrompt, { mode: 0o600 });
-  const childExtension = fileURLToPath(new URL("./child.ts", import.meta.url));
-  const role = ROLE_DEFINITIONS[options.task.role];
-  const args = [
-    "--mode", "json", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
-    options.trusted ? "--approve" : "--no-approve",
-    "--extension", childExtension,
-    "--tools", role.tools.join(","),
-    "--model", options.model,
-    "--thinking", options.thinking,
-    "--append-system-prompt", promptPath,
-    options.prompt,
-  ];
-  const invocation = options.invocation ?? piInvocation();
-  const child = spawn(invocation.command, [...invocation.argsPrefix, ...args], {
-    cwd: options.workspace,
-    shell: false,
-    detached: process.platform !== "win32",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      PI_CONFIG_SUBAGENT_CHILD: "1",
-      PI_CONFIG_AGENT_ROLE: options.task.role,
-      PI_CONFIG_AGENT_WORKSPACE: options.workspace,
-      PI_CONFIG_AGENT_CWD: options.workspace,
-      PI_CONFIG_AGENT_WRITABLE: role.mutatesWorkspace ? "1" : "0",
-    },
-  });
+  let child: ChildProcess | undefined;
+  try {
+    await chmod(runDir, 0o700);
+    const promptPath = join(runDir, "system.md");
+    await writeFile(promptPath, options.systemPrompt, { mode: 0o600 });
+    const childExtension = fileURLToPath(new URL("./child.ts", import.meta.url));
+    const role = ROLE_DEFINITIONS[options.task.role];
+    const args = [
+      "--mode", "json", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
+      options.trusted ? "--approve" : "--no-approve",
+      "--extension", childExtension,
+      "--tools", role.tools.join(","),
+      "--model", options.model,
+      "--thinking", options.thinking,
+      "--append-system-prompt", promptPath,
+      options.prompt,
+    ];
+    const invocation = options.invocation ?? piInvocation();
+    child = spawn(invocation.command, [...invocation.argsPrefix, ...args], {
+      cwd: options.workspace,
+      shell: false,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PI_CONFIG_SUBAGENT_CHILD: "1",
+        PI_CONFIG_AGENT_ROLE: options.task.role,
+        PI_CONFIG_AGENT_WORKSPACE: options.workspace,
+        PI_CONFIG_AGENT_CWD: options.workspace,
+        PI_CONFIG_AGENT_WRITABLE: role.mutatesWorkspace ? "1" : "0",
+      },
+    });
+  } finally {
+    if (!child) await rm(runDir, { recursive: true, force: true });
+  }
+  if (!child) throw new Error("Failed to start child Pi");
 
   let buffer = "";
   let stderr = "";
