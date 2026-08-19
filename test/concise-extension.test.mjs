@@ -18,52 +18,22 @@ test("Caveman policy is always appended without replacing the base prompt", () =
   assert.equal(result.systemPrompt.endsWith(CONCISE_RESPONSE_POLICY), true);
 });
 
-test("Caveman policy composes before Ponytail and remains when Ponytail is off", async () => {
+test("Caveman policy composes before permanent full Ponytail", () => {
   const handlers = new Map();
-  const commands = new Map();
   const pi = {
     on(event, handler) {
       const list = handlers.get(event) ?? [];
       list.push(handler);
       handlers.set(event, list);
     },
-    registerCommand(name, options) { commands.set(name, options); },
-    appendEntry() {},
-    sendUserMessage() {},
-    events: { emit() {} },
   };
-  const compose = async () => {
-    let systemPrompt = "BASE";
-    for (const handler of handlers.get("before_agent_start") ?? []) {
-      const result = await handler({ systemPrompt }, context);
-      if (result?.systemPrompt) systemPrompt = result.systemPrompt;
-    }
-    return systemPrompt;
-  };
-  const context = {
-    ui: {
-      notify() {},
-      setStatus() {},
-      theme: { fg: (_color, value) => value },
-    },
-  };
+  conciseExtension(pi);
+  ponytailExtension(pi);
 
-  const previousDefault = process.env.PONYTAIL_DEFAULT_MODE;
-  process.env.PONYTAIL_DEFAULT_MODE = "full";
-  try {
-    conciseExtension(pi);
-    ponytailExtension(pi);
-
-    const active = await compose();
-    assert.ok(active.indexOf(CONCISE_RESPONSE_POLICY) > active.indexOf("BASE"));
-    assert.ok(active.indexOf("PONYTAIL MODE ACTIVE") > active.indexOf(CONCISE_RESPONSE_POLICY));
-
-    await commands.get("ponytail").handler("off", context);
-    const disabled = await compose();
-    assert.ok(disabled.includes(CONCISE_RESPONSE_POLICY));
-    assert.doesNotMatch(disabled, /PONYTAIL MODE ACTIVE/);
-  } finally {
-    if (previousDefault === undefined) delete process.env.PONYTAIL_DEFAULT_MODE;
-    else process.env.PONYTAIL_DEFAULT_MODE = previousDefault;
+  let systemPrompt = "BASE";
+  for (const handler of handlers.get("before_agent_start") ?? []) {
+    systemPrompt = handler({ systemPrompt }).systemPrompt;
   }
+  assert.ok(systemPrompt.indexOf(CONCISE_RESPONSE_POLICY) > systemPrompt.indexOf("BASE"));
+  assert.ok(systemPrompt.indexOf("PONYTAIL MODE ACTIVE - level: full") > systemPrompt.indexOf(CONCISE_RESPONSE_POLICY));
 });

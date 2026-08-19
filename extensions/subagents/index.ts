@@ -12,8 +12,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CONCISE_RESPONSE_POLICY } from "../concise.ts";
 import { CONFIG_EVENTS, restoreCoordinatedTodoSnapshot, type SubagentProgressEvent } from "../coordination-core.ts";
-import { buildPonytailInstructions, type PonytailSessionMode } from "../ponytail-core.ts";
-import { loadPonytailSkill } from "../ponytail.ts";
+import { PONYTAIL_INSTRUCTIONS } from "../ponytail.ts";
 import {
   claimTodoDelegations,
   copyTodoSnapshot,
@@ -152,16 +151,11 @@ export function formatPatchPage(patch: string, requestedOffset: number, requeste
 export default function subagentsExtension(pi: ExtensionAPI): void {
   if (process.env.PI_CONFIG_SUBAGENT_CHILD === "1") return;
   let todoSnapshot = emptyTodoSnapshot();
-  let ponytailMode: PonytailSessionMode = "off";
   const retained = new Map<string, WorkerWorkspace>();
   const shutdown = new AbortController();
-  const ponytailSkill = loadPonytailSkill().body;
 
   pi.events.on(CONFIG_EVENTS.todoSnapshot, (value) => {
     try { todoSnapshot = validateTodoSnapshot(value); } catch {}
-  });
-  pi.events.on(CONFIG_EVENTS.ponytailMode, (value) => {
-    if (value === "off" || value === "lite" || value === "full" || value === "ultra") ponytailMode = value;
   });
 
   pi.registerTool({
@@ -281,13 +275,12 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
                 overallGoal: wave.title,
                 task,
                 todo: task.todoId === undefined ? undefined : todoSnapshot.tasks.find((todo) => todo.id === task.todoId),
-                ponytailMode,
               }),
               systemPrompt: [
                 ROLE_DEFINITIONS[task.role].prompt,
                 CONCISE_RESPONSE_POLICY,
-                ponytailMode === "off" ? "" : buildPonytailInstructions(ponytailSkill, ponytailMode),
-              ].filter(Boolean).join("\n\n"),
+                PONYTAIL_INSTRUCTIONS,
+              ].join("\n\n"),
               trusted: ctx.isProjectTrusted(),
               signal: abortSignal,
               onUpdate(update) {
