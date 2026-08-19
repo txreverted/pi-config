@@ -24,6 +24,21 @@ test("oversized search responses cancel their bodies", async () => {
   }
 });
 
+test("chunked oversized search responses are cancelled", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(new Uint8Array(1024 * 1024)); },
+    cancel() { cancelled = true; },
+  }), { status: 200 });
+  try {
+    await assert.rejects(() => searchExa("bounded"), /exceeds 2MB limit/);
+    assert.equal(cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Exa MCP parsing accepts multiline SSE data", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(`data: {"result":
