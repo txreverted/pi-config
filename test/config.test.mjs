@@ -14,7 +14,6 @@ const readme = normalizeLines(await readFile(new URL("../README.md", import.meta
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
-const skillPath = "skills/ponytail/SKILL.md";
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
@@ -33,20 +32,16 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.pi, {
     extensions,
     prompts: ["./prompts"],
-    skills: ["./skills/ponytail/SKILL.md"],
   });
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
+  assert.deepEqual(packageJson.files, ["extensions", "prompts", "README.md"]);
   assert.deepEqual(packageJson.dependencies, { linkedom: "0.18.13" });
   assert.deepEqual(packageJson.peerDependencies, {
-    "@earendil-works/pi-ai": ">=0.84.2",
-    "@earendil-works/pi-coding-agent": ">=0.84.2",
-    "@earendil-works/pi-tui": ">=0.84.2",
-    typebox: ">=1.3.14",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    typebox: "*",
   });
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
-  assert.deepEqual(await readdir(new URL("../skills/", import.meta.url)), ["ponytail"]);
-  const ponytailSkill = await readFile(new URL(`../${skillPath}`, import.meta.url), "utf8");
-  assert.match(ponytailSkill, /disable-model-invocation: true/);
 });
 
 test("workflow prompts load and expand through Pi's built-in templates", async () => {
@@ -129,7 +124,6 @@ test("package contents include runtime resources and exclude repository-only sta
       "extensions/subagents/index.ts",
       "extensions/subagents/child.ts",
       ...promptPaths,
-      skillPath,
     ]) assert.ok(names.has(path), path);
     assert.equal([...names].some((path) => /^(?:test|themes|\.github)\//.test(path)), false);
     for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
@@ -199,15 +193,14 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
-  for (const path of [...promptPaths, skillPath]) await access(new URL(`../${path}`, import.meta.url));
+  for (const path of promptPaths) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
-  assert.match(readme, /\]\(skills\/ponytail\/SKILL\.md\)/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
   assert.match(readme, /parallel_agents/);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
   for (const pattern of [
-    /Goal mode has no automatic run ceiling/,
-    /It can use every active tool and provider quota/,
+    /Goal mode and started subagents have no token or runtime ceiling/,
+    /They can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
     /retains at most 10 truncated outputs or 50MB per session/,
     /built-in `grep` and `find`/,

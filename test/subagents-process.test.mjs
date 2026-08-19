@@ -56,6 +56,31 @@ emit({type:"message_end",message:{role:"toolResult",toolName:"agent_result",deta
   }
 });
 
+test("child runner has no token ceiling", async () => {
+  const { root, script } = await fixture(`
+const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
+emit({type:"agent_start"});
+emit({type:"message_end",message:{role:"assistant",stopReason:"stop",usage:{totalTokens:1000000}}});
+emit({type:"message_end",message:{role:"toolResult",toolName:"agent_result",details:{agentResult:{status:"succeeded",summary:"Finished",evidence:[]}}}});
+`);
+  try {
+    const result = await runChildAgent({
+      task,
+      workspace: root,
+      model: "test/model",
+      thinking: "low",
+      prompt: "Inspect",
+      systemPrompt: "Role",
+      trusted: false,
+      invocation: { command: process.execPath, argsPrefix: [script] },
+    });
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.usage.totalTokens, 1_000_000);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("child runner rejects malformed structured completion", async () => {
   const { root, script } = await fixture(`
 const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -140,7 +165,6 @@ test("child runner enforces the startup deadline", async () => {
       systemPrompt: "Role",
       trusted: false,
       startupMs: 30,
-      runtimeMs: 5_000,
       invocation: { command: process.execPath, argsPrefix: [script] },
     });
     assert.equal(result.status, "failed");

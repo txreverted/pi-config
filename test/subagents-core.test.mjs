@@ -83,7 +83,7 @@ test("context packets are bounded and contain task ownership", () => {
     contextFiles: ["src/a.ts"],
     writeScope: ["src/**"],
   };
-  const packet = buildContextPacket({ overallGoal: "Ship it", task, ponytailMode: "full" });
+  const packet = buildContextPacket({ overallGoal: "Ship it", task });
   assert.ok(Buffer.byteLength(packet) <= SUBAGENT_LIMITS.contextPacketBytes);
   assert.match(packet, /WRITE SCOPE/);
   assert.match(packet, /agent_result/);

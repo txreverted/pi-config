@@ -6,7 +6,6 @@ import {
 } from "./todo-core.ts";
 
 export const CONFIG_EVENTS = {
-  ponytailMode: "pi-config:ponytail-mode",
   subagentProgress: "pi-config:subagents-progress",
   todoSnapshot: "pi-config:todo-snapshot",
 } as const;
