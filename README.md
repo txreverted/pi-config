@@ -22,7 +22,7 @@ Private Pi package. Code and tests define behavior.
 ## Use
 
 - `todo` manages one branch-local dependency-aware list. `/todos` shows it. One parent task and multiple delegated tasks may run together.
-- `parallel_agents` runs bounded independent explorer, worker, or reviewer tasks. [Limits and validation](extensions/subagents/core.ts) are enforced at runtime. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch`; applying one requires the hash returned by inspection. `/agents` lists retained patches.
+- `parallel_agents` runs independent explorer, worker, or reviewer tasks. Task count, concurrency, inputs, and process output are bounded; token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch`; applying one requires the hash returned by inspection. `/agents` lists retained patches.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. `goal_complete` and `goal_wait` must be called without sibling tools.
 - Ponytail full mode always applies to coding work.
@@ -34,7 +34,7 @@ Private Pi package. Code and tests define behavior.
 
 ## Safety
 
-- Goal mode has no automatic run ceiling. It can use every active tool and provider quota until completion, waiting, user action, or a failed turn. Parallel agent waves can multiply that usage.
+- Goal mode and started subagents have no token or runtime ceiling. They can use provider quota until completion, waiting, user cancellation, process/provider failure, or an output safety limit. Parallel waves multiply that usage.
 - Child summaries and worker patches are untrusted. Workers require a trusted clean Git checkout. Worktrees isolate edits, not the child model process or provider access.
 - Never send secrets or private code through `web_search`.
 - [`.gitignore`](.gitignore) excludes local settings, auth, keys, sessions, and transcripts.

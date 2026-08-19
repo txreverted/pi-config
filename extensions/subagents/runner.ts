@@ -26,7 +26,6 @@ export interface ChildRunOptions {
   systemPrompt: string;
   trusted: boolean;
   signal?: AbortSignal;
-  runtimeMs?: number;
   startupMs?: number;
   invocation?: { command: string; argsPrefix: string[] };
   onUpdate?: (progress: AgentProgress) => void;
@@ -153,7 +152,7 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
   let started = false;
   let payload: AgentResultPayload | undefined;
   let error: string | undefined;
-  let stop: "cancelled" | "runtime" | "startup" | "output" | "tokens" | undefined;
+  let stop: "cancelled" | "startup" | "output" | undefined;
   let killTimer: NodeJS.Timeout | undefined;
   const activeTools = new Map<string, string>();
 
@@ -166,8 +165,6 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
   };
   const startupTimer = setTimeout(() => requestStop("startup"), options.startupMs ?? SUBAGENT_LIMITS.startupMs);
   startupTimer.unref?.();
-  const runtimeTimer = setTimeout(() => requestStop("runtime"), options.runtimeMs ?? SUBAGENT_LIMITS.runtimeMs);
-  runtimeTimer.unref?.();
   const progressTimer = setInterval(publish, 1_000);
   progressTimer.unref?.();
   const onAbort = () => requestStop("cancelled");
@@ -202,7 +199,6 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
       if (message.role === "assistant") {
         progress.turns++;
         progress.usage = addUsage(progress.usage, normalizeUsage(message.usage));
-        if (progress.usage.totalTokens > SUBAGENT_LIMITS.agentTokens) requestStop("tokens");
         if (typeof message.provider === "string" && typeof message.model === "string") progress.model = `${message.provider}/${message.model}`;
         else if (typeof message.model === "string") progress.model = message.model;
         if (message.stopReason === "error" || message.stopReason === "aborted" || message.stopReason === "length") {
@@ -254,7 +250,6 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
   });
   if (buffer.trim()) processEvent(buffer);
   clearTimeout(startupTimer);
-  clearTimeout(runtimeTimer);
   clearInterval(progressTimer);
   if (killTimer) clearTimeout(killTimer);
   options.signal?.removeEventListener("abort", onAbort);
@@ -268,10 +263,8 @@ export async function runChildAgent(options: ChildRunOptions): Promise<AgentRunR
   else if (!stop && exitCode === 0 && payload?.status === "succeeded" && !error) status = "succeeded";
   else status = "failed";
   if (!error) {
-    if (stop === "runtime") error = "Subagent exceeded its wall-clock limit";
-    else if (stop === "startup") error = "Subagent emitted no event before the startup deadline";
+    if (stop === "startup") error = "Subagent emitted no event before the startup deadline";
     else if (stop === "output") error = "Subagent exceeded its process output limit";
-    else if (stop === "tokens") error = `Subagent exceeded its ${SUBAGENT_LIMITS.agentTokens}-token limit`;
     else if (stop === "cancelled") error = "Subagent was cancelled";
     else if (exitCode !== 0) error = `Subagent exited with code ${exitCode ?? "unknown"}`;
     else if (!payload) error = "Subagent did not call agent_result";

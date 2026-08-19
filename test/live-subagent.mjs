@@ -27,7 +27,6 @@ const result = await runChildAgent({
   prompt: "Do not inspect files. Call agent_result alone with status succeeded, summary LIVE_SUBAGENT_READY, and empty evidence.",
   systemPrompt: ROLE_DEFINITIONS.explorer.prompt,
   trusted: false,
-  runtimeMs: 60_000,
 });
 assert.equal(result.status, "succeeded", result.error ?? result.stderr);
 assert.match(result.result?.summary ?? "", /LIVE_SUBAGENT_READY/);

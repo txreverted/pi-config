@@ -199,8 +199,8 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(readme, /parallel_agents/);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
   for (const pattern of [
-    /Goal mode has no automatic run ceiling/,
-    /It can use every active tool and provider quota/,
+    /Goal mode and started subagents have no token or runtime ceiling/,
+    /They can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
     /retains at most 10 truncated outputs or 50MB per session/,
     /built-in `grep` and `find`/,

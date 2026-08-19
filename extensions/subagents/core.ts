@@ -17,9 +17,6 @@ export const SUBAGENT_LIMITS = {
   contextPacketBytes: 16_000,
   stderrBytes: 16_000,
   processOutputBytes: 10 * 1024 * 1024,
-  agentTokens: 80_000,
-  runTokens: 200_000,
-  runtimeMs: 15 * 60_000,
   startupMs: 20_000,
 } as const;
 
