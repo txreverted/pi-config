@@ -16,7 +16,6 @@ import layoutExtension, {
 } from "../extensions/layout.ts";
 
 const values = {
-  version: "0.84.2",
   cwd: "~/Documents/pi-config",
   branch: "main",
   elapsedSeconds: 90,
@@ -65,7 +64,8 @@ test("compact footer formats elapsed time, tokens, and home-relative paths", () 
 test("compact footer matches the wide layout and never exceeds narrow terminals", () => {
   const wide = formatCompactFooter(values, 120);
   assert.equal(visibleWidth(wide), 120);
-  assert.match(wide, /^pi v0\.84\.2 ~\/Documents\/pi-config\(main\) 1m30/);
+  assert.match(wide, /^~\/Documents\/pi-config\(main\) 1m30/);
+  assert.doesNotMatch(wide, /pi v/);
   assert.match(wide, /\$0\.000 \(api\) 0\.0%\/272k \(auto\) gpt-5\.6-sol \(xhigh\)$/);
   assert.match(formatCompactFooter({ ...values, contextPercent: null }, 120), /\?\/272k \(auto\)/);
 
