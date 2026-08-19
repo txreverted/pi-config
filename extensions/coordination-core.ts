@@ -1,4 +1,3 @@
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   emptyTodoSnapshot,
   validateTodoSnapshot,
@@ -26,14 +25,21 @@ export interface SubagentProgressEvent {
   tasks: SubagentActivity[];
 }
 
-function resultDetails(entry: SessionEntry): { toolName: string; details: Record<string, unknown> } | undefined {
-  if (entry.type !== "message" || entry.message.role !== "toolResult") return undefined;
-  const details = entry.message.details;
+const SUBAGENT_ROLES = new Set(["explorer", "worker", "reviewer"]);
+const SUBAGENT_STATUSES = new Set(["queued", "starting", "running", "succeeded", "failed", "blocked", "cancelled"]);
+
+function resultDetails(entry: unknown): { toolName: string; details: Record<string, unknown> } | undefined {
+  if (!entry || typeof entry !== "object") return undefined;
+  const candidate = entry as { type?: unknown; message?: unknown };
+  if (candidate.type !== "message" || !candidate.message || typeof candidate.message !== "object") return undefined;
+  const message = candidate.message as Record<string, unknown>;
+  if (message.role !== "toolResult" || typeof message.toolName !== "string") return undefined;
+  const details = message.details;
   if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
-  return { toolName: entry.message.toolName, details: details as Record<string, unknown> };
+  return { toolName: message.toolName, details: details as Record<string, unknown> };
 }
 
-export function restoreCoordinatedTodoSnapshot(entries: readonly SessionEntry[]): TodoSnapshot {
+export function restoreCoordinatedTodoSnapshot(entries: readonly unknown[]): TodoSnapshot {
   let snapshot = emptyTodoSnapshot();
   for (const entry of entries) {
     const result = resultDetails(entry);
@@ -58,7 +64,7 @@ export interface UnresolvedAgentPatch {
   taskId: string;
 }
 
-export function unresolvedAgentPatches(entries: readonly SessionEntry[]): UnresolvedAgentPatch[] {
+export function unresolvedAgentPatches(entries: readonly unknown[]): UnresolvedAgentPatch[] {
   const unresolved = new Map<string, UnresolvedAgentPatch>();
   for (const entry of entries) {
     const result = resultDetails(entry);
@@ -79,4 +85,30 @@ export function unresolvedAgentPatches(entries: readonly SessionEntry[]): Unreso
     }
   }
   return [...unresolved.values()];
+}
+
+export function validateSubagentProgressEvent(value: unknown): SubagentProgressEvent | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  if (typeof input.runId !== "string" || !Array.isArray(input.tasks)) return undefined;
+  const tasks: SubagentActivity[] = [];
+  for (const value of input.tasks) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const task = value as Record<string, unknown>;
+    if (
+      typeof task.runId !== "string" || typeof task.taskId !== "string" ||
+      !SUBAGENT_ROLES.has(task.role as string) || !SUBAGENT_STATUSES.has(task.status as string) ||
+      (task.todoId !== undefined && (!Number.isSafeInteger(task.todoId) || (task.todoId as number) < 1)) ||
+      (task.activity !== undefined && typeof task.activity !== "string")
+    ) return undefined;
+    tasks.push({
+      runId: task.runId,
+      taskId: task.taskId,
+      ...(task.todoId === undefined ? {} : { todoId: task.todoId as number }),
+      role: task.role as SubagentActivity["role"],
+      status: task.status as SubagentActivity["status"],
+      ...(task.activity === undefined ? {} : { activity: task.activity }),
+    });
+  }
+  return { runId: input.runId, tasks };
 }

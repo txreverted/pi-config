@@ -11,6 +11,7 @@ import {
 import {
   restoreCoordinatedTodoSnapshot,
   unresolvedAgentPatches,
+  validateSubagentProgressEvent,
 } from "../extensions/coordination-core.ts";
 import { applyTodoAction, emptyTodoSnapshot } from "../extensions/todo-core.ts";
 
@@ -121,4 +122,24 @@ test("coordination restores todo snapshots and tracks unresolved patches", () =>
     runId: "run", taskId: "worker", patchState: "applied", todoSnapshot,
   } } });
   assert.deepEqual(unresolvedAgentPatches(entries), []);
+});
+
+test("coordination ignores malformed session entries and progress events", () => {
+  const snapshot = addTodo(emptyTodoSnapshot(), "Keep");
+  const entries = [
+    true,
+    { type: "message" },
+    { type: "message", message: null },
+    { type: "message", message: { role: "toolResult", toolName: "todo", details: { snapshot } } },
+  ];
+  assert.equal(restoreCoordinatedTodoSnapshot(entries).tasks[0].subject, "Keep");
+  assert.deepEqual(unresolvedAgentPatches(entries), []);
+  assert.equal(validateSubagentProgressEvent(null), undefined);
+  assert.equal(validateSubagentProgressEvent({ runId: "run", tasks: [{}] }), undefined);
+  assert.deepEqual(validateSubagentProgressEvent({
+    runId: "run",
+    tasks: [{ runId: "run", taskId: "task", todoId: 1, role: "worker", status: "running", activity: "editing" }],
+  })?.tasks[0], {
+    runId: "run", taskId: "task", todoId: 1, role: "worker", status: "running", activity: "editing",
+  });
 });

@@ -115,6 +115,16 @@ test("bounded process terminates when the working-set monitor crosses its limit"
   );
 });
 
+test("bounded process ignores best-effort working-set sampler failures", async () => {
+  const result = await runBoundedProcess(process.execPath, ["-e", "process.stdout.write('ok')"], {
+    cwd: process.cwd(),
+    memoryPollMs: 1,
+    memoryUsage: async () => { throw new Error("sampler failed"); },
+    tempPrefix: "pi-tools-test-memory-sampler-failure",
+  });
+  assert.equal(result.stdout, "ok");
+});
+
 test("bounded process enforces timeouts and cancellation", async () => {
   const immediateController = new AbortController();
   const immediate = runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {

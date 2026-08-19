@@ -213,6 +213,8 @@ export async function runBoundedProcess(
     try {
       const used = await memoryUsage(child.pid);
       if (!childClosed && used !== undefined && used > maxMemoryBytes) requestStop("memory_limit");
+    } catch {
+      // Working-set monitoring is best-effort and must not crash the parent process.
     } finally {
       checkingMemory = false;
     }

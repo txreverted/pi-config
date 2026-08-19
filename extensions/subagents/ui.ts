@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { safeDisplayLine } from "../text-safety.ts";
+import { normalizeDisplayText, safeDisplayLine } from "../text-safety.ts";
 import type { AgentProgress, AgentRunResult, ParallelAgentsDetails } from "./core.ts";
 
 function tokens(value: number): string {
@@ -70,11 +70,16 @@ function treeLines(details: ParallelAgentsDetails, theme: Theme, expanded: boole
   return lines;
 }
 
-export function renderAgents(details: ParallelAgentsDetails, theme: Theme, expanded: boolean): Component {
+export function renderAgents(details: ParallelAgentsDetails, theme: Theme, expanded: boolean, fallback = "Agent output is unavailable."): Component {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return treeLines(details, theme, expanded).map((line) => truncateToWidth(line, Math.max(1, width), "..."));
+      const safeWidth = Math.max(1, width);
+      try {
+        return treeLines(details, theme, expanded).map((line) => truncateToWidth(line, safeWidth, "..."));
+      } catch {
+        return normalizeDisplayText(fallback).split("\n").map((line) => truncateToWidth(line, safeWidth, "..."));
+      }
     },
   };
 }
