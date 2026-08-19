@@ -17,9 +17,6 @@ export const SUBAGENT_LIMITS = {
   contextPacketBytes: 16_000,
   stderrBytes: 16_000,
   processOutputBytes: 10 * 1024 * 1024,
-  agentTokens: 80_000,
-  runTokens: 200_000,
-  runtimeMs: 15 * 60_000,
   startupMs: 20_000,
 } as const;
 
@@ -330,7 +327,6 @@ export function buildContextPacket(input: {
   overallGoal: string;
   task: AgentTask;
   todo?: TodoTask;
-  ponytailMode: string;
 }): string {
   const { task, todo } = input;
   const sections = [
@@ -341,7 +337,6 @@ export function buildContextPacket(input: {
     task.contextFiles.length ? "STARTING FILES\n" + task.contextFiles.map((path) => `- ${path}`).join("\n") : "",
     task.writeScope.length ? "WRITE SCOPE\n" + task.writeScope.map((scope) => `- ${scope}`).join("\n") : "",
     "ACCEPTANCE CRITERIA\n" + task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n"),
-    `PONYTAIL MODE\n${safeDisplayLine(input.ponytailMode || "off", 20)}`,
     "RETURN CONTRACT\nCall agent_result alone when done. Report blocked only when parent input is required.",
   ].filter(Boolean);
   return utf8Prefix(sections.join("\n\n"), SUBAGENT_LIMITS.contextPacketBytes);

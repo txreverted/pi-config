@@ -9,7 +9,6 @@
   "files": [
     "extensions",
     "prompts",
-    "skills",
     "README.md"
   ],
   "scripts": {
@@ -38,19 +37,16 @@
     ],
     "prompts": [
       "./prompts"
-    ],
-    "skills": [
-      "./skills/ponytail/SKILL.md"
     ]
   },
   "dependencies": {
     "linkedom": "0.18.13"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.84.2",
-    "@earendil-works/pi-coding-agent": ">=0.84.2",
-    "@earendil-works/pi-tui": ">=0.84.2",
-    "typebox": ">=1.3.14"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.84.2",

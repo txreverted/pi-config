@@ -12,8 +12,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CONCISE_RESPONSE_POLICY } from "../concise.ts";
 import { CONFIG_EVENTS, restoreCoordinatedTodoSnapshot, type SubagentProgressEvent } from "../coordination-core.ts";
-import { buildPonytailInstructions, type PonytailSessionMode } from "../ponytail-core.ts";
-import { loadPonytailSkill } from "../ponytail.ts";
+import { PONYTAIL_INSTRUCTIONS } from "../ponytail.ts";
 import {
   claimTodoDelegations,
   copyTodoSnapshot,
@@ -152,22 +151,17 @@ export function formatPatchPage(patch: string, requestedOffset: number, requeste
 export default function subagentsExtension(pi: ExtensionAPI): void {
   if (process.env.PI_CONFIG_SUBAGENT_CHILD === "1") return;
   let todoSnapshot = emptyTodoSnapshot();
-  let ponytailMode: PonytailSessionMode = "off";
   const retained = new Map<string, WorkerWorkspace>();
   const shutdown = new AbortController();
-  const ponytailSkill = loadPonytailSkill().body;
 
   pi.events.on(CONFIG_EVENTS.todoSnapshot, (value) => {
     try { todoSnapshot = validateTodoSnapshot(value); } catch {}
-  });
-  pi.events.on(CONFIG_EVENTS.ponytailMode, (value) => {
-    if (value === "off" || value === "lite" || value === "full" || value === "ultra") ponytailMode = value;
   });
 
   pi.registerTool({
     name: "parallel_agents",
     label: "Agents",
-    description: "Run 2-6 substantial independent explorer, worker, or reviewer tasks as one bounded foreground parallel wave. Workers use isolated Git worktrees, require non-overlapping write scopes, and return patches for parent inspection. Use only when parallelism reduces wall time.",
+    description: "Run 2-6 substantial independent explorer, worker, or reviewer tasks as one foreground parallel wave. Started tasks have no token or runtime ceiling and run until completion, cancellation, failure, or an output safety limit. Workers use isolated Git worktrees and return patches for parent inspection.",
     promptSnippet: "Run independent explorer, worker, or reviewer tasks concurrently in isolated contexts",
     promptGuidelines: [
       "Use parallel_agents only when at least two substantial tasks are ready and independent; keep singleton or dependent work in the parent.",
@@ -269,8 +263,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         try {
           if (abortSignal.aborted) {
             result = failed("Subagent was cancelled before launch");
-          } else if (aggregateUsage(progress.map((entry) => entry.usage)).totalTokens >= SUBAGENT_LIMITS.runTokens) {
-            result = failed(`Agent wave reached its ${SUBAGENT_LIMITS.runTokens}-token limit before this task launched`);
           } else {
             result = await runChildAgent({
               task,
@@ -281,13 +273,12 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
                 overallGoal: wave.title,
                 task,
                 todo: task.todoId === undefined ? undefined : todoSnapshot.tasks.find((todo) => todo.id === task.todoId),
-                ponytailMode,
               }),
               systemPrompt: [
                 ROLE_DEFINITIONS[task.role].prompt,
                 CONCISE_RESPONSE_POLICY,
-                ponytailMode === "off" ? "" : buildPonytailInstructions(ponytailSkill, ponytailMode),
-              ].filter(Boolean).join("\n\n"),
+                PONYTAIL_INSTRUCTIONS,
+              ].join("\n\n"),
               trusted: ctx.isProjectTrusted(),
               signal: abortSignal,
               onUpdate(update) {
