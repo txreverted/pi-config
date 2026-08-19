@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const MAX_PATCH_BYTES = 2_000_000;
-const MAX_UNTRACKED = 1_000;
+export const MAX_CHANGED_FILES = 1_000;
 const MAX_METADATA_BYTES = 16_384;
 
 export interface WorkerWorkspace {
@@ -154,11 +154,19 @@ export async function recoverWorkerWorkspace(cwd: string, runId: string, taskId:
   throw new Error(`Unknown worker patch '${runId}/${taskId}'`);
 }
 
+export function validateWorkerChangedFiles(tracked: readonly string[], untracked: readonly string[]): string[] {
+  if (untracked.length > MAX_CHANGED_FILES) throw new Error(`Worker created more than ${MAX_CHANGED_FILES} untracked files`);
+  const files = [...new Set([...tracked, ...untracked])];
+  if (files.length > MAX_CHANGED_FILES) {
+    throw new Error(`Worker changed more than ${MAX_CHANGED_FILES} total files; reduce the worker's changes before inspection`);
+  }
+  return files;
+}
+
 async function changedFiles(workspace: WorkerWorkspace): Promise<string[]> {
   const tracked = (await git(workspace.worktree, ["diff", "--name-only", "-z", workspace.baseCommit, "--"])).split("\0").filter(Boolean);
   const untracked = (await git(workspace.worktree, ["ls-files", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
-  if (untracked.length > MAX_UNTRACKED) throw new Error(`Worker created more than ${MAX_UNTRACKED} untracked files`);
-  return [...new Set([...tracked, ...untracked])];
+  return validateWorkerChangedFiles(tracked, untracked);
 }
 
 function matchesScope(path: string, scope: string): boolean {

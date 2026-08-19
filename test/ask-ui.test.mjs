@@ -144,6 +144,19 @@ test("custom editor submits or cancels without leaking drafts", () => {
   assert.deepEqual(cancelled.answers, []);
 });
 
+test("blank Other revision preserves a prior single choice", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  const component = createAskComponent(tui, theme, keybindings, questions(), () => {});
+  component.focused = true;
+  component.handleInput("\r");
+  component.handleInput("\x1b[D");
+  component.handleInput("\x1b[B");
+  component.handleInput("\x1b[B");
+  component.handleInput("\r");
+  component.handleInput("\r");
+  assert.equal(component.snapshot(false).answers[0].answer, "Web");
+});
+
 test("active tabs and help stay explicit without color or default keybindings", () => {
   const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
   const rebound = {
