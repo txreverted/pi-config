@@ -150,6 +150,16 @@ test("session cost includes assistant, tool, compaction, and branch-summary usag
   assert.equal(totalSessionCost(entries), 2);
 });
 
+test("session cost ignores malformed unvalidated session entries", () => {
+  assert.equal(totalSessionCost([
+    true,
+    { type: "message" },
+    { type: "message", message: null },
+    { type: "message", message: { role: "assistant", usage: { cost: { total: "invalid" } } } },
+    { type: "compaction", usage: { cost: { total: 0.25 } } },
+  ]), 0.25);
+});
+
 test("layout installs only in TUI mode, caches cost, and disposes footer resources", () => {
   const events = new Map();
   layoutExtension({ on(name, handler) { events.set(name, handler); } });

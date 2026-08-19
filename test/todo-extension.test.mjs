@@ -117,6 +117,8 @@ test("todo widget follows delegated agent progress", async () => {
   const widget = ctx.widgets.at(-1);
   const theme = { fg: (_color, text) => text, bold: (text) => text };
   assert.match(widget.factory({ terminal: { rows: 30 } }, theme).render(80).join("\n"), /Worker: editing src\/a\.ts/);
+  assert.doesNotThrow(() => emit(CONFIG_EVENTS.subagentProgress, null));
+  assert.doesNotThrow(() => emit(CONFIG_EVENTS.subagentProgress, { runId: "run", tasks: [{}] }));
 });
 
 test("todo publishes a bounded native Pi widget", async () => {

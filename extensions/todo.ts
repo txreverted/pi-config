@@ -17,7 +17,7 @@ import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
 import {
   CONFIG_EVENTS,
   restoreCoordinatedTodoSnapshot,
-  type SubagentProgressEvent,
+  validateSubagentProgressEvent,
 } from "./coordination-core.ts";
 
 const TOOL_NAME = "todo";
@@ -163,9 +163,10 @@ export default function todoExtension(pi: ExtensionAPI): void {
     }
   });
   pi.events.on(CONFIG_EVENTS.subagentProgress, (value) => {
-    const event = value as SubagentProgressEvent;
+    const event = validateSubagentProgressEvent(value);
+    if (!event) return;
     liveActivity.clear();
-    for (const task of event.tasks ?? []) {
+    for (const task of event.tasks) {
       if (task.todoId === undefined || (task.status !== "queued" && task.status !== "starting" && task.status !== "running")) continue;
       const role = task.role[0]!.toUpperCase() + task.role.slice(1);
       liveActivity.set(task.todoId, safeDisplayLine(`${role}: ${task.activity ?? task.status}`, 200));

@@ -1,6 +1,5 @@
 import { watchFile, unwatchFile } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   CONFIG_DIR_NAME,
   getAgentDir,
@@ -159,16 +158,25 @@ export function getCostLabel(ctx: Pick<ExtensionContext, "model" | "modelRegistr
     : "api";
 }
 
-function sessionEntryCost(entry: SessionEntry): number {
-  const usage = entry.type === "message"
-    ? entry.message.role === "assistant" || entry.message.role === "toolResult" ? entry.message.usage : undefined
-    : entry.type === "compaction" || entry.type === "branch_summary" ? entry.usage : undefined;
-  const cost = usage?.cost.total;
-  return cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : 0;
+function sessionEntryCost(entry: unknown): number {
+  if (!entry || typeof entry !== "object") return 0;
+  const record = entry as Record<string, unknown>;
+  let usage: unknown;
+  if (record.type === "message" && record.message && typeof record.message === "object") {
+    const message = record.message as Record<string, unknown>;
+    if (message.role === "assistant" || message.role === "toolResult") usage = message.usage;
+  } else if (record.type === "compaction" || record.type === "branch_summary") {
+    usage = record.usage;
+  }
+  if (!usage || typeof usage !== "object") return 0;
+  const costSummary = (usage as Record<string, unknown>).cost;
+  if (!costSummary || typeof costSummary !== "object") return 0;
+  const cost = (costSummary as Record<string, unknown>).total;
+  return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : 0;
 }
 
-export function totalSessionCost(entries: readonly SessionEntry[]): number {
-  return entries.reduce((total, entry) => total + sessionEntryCost(entry), 0);
+export function totalSessionCost(entries: readonly unknown[]): number {
+  return entries.reduce<number>((total, entry) => total + sessionEntryCost(entry), 0);
 }
 
 function joinFooterSides(left: string, right: string, width: number): string {
