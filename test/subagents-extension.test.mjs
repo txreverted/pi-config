@@ -55,6 +55,11 @@ test("subagent extension exposes one parallel batch and one patch lifecycle tool
   assert.equal(schema.properties.maxConcurrency.maximum, 3);
   assert.match(h.tools.get("parallel_agents").promptGuidelines.join("\n"), /parent remains responsible/i);
   assert.equal(h.tools.get("parallel_agents").executionMode, "sequential");
+  const heading = h.tools.get("parallel_agents").renderCall({}, {
+    bold: (text) => text,
+    fg: (_color, text) => text,
+  });
+  assert.equal(heading.render(80).join("\n").trimEnd(), "Agents");
   assert.equal(h.tools.get("agent_patch").parameters.properties.offset.minimum, 0);
   assert.ok(h.tools.get("agent_patch").parameters.properties.limit.maximum < 50 * 1024);
 });

@@ -10,6 +10,11 @@ const theme = {
   fg: (_color, text) => text,
 };
 
+const ansiTheme = {
+  bold: (text) => text,
+  fg: (color, text) => `\x1b[${{ success: 32, error: 31, warning: 33, muted: 90, dim: 2 }[color]}m${text}\x1b[0m`,
+};
+
 function details() {
   const usage = { ...emptyUsage(), totalTokens: 12_400 };
   return {
@@ -37,10 +42,28 @@ test("agent tree rendering is Claude-like, sanitized, and width bounded", () => 
     assert.ok(lines.every((line) => visibleWidth(line) <= width));
   }
   const text = renderAgents(details(), theme, false).render(120).join("\n");
-  assert.match(text, /^Agents │ 1\/3 completed/m);
+  assert.match(text, /^1\/3 completed │ 12k tokens/m);
+  assert.doesNotMatch(text, /^Agents(?: │|$)/m);
   assert.match(text, /├─ Explorer/);
   assert.match(text, /└─ Reviewer/);
   assert.match(text, /⎿ searching/);
+});
+
+test("agent status colors exclude tree connectors", () => {
+  const colored = details();
+  colored.progress[2] = {
+    ...colored.progress[2],
+    status: "failed",
+    activity: "failed",
+    startedAt: Date.now() - 1_000,
+    endedAt: Date.now(),
+  };
+  const lines = renderAgents(colored, ansiTheme, false).render(160);
+  const succeeded = lines.find((line) => line.includes("Worker"));
+  const failed = lines.find((line) => line.includes("Reviewer"));
+
+  assert.ok(succeeded?.startsWith("\x1b[90m├─ \x1b[0m\x1b[32mWorker"));
+  assert.ok(failed?.startsWith("\x1b[90m└─ \x1b[0m\x1b[31mReviewer"));
 });
 
 test("expanded agent rendering shows measured patch state", () => {
