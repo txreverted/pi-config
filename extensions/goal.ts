@@ -43,9 +43,15 @@ function completionNote(summary: string, evidence: string): string {
 
 function currentToolBatch(ctx: ExtensionContext, toolCallId: string): string[] {
   for (const entry of [...ctx.sessionManager.getBranch()].reverse()) {
-    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-    const content = Array.isArray(entry.message.content) ? entry.message.content : [];
-    const calls = content.filter((item) => item.type === "toolCall");
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { type?: unknown; message?: unknown };
+    if (record.type !== "message" || !record.message || typeof record.message !== "object") continue;
+    const message = record.message as Record<string, unknown>;
+    if (message.role !== "assistant") continue;
+    const content = Array.isArray(message.content) ? message.content : [];
+    const calls = content.filter((item): item is { type: "toolCall"; id: string; name: string } =>
+      Boolean(item && typeof item === "object" && (item as Record<string, unknown>).type === "toolCall" &&
+        typeof (item as Record<string, unknown>).id === "string" && typeof (item as Record<string, unknown>).name === "string"));
     if (calls.some((call) => call.id === toolCallId)) return calls.map((call) => call.name);
   }
   return [];
@@ -54,8 +60,10 @@ function currentToolBatch(ctx: ExtensionContext, toolCallId: string): string[] {
 function restoreGoalState(ctx: ExtensionContext): GoalSnapshot | undefined {
   let restored: GoalSnapshot | undefined;
   for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type !== "custom" || entry.customType !== ENTRY) continue;
-    const data = entry.data as { goal?: unknown } | undefined;
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { type?: unknown; customType?: unknown; data?: unknown };
+    if (record.type !== "custom" || record.customType !== ENTRY) continue;
+    const data = record.data && typeof record.data === "object" ? record.data as { goal?: unknown } : undefined;
     restored = undefined;
     if (data?.goal === null) continue;
     const validated = validateGoalSnapshot(data?.goal);

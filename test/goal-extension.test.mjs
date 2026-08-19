@@ -270,6 +270,22 @@ test("goal terminal tools block every call in a mixed batch", async () => {
   assert.equal(await h.events.get("tool_call")({ toolCallId: "goal-2", toolName: "goal_wait", input: {} }, h.context), undefined);
 });
 
+test("goal restore and tool batching ignore malformed session entries", async () => {
+  const goal = { id: "restored", objective: "Keep working", status: "paused" };
+  const branch = [
+    true,
+    { type: "message" },
+    snapshotEntry(goal),
+    { type: "message", message: null },
+    { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "goal", name: "goal_wait" }] } },
+  ];
+  const h = harness(branch);
+  assert.doesNotThrow(() => h.events.get("session_start")({}, h.context));
+  assert.equal(await h.events.get("tool_call")({ toolCallId: "goal", toolName: "goal_wait", input: {} }, h.context), undefined);
+  await h.commands.get("goal").handler("status", h.context);
+  assert.match(h.notices.at(-1).message, /paused: Keep working/);
+});
+
 test("a settled goal run without an assistant message pauses safely", async () => {
   const h = harness();
   await h.events.get("session_start")({}, h.context);

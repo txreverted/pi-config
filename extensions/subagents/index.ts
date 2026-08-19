@@ -379,8 +379,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     },
     renderResult(result, { expanded }, theme) {
       const details = result.details as ParallelAgentsDetails | undefined;
-      if (details) return renderAgents(details, theme, expanded);
-      const text = result.content[0]?.type === "text" ? result.content[0].text : "No agent output.";
+      const textItem = Array.isArray(result.content) ? result.content.find((item) => item?.type === "text") : undefined;
+      const text = textItem?.type === "text" ? textItem.text : "No agent output.";
+      if (details && Array.isArray(details.progress) && Array.isArray(details.results) && typeof details.usage?.totalTokens === "number") {
+        return renderAgents(details, theme, expanded, text);
+      }
       return new Text(normalizeDisplayText(text), 0, 0);
     },
   });

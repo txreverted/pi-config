@@ -59,6 +59,20 @@ test("subagent extension exposes one parallel batch and one patch lifecycle tool
   assert.ok(h.tools.get("agent_patch").parameters.properties.limit.maximum < 50 * 1024);
 });
 
+test("parallel agent errors with empty details render their message", () => {
+  const h = harness();
+  subagentsExtension(h.pi);
+  const theme = {
+    bold: (text) => text,
+    fg: (_color, text) => text,
+  };
+  const component = h.tools.get("parallel_agents").renderResult({
+    content: [{ type: "text", text: "Todo #1 is not ready for delegation" }],
+    details: {},
+  }, { expanded: false }, theme);
+  assert.equal(component.render(80).join("\n").trimEnd(), "Todo #1 is not ready for delegation");
+});
+
 test("top-level subagent tools stay disabled in child processes", () => {
   const previous = process.env.PI_CONFIG_SUBAGENT_CHILD;
   process.env.PI_CONFIG_SUBAGENT_CHILD = "1";
@@ -108,6 +122,10 @@ test("child extension provides structured completion and blocks workspace escape
       sessionManager: { getBranch: () => [] },
     });
     assert.match(gitBlocked.reason, /Git metadata/);
+    const malformedBranch = await h.events.get("tool_call")({ toolName: "agent_result", toolCallId: "result", input: {} }, {
+      sessionManager: { getBranch: () => [true, { type: "message" }, { type: "message", message: null }] },
+    });
+    assert.equal(malformedBranch, undefined);
   } finally {
     for (const [name, value] of Object.entries(previous)) {
       const envName = { child: "PI_CONFIG_SUBAGENT_CHILD", role: "PI_CONFIG_AGENT_ROLE", workspace: "PI_CONFIG_AGENT_WORKSPACE", cwd: "PI_CONFIG_AGENT_CWD", writable: "PI_CONFIG_AGENT_WRITABLE" }[name];
