@@ -38,10 +38,10 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
   assert.deepEqual(packageJson.dependencies, { linkedom: "0.18.13" });
   assert.deepEqual(packageJson.peerDependencies, {
-    "@earendil-works/pi-ai": ">=0.84.2",
-    "@earendil-works/pi-coding-agent": ">=0.84.2",
-    "@earendil-works/pi-tui": ">=0.84.2",
-    typebox: ">=1.3.14",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    typebox: "*",
   });
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
   assert.deepEqual(await readdir(new URL("../skills/", import.meta.url)), ["ponytail"]);
