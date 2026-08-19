@@ -4,7 +4,6 @@ import {
   CONFIG_DIR_NAME,
   getAgentDir,
   SettingsManager,
-  VERSION,
   type ExtensionAPI,
   type ExtensionContext,
   type ReadonlyFooterDataProvider,
@@ -78,7 +77,6 @@ export function compactStartupSpacing(
 }
 
 export interface CompactFooterValues {
-  version: string;
   cwd: string;
   branch: string | null;
   elapsedSeconds: number;
@@ -216,14 +214,12 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   const cost = Number.isFinite(values.cost) ? Math.max(0, values.cost) : 0;
 
   let showElapsed = true;
-  let showVersion = true;
   let showCost = true;
   let showLocation = true;
   let showContext = true;
   let showModel = true;
   const build = () => {
     const left = [
-      showVersion ? `pi v${values.version}` : "",
       showLocation ? location : "",
       showElapsed ? formatElapsed(values.elapsedSeconds) : "",
       status,
@@ -238,7 +234,6 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
 
   for (const hide of [
     () => { showElapsed = false; },
-    () => { showVersion = false; },
     () => { showCost = false; },
     () => { if (status) showLocation = false; },
     () => { if (status) showModel = false; },
@@ -322,7 +317,6 @@ function installLayout(
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([, text]) => text);
         const line = formatCompactFooter({
-          version: VERSION,
           cwd: compactCwd(ctx.sessionManager.getCwd()),
           branch: footerData.getGitBranch(),
           elapsedSeconds: answerElapsedSeconds(),
