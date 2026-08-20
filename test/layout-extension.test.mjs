@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, visibleWidth } from "@earendil-works/pi-tui";
 import layoutExtension, {
   compactCwd,
   createAnswerTimer,
@@ -173,9 +173,46 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     };
     sessionStart({}, context);
 
-    const headerTui = { children: [], requestRender() {} };
-    const header = headerFactory(headerTui);
-    assert.deepEqual(header.render(80), []);
+    const builtInHeader = { render: () => ["header"], invalidate() {} };
+    const headerLeading = new Spacer(1);
+    const headerTrailing = new Spacer(1);
+    const headerContainer = new Container();
+    headerContainer.addChild(headerLeading);
+    headerContainer.addChild(builtInHeader);
+    headerContainer.addChild(headerTrailing);
+    const resourceTrailing = new Spacer(1);
+    const resourcesContainer = new Container();
+    resourcesContainer.addChild(new Spacer(1));
+    resourcesContainer.addChild({
+      render: () => ["[Context]", "  AGENTS.md", "", "[Extensions]", "  layout.ts"],
+      invalidate() {},
+    });
+    resourcesContainer.addChild(resourceTrailing);
+    const chatContainer = new Container();
+    const documentContainer = new Container();
+    documentContainer.addChild(headerContainer);
+    documentContainer.addChild(resourcesContainer);
+    documentContainer.addChild(chatContainer);
+    const widgetContainer = new Container();
+    widgetContainer.addChild(new Spacer(1));
+    const editor = { render: () => ["editor"], invalidate() {} };
+    const headerIndex = headerContainer.children.indexOf(builtInHeader);
+    const header = headerFactory({ children: [documentContainer], requestRender() {} });
+    headerContainer.children[headerIndex] = header;
+
+    assert.deepEqual([
+      ...documentContainer.render(80),
+      ...widgetContainer.render(80),
+      ...editor.render(80),
+    ], ["", "[Context]", "  AGENTS.md", "", "[Extensions]", "  layout.ts", "", "editor"]);
+    chatContainer.addChild({ render: () => ["prompt"], invalidate() {} });
+    assert.deepEqual(documentContainer.render(80), [
+      "", "[Context]", "  AGENTS.md", "", "[Extensions]", "  layout.ts", "", "prompt",
+    ]);
+    header.dispose();
+    assert.deepEqual(headerLeading.render(80), [""]);
+    assert.deepEqual(headerTrailing.render(80), [""]);
+    assert.deepEqual(resourceTrailing.render(80), [""]);
     let unsubscribed = false;
     const footer = footerFactory(
       { requestRender() {} },
