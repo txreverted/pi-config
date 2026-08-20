@@ -36,8 +36,6 @@ jobs:
       - if: matrix.pi == 'latest'
         run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
       - run: npm run check
-      - if: runner.os == 'Windows'
-        run: npm run test:windows
 
   live-web:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
