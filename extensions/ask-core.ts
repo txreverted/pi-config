@@ -73,7 +73,7 @@ export class AskState {
     if (!this.question) return;
     const answer = boundCustomAnswer(value);
     if (!answer) {
-      if (this.question.multiSelect) this.custom.delete(this.page);
+      this.custom.delete(this.page);
       return;
     }
     this.custom.set(this.page, answer);
