@@ -103,8 +103,8 @@ async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined,
       if (selected === other) {
         const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
         if (answer === null) return { answers: [], cancelled: true };
-        if (!answer) continue;
         state.write(answer);
+        if (!answer) continue;
       } else {
         const optionIndex = choices.indexOf(selected);
         if (optionIndex < 0) throw new Error("Selected answer no longer matches the available options");
