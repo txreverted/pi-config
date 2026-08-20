@@ -2,6 +2,8 @@ import { parseHTML } from "linkedom";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp?tools=web_search_exa";
 const EXA_TOOL = "web_search_exa";
+const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
+const PARALLEL_TOOL = "web_search";
 const SEARCH_TIMEOUT_MS = 30_000;
 const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_RESULT_URL_CHARS = 4_096;
@@ -16,7 +18,7 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
-export type SearchProvider = "exa-mcp" | "duckduckgo";
+export type SearchProvider = "exa-mcp" | "parallel-mcp" | "duckduckgo";
 
 export interface WebSearchResponse extends SearchResponse {
   provider: SearchProvider;
@@ -169,6 +171,39 @@ export function parseExaSearchText(text: string, limit = 5): SearchResponse {
   return { results };
 }
 
+export function parseParallelSearchText(text: string, limit = 5): SearchResponse {
+  try {
+    const payload = JSON.parse(text) as {
+      results?: Array<{
+        title?: unknown;
+        url?: unknown;
+        excerpts?: unknown;
+      }>;
+    };
+    if (!Array.isArray(payload.results)) return { results: [] };
+
+    const results: SearchResult[] = [];
+    const seen = new Set<string>();
+    for (const item of payload.results) {
+      const url = normalizeHttpUrl(item.url);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      const excerpts = Array.isArray(item.excerpts)
+        ? item.excerpts.filter((entry): entry is string => typeof entry === "string").join(" ")
+        : "";
+      results.push({
+        title: cleanSnippet(item.title, 300) || `Result ${results.length + 1}`,
+        url,
+        snippet: cleanSnippet(excerpts),
+      });
+      if (results.length >= limit) break;
+    }
+    return { results };
+  } catch {
+    return { results: [] };
+  }
+}
+
 export async function searchExa(query: string, limit = 5, signal?: AbortSignal): Promise<SearchResponse> {
   const requestSignal = combinedSignal(signal, SEARCH_TIMEOUT_MS);
   const response = await fetch(EXA_MCP_URL, {
@@ -205,6 +240,47 @@ export async function searchExa(query: string, limit = 5, signal?: AbortSignal):
 
   const parsed = parseExaSearchText(resultText, limit);
   if (parsed.results.length === 0) throw new Error("Exa search returned no parseable results");
+  return parsed;
+}
+
+export async function searchParallel(query: string, limit = 5, signal?: AbortSignal): Promise<SearchResponse> {
+  const requestSignal = combinedSignal(signal, SEARCH_TIMEOUT_MS);
+  const response = await fetch(PARALLEL_MCP_URL, {
+    method: "POST",
+    redirect: "error",
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      "User-Agent": "pi-minimal-web/0.1",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: PARALLEL_TOOL,
+        arguments: { objective: query, search_queries: [query] },
+      },
+    }),
+    signal: requestSignal,
+  });
+
+  if (!response.ok) {
+    response.body?.cancel().catch(() => {});
+    throw new Error(response.status === 429 ? "Parallel search rate limit reached" : `Parallel search failed with HTTP ${response.status}`);
+  }
+
+  const envelope = parseMcpEnvelope(await readWebResponse(response, MAX_SEARCH_RESPONSE_BYTES));
+  if (!envelope) throw new Error("Parallel search returned an invalid response");
+  if (envelope.error) throw new Error(`Parallel search error${envelope.error.code ? ` ${envelope.error.code}` : ""}`);
+
+  const resultText = envelope.result?.content?.find(
+    (entry) => entry.type === "text" && typeof entry.text === "string" && entry.text.trim(),
+  )?.text;
+  if (envelope.result?.isError || !resultText) throw new Error("Parallel search returned an error");
+
+  const parsed = parseParallelSearchText(resultText, limit);
+  if (parsed.results.length === 0) throw new Error("Parallel search returned no parseable results");
   return parsed;
 }
 
@@ -276,13 +352,22 @@ export async function searchWeb(query: string, limit = 5, signal?: AbortSignal):
     if (overallSignal.aborted) throw abortError(overallSignal);
     try {
       return {
-        ...(await searchDuckDuckGo(query, limit, overallSignal)),
-        provider: "duckduckgo",
-        attemptedProviders: ["exa-mcp", "duckduckgo"],
+        ...(await searchParallel(query, limit, overallSignal)),
+        provider: "parallel-mcp",
+        attemptedProviders: ["exa-mcp", "parallel-mcp"],
       };
-    } catch (duckDuckGoError) {
+    } catch (parallelError) {
       if (overallSignal.aborted) throw abortError(overallSignal);
-      throw new Error(`Keyless web search failed (Exa: ${shortError(exaError)}; DuckDuckGo: ${shortError(duckDuckGoError)})`);
+      try {
+        return {
+          ...(await searchDuckDuckGo(query, limit, overallSignal)),
+          provider: "duckduckgo",
+          attemptedProviders: ["exa-mcp", "parallel-mcp", "duckduckgo"],
+        };
+      } catch (duckDuckGoError) {
+        if (overallSignal.aborted) throw abortError(overallSignal);
+        throw new Error(`Keyless web search failed (Exa: ${shortError(exaError)}; Parallel: ${shortError(parallelError)}; DuckDuckGo: ${shortError(duckDuckGoError)})`);
+      }
     }
   }
 }
