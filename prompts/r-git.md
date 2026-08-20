@@ -1,21 +1,21 @@
 ---
-description: Group working-tree changes into PRs and merge them
+description: Split unstaged changes into PRs and merge them
 ---
-Analyze every unstaged change and untracked file. Group them by intent into the smallest coherent set of pull requests.
+Analyze every unstaged change and untracked file. Group them by intent into the smallest coherent pull requests.
 
-Invocation authorizes branch creation, commits, pushes, pull request creation, and merges.
+For each group:
 
-- Read repository instructions and inspect the current Git state.
-- Preserve existing work. Never reset, discard, overwrite, or force-push.
-- Include related staged changes. Leave unrelated staged work untouched.
-- Never commit secrets, auth, settings, sessions, transcripts, ignored files, or unrelated work.
-- Keep related tests and docs with their implementation.
-- Create a branch and clear commit or commits for each group.
-- Push each branch, open its pull request, and merge it.
-- Process dependent groups in order.
-- Do not run tests, lint, typechecks, or other local checks.
-- Never bypass required checks, reviews, branch protection, hooks, or conflicts.
+1. Create a branch from the verified default branch.
+2. Commit only that group. Keep its code, tests, and docs together.
+3. Push the branch, open a pull request, and merge it.
 
-Use `main` when it is the verified target. Otherwise use the default branch.
+Process dependent groups in order.
 
-Report pull requests, commits, merges, blockers, and excluded files.
+- Read repository rules and inspect Git first.
+- Keep existing work. Never reset, discard, overwrite, or force-push.
+- Include related staged changes. Leave unrelated staged changes alone.
+- Never commit secrets, ignored files, or unrelated work.
+- Run no local checks.
+- Never bypass checks, reviews, branch protection, hooks, or conflicts.
+
+Report merged pull requests and blockers.
