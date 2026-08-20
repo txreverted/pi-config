@@ -21,7 +21,6 @@ const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name
 const extensions = [
   "./extensions/web.ts",
   "./extensions/ask.ts",
-  "./extensions/goal.ts",
   "./extensions/layout.ts",
   "./extensions/concise.ts",
   "./extensions/unslop.ts",
@@ -242,8 +241,6 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.doesNotMatch(readme, /subagent|parallel_agents|agent_patch|PI_LIVE_SUBAGENT/i);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
   for (const pattern of [
-    /Goal mode has no token or runtime ceiling/,
-    /It can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
     /No background code index runs/,
     /PI_LIVE_WEB=1/,
