@@ -62,14 +62,18 @@ test("compact footer formats elapsed time, tokens, and home-relative paths", () 
 
 test("compact footer matches the wide layout and never exceeds narrow terminals", () => {
   const wide = formatCompactFooter(values, 120);
-  assert.equal(visibleWidth(wide), 120);
-  assert.match(wide, /^~\/Documents\/pi-config\(main\) 1m30/);
-  assert.doesNotMatch(wide, /pi v/);
-  assert.match(wide, /\$0\.000 \(api\) 0\.0%\/272k \(auto\) gpt-5\.6-sol \(xhigh\)$/);
-  assert.match(formatCompactFooter({ ...values, contextPercent: null }, 120), /\?\/272k \(auto\)/);
+  assert.equal(wide.length, 2);
+  assert.equal(wide[0], "~/Documents/pi-config(main)");
+  assert.equal(visibleWidth(wide[1]), 120);
+  assert.match(wide[1], /^\$0\.000 \(api\) 0\.0%\/272k \(auto\) 1m30/);
+  assert.match(wide[1], /gpt-5\.6-sol \(xhigh\)$/);
+  assert.doesNotMatch(wide.join("\n"), /pi v/);
+  assert.match(formatCompactFooter({ ...values, contextPercent: null }, 120)[1], /\?\/272k \(auto\)/);
 
   for (let width = 1; width <= 100; width++) {
-    assert.ok(visibleWidth(formatCompactFooter(values, width)) <= width, String(width));
+    const lines = formatCompactFooter(values, width);
+    assert.equal(lines.length, 2);
+    assert.ok(lines.every((line) => visibleWidth(line) <= width), String(width));
   }
 });
 
@@ -79,13 +83,12 @@ test("compact footer prioritizes extension status and sanitizes it", () => {
     cwd: "~/a/very/long/project/directory/that/will/not/fit",
     statuses: ["sync:\nactive"],
   };
-  const line = formatCompactFooter(prioritized, 60);
+  const lines = formatCompactFooter(prioritized, 60);
 
-  assert.equal(visibleWidth(line), 60);
-  assert.match(line, /sync: active/);
-  assert.doesNotMatch(line, /pi v|1m30|\$0\.000/);
-  assert.equal(formatCompactFooter(prioritized, 20), "sync: active");
-  assert.equal(formatCompactFooter(prioritized, 12), "sync: active");
+  assert.equal(visibleWidth(lines[1]), 60);
+  assert.match(lines[1], /^sync: active/);
+  assert.match(lines[1], /gpt-5\.6-sol \(xhigh\)$/);
+  assert.doesNotMatch(lines.join("\n"), /pi v|1m30|\$0\.000/);
 });
 
 test("cost label distinguishes subscription-backed auth from API access", () => {
@@ -185,21 +188,22 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     );
     const lines = footer.render(80);
     footer.render(80);
-    assert.equal(lines.length, 1);
-    assert.equal(visibleWidth(lines[0]), 80);
-    assert.match(lines[0], /sync: active/);
+    assert.equal(lines.length, 2);
+    assert.ok(visibleWidth(lines[0]) <= 80);
+    assert.match(lines[0], /\(main\)$/);
+    assert.match(lines[1], /sync: active/);
     assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
 
     entries.push({ type: "message", message: { role: "toolResult", usage: { cost: { total: 0.5 } } } });
     events.get("turn_end")({}, context);
     events.get("agent_settled")({}, context);
     assert.equal(entryReads, 3);
-    assert.match(footer.render(200)[0], /\$1\.500 \(api\)/);
+    assert.match(footer.render(200)[1], /\$1\.500 \(api\)/);
 
     entries.length = 1;
     entries[0] = { type: "compaction", usage: { cost: { total: 0.25 } } };
     events.get("session_tree")({}, context);
-    assert.match(footer.render(200)[0], /\$0\.250 \(api\)/);
+    assert.match(footer.render(200)[1], /\$0\.250 \(api\)/);
 
     footer.dispose();
     assert.equal(unsubscribed, true);
@@ -243,14 +247,14 @@ test("layout refreshes the auto-compaction indicator while the session is open",
         onBranchChange: () => () => {},
       },
     );
-    assert.match(footer.render(160)[0], /\(auto\)/);
+    assert.match(footer.render(160)[1], /\(auto\)/);
 
     writeFileSync(join(agentDir, "settings.json"), '{"compaction":{"enabled":false}}\n');
     const deadline = Date.now() + 5_000;
-    while (/\(auto\)/.test(footer.render(160)[0]) && Date.now() < deadline) {
+    while (/\(auto\)/.test(footer.render(160)[1]) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    assert.doesNotMatch(footer.render(160)[0], /\(auto\)/);
+    assert.doesNotMatch(footer.render(160)[1], /\(auto\)/);
   } finally {
     footer?.dispose();
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
