@@ -69,3 +69,19 @@ PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model> npm run test:live-sub
 CI runs the web check weekly and on manual dispatch. Its failures are non-blocking provider-drift signals. The subagent smoke is manual because it spends configured provider quota.
 
 Test UI changes in an interactive terminal.
+
+## Sources
+
+- [Pi docs](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi), [releases](https://github.com/earendil-works/pi/releases), and [changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md).
+- [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
+- [npm CLI docs](https://docs.npmjs.com/cli/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
+- [TypeScript docs](https://www.typescriptlang.org/docs/), [5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
+- [TypeBox docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox), [changelog](https://github.com/sinclairzx81/typebox/tree/main/changelog), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md).
+- [LinkeDOM docs and source](https://github.com/WebReflection/linkedom) and [tags](https://github.com/WebReflection/linkedom/tags).
+- [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
+- [Git reference](https://git-scm.com/docs), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
+- [Windows `taskkill` reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
+- [GitHub Actions docs](https://docs.github.com/en/actions), [`checkout` releases](https://github.com/actions/checkout/releases), and [`setup-node` releases](https://github.com/actions/setup-node/releases).
+- [MCP specification](https://modelcontextprotocol.io/specification/latest) and [source](https://github.com/modelcontextprotocol/modelcontextprotocol).
+- [Exa MCP docs](https://docs.exa.ai/reference/exa-mcp) and [server source](https://github.com/exa-labs/exa-mcp-server).
+- [DuckDuckGo results help](https://duckduckgo.com/duckduckgo-help-pages/results/).

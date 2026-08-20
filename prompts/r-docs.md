@@ -14,6 +14,7 @@ Scope: ${ARGUMENTS:-entire repository}.
 - Keep, merge, or delete human docs based on unique current value.
 - Remove stale, duplicated, speculative, roadmap, and code-obvious content.
 - Keep one human guide.
+- End the main README with `## Sources`: verified first-party docs, source, releases, and migration guides for each external tool the project uses. Prefer current canonical pages; use versioned pages for version-specific behavior.
 - Use short sentences, exact paths, commands, examples, and relative links.
 - Verify every technical claim.
 - Do not change source code or runtime Markdown unless explicitly included.
