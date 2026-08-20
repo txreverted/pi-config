@@ -116,7 +116,9 @@ test("session index preserves native schemas and searches tracked and untracked 
 
     const found = await find.execute("find", { pattern: "*.ts", limit: 20 }, undefined, undefined, ctx);
     const foundText = found.content[0].text;
-    assert.match(foundText, /src\/main\.ts/);
+    const allFound = await find.execute("find-debug", { pattern: "**", limit: 20 }, undefined, undefined, ctx);
+    await pi.commands.get("search-index").handler("", ctx);
+    assert.match(foundText, /src\/main\.ts/, JSON.stringify({ foundText, allFound: allFound.content[0].text, notices: ctx.notices }));
     assert.match(foundText, /src\/naïve\[unit\]\.ts/);
     assert.match(foundText, /untracked\.ts/);
     assert.doesNotMatch(foundText, /ignored\.ts/);
