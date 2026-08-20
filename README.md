@@ -29,7 +29,7 @@ Private Pi package. Code and tests define behavior.
 - Parent turns use Ponytail full mode for coding and Unslop for writing. Child agents use Ponytail and Caveman. `/skill:unslop` loads the writing skill explicitly.
 - The TUI hides the startup header and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
-- `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` asks Pi to create checked pull requests and merge them when repository rules allow.
+- `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` groups working-tree changes into pull requests, pushes them, and merges them without local checks.
 - `web_search` sends each approved query to Exa's keyless MCP service first. It may fall back to keyless DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
 - `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
