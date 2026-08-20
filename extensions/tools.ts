@@ -25,6 +25,8 @@ const JQ_PATH_MAX_CHARS = 4_096;
 const JQ_VARIABLE_LIMIT = 100;
 const JQ_VARIABLE_VALUE_MAX_CHARS = 64 * 1024;
 const JQ_VARIABLE_TOTAL_MAX_BYTES = 1024 * 1024;
+// Count UTF-8 bytes plus two per argv item. Twice any accepted total stays below Windows' 32,767 UTF-16-unit limit.
+const JQ_ARGV_MAX_BYTES = 16 * 1024;
 const JQ_RETAINED_OUTPUT_LIMIT_BYTES = 50 * 1024 * 1024;
 const JQ_RETAINED_OUTPUT_LIMIT_FILES = 10;
 const COMBINED_TRUNCATION_NOTICE = "[Combined jq output truncated to stay within Pi's tool output limits.]";
@@ -76,6 +78,13 @@ function validateJqBounds(input: string | undefined, variables: readonly { name:
   const variableBytes = variables.reduce((total, variable) => total + Buffer.byteLength(variable.value, "utf8"), 0);
   if (variableBytes > JQ_VARIABLE_TOTAL_MAX_BYTES) {
     throw new Error(`jq variable values must total at most ${formatSize(JQ_VARIABLE_TOTAL_MAX_BYTES)}`);
+  }
+}
+
+function validateJqArgv(command: string, args: readonly string[]): void {
+  const bytes = [command, ...args].reduce((total, value) => total + Buffer.byteLength(value, "utf8") + 2, 0);
+  if (bytes >= JQ_ARGV_MAX_BYTES) {
+    throw new Error(`jq command line must be less than ${formatSize(JQ_ARGV_MAX_BYTES)}`);
   }
 }
 
@@ -174,7 +183,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "jq",
     label: "jq",
-    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes, ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of combined stdout/stderr, and a best-effort ${formatSize(DEFAULT_PROCESS_MAX_MEMORY_BYTES)} working-set monitor. Input and arguments are bounded. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; up to ${JQ_RETAINED_OUTPUT_LIMIT_FILES} sanitized mode-0600 output files totaling ${formatSize(JQ_RETAINED_OUTPUT_LIMIT_BYTES)} are retained per session.`,
+    description: `Query or transform JSON with jq. Provide input, files, or nullInput. Execution is capped at two minutes, ${formatSize(JQ_OUTPUT_HARD_LIMIT_BYTES)} of combined stdout/stderr, and a best-effort ${formatSize(DEFAULT_PROCESS_MAX_MEMORY_BYTES)} working-set monitor. Input is bounded and the aggregate argument vector must stay below ${formatSize(JQ_ARGV_MAX_BYTES)}. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; up to ${JQ_RETAINED_OUTPUT_LIMIT_FILES} sanitized mode-0600 output files totaling ${formatSize(JQ_RETAINED_OUTPUT_LIMIT_BYTES)} are retained per session.`,
     promptSnippet: "Query and transform JSON with jq filters",
     promptGuidelines: ["Use jq for structured JSON queries and transformations instead of parsing JSON with shell text tools."],
     parameters: jqSchema,
@@ -199,6 +208,7 @@ export default function toolsExtension(pi: ExtensionAPI): void {
       if (params.sortKeys) args.push("--sort-keys");
       for (const { name, value } of params.variables ?? []) args.push("--arg", name, value);
       args.push("--", params.filter, ...(params.files ?? []));
+      validateJqArgv("jq", args);
 
       const result = await runBoundedProcess("jq", args, {
         cwd: ctx.cwd,

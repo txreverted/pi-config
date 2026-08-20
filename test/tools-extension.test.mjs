@@ -63,6 +63,42 @@ test("jq bounds aggregate variable input before spawning", async () => {
   );
 });
 
+test("jq enforces the portable aggregate argv boundary before spawning", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-jq-argv-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "data.json"), "{}");
+
+  const fixedArgv = [
+    "jq", "--raw-output", "--compact-output", "--slurp", "--sort-keys",
+    "--arg", "v", "x", "--", "", "data.json",
+  ];
+  const fixedBytes = fixedArgv.reduce((total, value) => total + Buffer.byteLength(value, "utf8") + 2, 0);
+  const filterBytes = 16 * 1024 - 1 - fixedBytes;
+  const filter = `${" ".repeat(filterBytes - 1)}.`;
+  const params = {
+    filter,
+    files: ["data.json"],
+    variables: [{ name: "v", value: "x" }],
+    rawOutput: true,
+    compactOutput: true,
+    slurp: true,
+    sortKeys: true,
+  };
+  const pi = fakePi();
+  toolsExtension(pi);
+
+  const result = await pi.tools.get("jq").execute(
+    "jq-argv-boundary", params, undefined, undefined, { cwd: root },
+  );
+  assert.equal(result.content[0].text.trim(), "[{}]");
+  await assert.rejects(
+    () => pi.tools.get("jq").execute(
+      "jq-argv-overflow", { ...params, filter: `${filter} ` }, undefined, undefined, { cwd: join(root, "missing") },
+    ),
+    /command line must be less than 16\.0KB/,
+  );
+});
+
 test("jq preserves leading-at filenames after the option terminator", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-jq-path-"));
   t.after(() => rm(root, { recursive: true, force: true }));
