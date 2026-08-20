@@ -8,73 +8,8 @@ import {
   type ExtensionContext,
   type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { stripTerminalSequences, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { safeDisplayLine } from "./text-safety.ts";
-
-type ComponentContainer = Component & { children: Component[] };
-type AdjustableSpacer = Component & { setLines(lines: number): void };
-
-function isComponentContainer(component: Component): component is ComponentContainer {
-  return Array.isArray((component as Partial<ComponentContainer>).children);
-}
-
-function isAdjustableSpacer(component: Component | undefined): component is AdjustableSpacer {
-  return typeof (component as Partial<AdjustableSpacer> | undefined)?.setLines === "function";
-}
-
-function findParentContainer(components: readonly Component[], target: Component): ComponentContainer | undefined {
-  for (const component of components) {
-    if (!isComponentContainer(component)) continue;
-    if (component.children.includes(target)) return component;
-    const parent = findParentContainer(component.children, target);
-    if (parent) return parent;
-  }
-  return undefined;
-}
-
-// ponytail: Pi 0.84.2 has no loaded-resource ordering API; remove when startup sections are configurable.
-function moveContextBelowExtensions(resources: ComponentContainer): void {
-  const sectionIndex = (name: string) => resources.children.findIndex(
-    (component) => stripTerminalSequences(component.render(200)[0] ?? "").trim() === `[${name}]`,
-  );
-  const contextIndex = sectionIndex("Context");
-  const extensionsIndex = sectionIndex("Extensions");
-  if (contextIndex < 0 || extensionsIndex < 0 || contextIndex > extensionsIndex) return;
-
-  const contextLength = isAdjustableSpacer(resources.children[contextIndex + 1]) ? 2 : 1;
-  const context = resources.children.splice(contextIndex, contextLength);
-  const movedExtensionsIndex = sectionIndex("Extensions");
-  const insertAt = movedExtensionsIndex + (isAdjustableSpacer(resources.children[movedExtensionsIndex + 1]) ? 2 : 1);
-  resources.children.splice(insertAt, 0, ...context);
-}
-
-// ponytail: Pi 0.84.2 has no startup-spacing API; remove when setHeader owns its surrounding space.
-export function compactStartupSpacing(
-  tui: Pick<TUI, "children">,
-  header: Component,
-  adjustedSpacers: Set<AdjustableSpacer>,
-): void {
-  const headerContainer = findParentContainer(tui.children, header);
-  if (!headerContainer) return;
-  const headerIndex = headerContainer.children.indexOf(header);
-  for (const spacer of [headerContainer.children[headerIndex - 1], headerContainer.children[headerIndex + 1]]) {
-    if (!isAdjustableSpacer(spacer)) continue;
-    spacer.setLines(0);
-    adjustedSpacers.add(spacer);
-  }
-
-  const documentContainer = findParentContainer(tui.children, headerContainer);
-  if (!documentContainer) return;
-  const containerIndex = documentContainer.children.indexOf(headerContainer);
-  const resources = documentContainer.children[containerIndex + 1];
-  const chat = documentContainer.children[containerIndex + 2];
-  if (!resources || !chat || !isComponentContainer(resources) || !isComponentContainer(chat)) return;
-  moveContextBelowExtensions(resources);
-  const trailingSpacer = resources.children.at(-1);
-  if (!isAdjustableSpacer(trailingSpacer)) return;
-  trailingSpacer.setLines(chat.children.length === 0 ? 0 : 1);
-  adjustedSpacers.add(trailingSpacer);
-}
 
 export interface CompactFooterValues {
   cwd: string;
@@ -263,25 +198,7 @@ function installLayout(
   ).getCompactionEnabled();
   let autoCompact = readAutoCompact();
 
-  ctx.ui.setHeader((tui) => {
-    const adjustedSpacers = new Set<AdjustableSpacer>();
-    const header: Component & { dispose(): void } = {
-      render: () => {
-        compactStartupSpacing(tui, header, adjustedSpacers);
-        return [];
-      },
-      invalidate() {},
-      dispose() {
-        for (const spacer of adjustedSpacers) spacer.setLines(1);
-        adjustedSpacers.clear();
-      },
-    };
-    queueMicrotask(() => {
-      compactStartupSpacing(tui, header, adjustedSpacers);
-      tui.requestRender();
-    });
-    return header;
-  });
+  ctx.ui.setHeader(() => ({ render: () => [], invalidate() {} }));
 
   ctx.ui.setFooter((tui, theme, footerData: ReadonlyFooterDataProvider) => {
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
