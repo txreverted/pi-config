@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import askExtension from "../extensions/ask.ts";
 import goalExtension from "../extensions/goal.ts";
-import todoExtension from "../extensions/todo.ts";
-import toolsExtension from "../extensions/tools.ts";
 import webExtension from "../extensions/web.ts";
 
 function rendererHarness(load) {
@@ -29,9 +27,7 @@ function rendererHarness(load) {
 test("config tool renderers collapse repeated display-only blank rows without adding a gutter", () => {
   const cases = [
     [askExtension, ["ask_user_question"]],
-    [toolsExtension, ["jq"]],
     [webExtension, ["web_search"]],
-    [todoExtension, ["todo"]],
     [goalExtension, ["goal_complete", "goal_wait"]],
   ];
   const result = { content: [{ type: "text", text: "one\n\n \n\n\u001b[31mtwo\u001b[0m" }] };

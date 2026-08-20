@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import unslopExtension, { UNSLOP_INSTRUCTIONS } from "../extensions/unslop.ts";
 
-test("Unslop always injects the full writing policy", () => {
+test("Unslop always injects the compact writing policy", () => {
   const events = new Map();
   const commands = [];
   unslopExtension({
@@ -14,8 +14,9 @@ test("Unslop always injects the full writing policy", () => {
   assert.equal(result.systemPrompt, `BASE\n\n${UNSLOP_INSTRUCTIONS}`);
   assert.match(result.systemPrompt, /UNSLOP MODE ACTIVE/);
   assert.match(result.systemPrompt, /Apply these instructions to all writing/);
-  assert.match(result.systemPrompt, /What makes this obviously AI generated\?/);
+  assert.match(result.systemPrompt, /What makes this look generated\?/);
   assert.match(result.systemPrompt, /Prefer the plain word/);
-  assert.doesNotMatch(result.systemPrompt, /description: Cut AI tells/);
+  assert.match(result.systemPrompt, /Avoid em dashes/);
+  assert.doesNotMatch(result.systemPrompt, /description:/);
   assert.deepEqual(commands, []);
 });
