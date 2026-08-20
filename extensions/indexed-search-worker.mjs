@@ -150,8 +150,8 @@ async function metadataIsFresh() {
 async function enumerateFiles() {
   await runCommand("git", ["rev-parse", "--is-inside-work-tree"], 64 * 1024);
   const args = [
-    "--hidden", "--color=never", "--print0", "--type", "f", "--type", "l", "--type", "d",
-    "--exclude", ".git", "--", ".", root,
+    "--hidden", "--color=never", "--print0", "--absolute-path", "--type", "f", "--type", "l", "--type", "d",
+    "--exclude", ".git", "--search-path", root, "--", ".",
   ];
   let output;
   try {
