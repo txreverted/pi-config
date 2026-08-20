@@ -561,6 +561,7 @@ function globMatches(path, pattern, allowNegation) {
     : pattern;
   return minimatch(candidate, effectivePattern, {
     dot: true,
+    platform: "linux",
     matchBase: !effectivePattern.includes("/"),
     nocase: allowNegation ? false : pattern.toLowerCase() === pattern,
     nocomment: true,
