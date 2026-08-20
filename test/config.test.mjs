@@ -67,7 +67,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
       { name: "r-docs", description: "Audit and simplify repository documentation", argumentHint: "[scope]" },
-      { name: "r-git", description: "Turn safe working-tree changes into coherent PRs and merge them", argumentHint: undefined },
+      { name: "r-git", description: "Group working-tree changes into PRs and merge them", argumentHint: undefined },
       { name: "r-impl", description: "Evidence-based implementation audit", argumentHint: "[scope]" },
     ]);
 
@@ -89,11 +89,12 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.doesNotMatch(implementation, /Correctness: 3|Tests: 1/);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
-    assert.match(git, /^Turn safe working-tree changes/);
-    assert.match(git, /staged and unstaged changes, untracked files/);
-    assert.match(git, /Invocation authorizes commits, pushes, pull request creation, and merges/);
-    assert.match(git, /Stop when intent, ownership, target, separation, authentication, conflicts, repository rules, or secret safety cannot be verified/);
-    assert.doesNotMatch(git, /^Process all unstaged and untracked work/);
+    assert.match(git, /^Analyze every unstaged change and untracked file/);
+    assert.match(git, /Group them by intent into the smallest coherent set of pull requests/);
+    assert.match(git, /Invocation authorizes branch creation, commits, pushes, pull request creation, and merges/);
+    assert.match(git, /Push each branch, open its pull request, and merge it/);
+    assert.match(git, /Do not run tests, lint, typechecks, or other local checks/);
+    assert.doesNotMatch(git, /Run relevant tests|Wait for required checks/);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
