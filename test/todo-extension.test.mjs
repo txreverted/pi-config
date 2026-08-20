@@ -136,10 +136,11 @@ test("todo publishes a bounded native Pi widget", async () => {
   const mixed = mixedUpdate.factory({ terminal: { rows: 30 } }, theme).render(80);
   assert.deepEqual(mixed.slice(0, 4), [
     " Todos: 1/10 completed",
-    " ■ #10 Task 9 │ Working",
-    " □ #2 Task 1",
-    " □ #3 Task 2",
+    "  ├─ ■ #10 Task 9 · Working",
+    "  ├─ □ #2 Task 1",
+    "  ├─ □ #3 Task 2",
   ]);
+  assert.equal(mixed.at(-1), "  └─ 3 more");
 
   for (const rows of [4, 9, 12]) {
     for (const width of [1, 12, 80]) {
