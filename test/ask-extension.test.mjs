@@ -116,6 +116,35 @@ test("RPC review can revise an earlier answer", async () => {
   assert.deepEqual(result.details.answers.map(({ answer }) => answer), ["Complete", "Web"]);
 });
 
+test("RPC blank custom revision clears the stale answer and waits for a valid answer", async () => {
+  const { tool } = setup();
+  let step = 0;
+  let inputStep = 0;
+  let choicesAfterBlank;
+  const result = await tool.execute("call", input(), undefined, undefined, {
+    mode: "rpc",
+    hasUI: true,
+    ui: {
+      select: async (_title, choices) => {
+        step++;
+        if (step === 1) return choices.at(-1);
+        if (step === 2) return choices[0];
+        if (step === 3) return choices.at(-1);
+        if (step === 4) {
+          choicesAfterBlank = choices;
+          return choices[0];
+        }
+        return choices.at(-1);
+      },
+      input: async () => ++inputStep === 1 ? "custom answer" : "   ",
+    },
+  });
+
+  assert.equal(choicesAfterBlank.at(-1), "└─ □ Other");
+  assert.equal(result.details.answers[0].answer, "Small");
+  assert.equal(result.details.answers[0].custom, false);
+});
+
 test("RPC display and custom answers are sanitized", async () => {
   const { tool } = setup();
   let shownTitle;

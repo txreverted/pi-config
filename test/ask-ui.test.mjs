@@ -62,6 +62,15 @@ test("question state supports multi-select, custom answers, and backtracking", (
   assert.equal(state.answers()[0].answer, "Web, CLI");
 });
 
+test("blank revisions clear single-choice custom answer state", () => {
+  const state = new AskState(questions());
+  state.write("custom answer");
+  assert.equal(state.customAnswer, "custom answer");
+  state.write("   ");
+  assert.equal(state.customAnswer, undefined);
+  assert.equal(state.isAnswered(0), false);
+});
+
 test("single-choice flow reviews and submits with approved glyphs", () => {
   const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
   let result;
@@ -142,6 +151,32 @@ test("custom editor submits or cancels without leaking drafts", () => {
   abandoned.handleInput("\x1b");
   assert.equal(cancelled.cancelled, true);
   assert.deepEqual(cancelled.answers, []);
+});
+
+test("blank Other revision clears a prior custom answer and waits for a valid answer", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  let submitted;
+  const component = createAskComponent(tui, theme, keybindings, questions(), (value) => { submitted = value; });
+  component.focused = true;
+  component.handleInput("\x1b[B");
+  component.handleInput("\x1b[B");
+  component.handleInput("\r");
+  component.handleInput("x");
+  component.handleInput("\r");
+  assert.equal(component.snapshot(false).answers[0].answer, "x");
+
+  component.handleInput("\x1b[D");
+  component.handleInput("\x1b[B");
+  component.handleInput("\x1b[B");
+  component.handleInput("\r");
+  component.handleInput("\x7f");
+  component.handleInput("\r");
+  assert.deepEqual(component.snapshot(false).answers, []);
+  assert.doesNotMatch(component.render(80).join("\n"), /Ready to submit/);
+
+  component.handleInput("1");
+  component.handleInput("\r");
+  assert.equal(submitted.answers[0].answer, "Web");
 });
 
 test("blank Other revision preserves a prior single choice", () => {
