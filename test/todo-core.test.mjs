@@ -2,10 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyTodoAction,
-  claimTodoDelegations,
   emptyTodoSnapshot,
   TODO_LIMITS,
-  updateTodoDelegation,
   validateTodoSnapshot,
 } from "../extensions/todo-core.ts";
 
@@ -48,7 +46,7 @@ test("dependencies must exist, differ from the task, and remain acyclic", () => 
   assert.throws(() => apply(snapshot, { action: "delete", id: 1 }), /dangling blocker/);
 });
 
-test("only one parent task may be active and work waits for blockers", () => {
+test("only one task may be active and work waits for blockers", () => {
   let pending = apply(emptyTodoSnapshot(), { action: "create", subject: "Blocker" });
   pending = apply(pending, { action: "create", subject: "Dependent", blockedBy: [1] });
   assert.throws(() => apply(pending, { action: "update", id: 2, status: "in_progress" }), /until blocker/);
@@ -60,23 +58,6 @@ test("only one parent task may be active and work waits for blockers", () => {
   snapshot = apply(snapshot, { action: "update", id: 2, status: "completed" });
   assert.equal(snapshot.tasks.every((task) => task.status === "completed"), true);
   assert.throws(() => apply(snapshot, { action: "update", id: 1, status: "pending" }), /until blocker/);
-});
-
-test("parallel agents claim independent todos without weakening parent ownership", () => {
-  let snapshot = apply(emptyTodoSnapshot(), { action: "create", subject: "Parent", status: "in_progress" });
-  snapshot = apply(snapshot, { action: "create", subject: "Worker A" });
-  snapshot = apply(snapshot, { action: "create", subject: "Worker B" });
-  snapshot = claimTodoDelegations(snapshot, [
-    { todoId: 2, runId: "run", taskId: "a", role: "worker" },
-    { todoId: 3, runId: "run", taskId: "b", role: "reviewer" },
-  ]);
-  assert.equal(snapshot.tasks.filter((task) => task.status === "in_progress").length, 3);
-  assert.equal(snapshot.tasks[1].delegation.phase, "queued");
-  snapshot = updateTodoDelegation(snapshot, { todoId: 2, runId: "run", taskId: "a" }, "awaiting_integration");
-  snapshot = updateTodoDelegation(snapshot, { todoId: 3, runId: "run", taskId: "b" }, "release");
-  assert.equal(snapshot.tasks[1].delegation.phase, "awaiting_integration");
-  assert.equal(snapshot.tasks[2].status, "pending");
-  assert.throws(() => claimTodoDelegations(snapshot, [{ todoId: 2, runId: "other", taskId: "x", role: "worker" }]), /not ready/);
 });
 
 test("all declared bounds are enforced at the core boundary", () => {

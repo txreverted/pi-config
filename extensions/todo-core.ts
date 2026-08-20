@@ -11,17 +11,6 @@ export const TODO_LIMITS = {
 export const TODO_STATUSES = ["pending", "in_progress", "completed"] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
 
-export const TODO_DELEGATION_PHASES = ["queued", "running", "awaiting_integration", "awaiting_verification"] as const;
-export type TodoDelegationPhase = (typeof TODO_DELEGATION_PHASES)[number];
-export type TodoDelegationRole = "explorer" | "worker" | "reviewer";
-
-export interface TodoDelegation {
-  runId: string;
-  taskId: string;
-  role: TodoDelegationRole;
-  phase: TodoDelegationPhase;
-}
-
 export interface TodoTask {
   id: number;
   subject: string;
@@ -29,7 +18,6 @@ export interface TodoTask {
   activeForm?: string;
   status: TodoStatus;
   blockedBy: number[];
-  delegation?: TodoDelegation;
 }
 
 export interface TodoSnapshot {
@@ -55,7 +43,6 @@ export interface TodoChange {
 const copyTask = (task: TodoTask): TodoTask => ({
   ...task,
   blockedBy: [...task.blockedBy],
-  ...(task.delegation ? { delegation: { ...task.delegation } } : {}),
 });
 export const copyTodoSnapshot = (snapshot: TodoSnapshot): TodoSnapshot => ({
   tasks: snapshot.tasks.map(copyTask),
@@ -95,31 +82,15 @@ function validBlockers(value: unknown): number[] {
   return blockers;
 }
 
-function validDelegation(value: unknown): TodoDelegation | undefined {
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid todo delegation");
-  const input = value as Record<string, unknown>;
-  const runId = validText(input.runId, "delegation runId", 100, true)!;
-  const taskId = validText(input.taskId, "delegation taskId", 80, true)!;
-  if (input.role !== "explorer" && input.role !== "worker" && input.role !== "reviewer") throw new Error("Invalid todo delegation role");
-  if (typeof input.phase !== "string" || !TODO_DELEGATION_PHASES.includes(input.phase as TodoDelegationPhase)) {
-    throw new Error("Invalid todo delegation phase");
-  }
-  return { runId, taskId, role: input.role, phase: input.phase as TodoDelegationPhase };
-}
-
 function validateTasks(tasks: TodoTask[]): void {
   if (tasks.length > TODO_LIMITS.tasks) throw new Error(`Todo list may contain at most ${TODO_LIMITS.tasks} tasks`);
   const byId = new Map(tasks.map((task) => [task.id, task]));
   if (byId.size !== tasks.length) throw new Error("Task ids must be unique");
-  if (tasks.filter((task) => task.status === "in_progress" && !task.delegation).length > 1) {
-    throw new Error("Only one parent-owned task may be in_progress");
+  if (tasks.filter((task) => task.status === "in_progress").length > 1) {
+    throw new Error("Only one task may be in_progress");
   }
-  const delegationKeys = tasks.flatMap((task) => task.delegation ? [`${task.delegation.runId}\0${task.delegation.taskId}`] : []);
-  if (new Set(delegationKeys).size !== delegationKeys.length) throw new Error("Todo delegations must be unique");
 
   for (const task of tasks) {
-    if (task.delegation && task.status !== "in_progress") throw new Error(`Delegated task #${task.id} must be in_progress`);
     if (task.blockedBy.includes(task.id)) throw new Error(`Task #${task.id} cannot block itself`);
     for (const id of task.blockedBy) {
       if (!byId.has(id)) throw new Error(`Task #${task.id} has dangling blocker #${id}`);
@@ -156,7 +127,6 @@ export function validateTodoSnapshot(value: unknown): TodoSnapshot {
       activeForm: validText(task.activeForm, "activeForm", TODO_LIMITS.activeForm),
       status: validStatus(task.status),
       blockedBy: validBlockers(task.blockedBy),
-      delegation: validDelegation(task.delegation),
     };
   });
   const nextId = validId(input.nextId, "nextId");
@@ -213,10 +183,7 @@ export function applyTodoAction(current: TodoSnapshot, input: TodoAction): TodoC
       if (input.subject !== undefined) task.subject = validText(input.subject, "subject", TODO_LIMITS.subject, true)!;
       if (input.description !== undefined) task.description = validText(input.description, "description", TODO_LIMITS.description);
       if (input.activeForm !== undefined) task.activeForm = validText(input.activeForm, "activeForm", TODO_LIMITS.activeForm);
-      if (input.status !== undefined) {
-        task.status = validStatus(input.status);
-        task.delegation = undefined;
-      }
+      if (input.status !== undefined) task.status = validStatus(input.status);
       if (input.blockedBy !== undefined) task.blockedBy = validBlockers(input.blockedBy);
       validateTasks(snapshot.tasks);
       return { snapshot: copyTodoSnapshot(snapshot), task: copyTask(task) };
@@ -232,50 +199,4 @@ export function applyTodoAction(current: TodoSnapshot, input: TodoAction): TodoC
       return { snapshot: emptyTodoSnapshot(), cleared };
     }
   }
-}
-
-export interface TodoDelegationClaim {
-  todoId: number;
-  runId: string;
-  taskId: string;
-  role: TodoDelegationRole;
-}
-
-export function claimTodoDelegations(current: TodoSnapshot, claims: readonly TodoDelegationClaim[]): TodoSnapshot {
-  const snapshot = validateTodoSnapshot(current);
-  if (claims.length === 0) return snapshot;
-  const todoIds = claims.map((claim) => validId(claim.todoId, "todoId"));
-  if (new Set(todoIds).size !== todoIds.length) throw new Error("A todo may be claimed only once per agent wave");
-  const completed = new Set(snapshot.tasks.filter((task) => task.status === "completed").map((task) => task.id));
-  for (const claim of claims) {
-    const task = snapshot.tasks.find((candidate) => candidate.id === claim.todoId);
-    if (!task) throw new Error(`Task #${claim.todoId} not found`);
-    if (task.status !== "pending" || task.delegation) throw new Error(`Task #${claim.todoId} is not ready for delegation`);
-    if (!task.blockedBy.every((id) => completed.has(id))) throw new Error(`Task #${claim.todoId} is blocked`);
-    const delegation = validDelegation({ ...claim, phase: "queued" });
-    task.status = "in_progress";
-    task.delegation = delegation;
-  }
-  validateTasks(snapshot.tasks);
-  return copyTodoSnapshot(snapshot);
-}
-
-export function updateTodoDelegation(
-  current: TodoSnapshot,
-  claim: Pick<TodoDelegationClaim, "todoId" | "runId" | "taskId">,
-  phase: TodoDelegationPhase | "release",
-): TodoSnapshot {
-  const snapshot = validateTodoSnapshot(current);
-  const task = snapshot.tasks.find((candidate) => candidate.id === validId(claim.todoId, "todoId"));
-  if (!task?.delegation || task.delegation.runId !== claim.runId || task.delegation.taskId !== claim.taskId) {
-    throw new Error(`Task #${claim.todoId} is not claimed by ${claim.runId}/${claim.taskId}`);
-  }
-  if (phase === "release") {
-    task.status = "pending";
-    task.delegation = undefined;
-  } else {
-    task.delegation.phase = phase;
-  }
-  validateTasks(snapshot.tasks);
-  return copyTodoSnapshot(snapshot);
 }
