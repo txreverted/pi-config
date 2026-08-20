@@ -13,12 +13,7 @@ import {
   type TodoSnapshot,
   type TodoTask,
 } from "./todo-core.ts";
-import { normalizeDisplayText, safeDisplayLine } from "./text-safety.ts";
-import {
-  CONFIG_EVENTS,
-  restoreCoordinatedTodoSnapshot,
-  validateSubagentProgressEvent,
-} from "./coordination-core.ts";
+import { normalizeDisplayText } from "./text-safety.ts";
 
 const TOOL_NAME = "todo";
 const WIDGET_NAME = "pi-config-todo";
@@ -39,11 +34,9 @@ const Parameters = Type.Object({
   blockedBy: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { maxItems: TODO_LIMITS.blockers })),
 }, { additionalProperties: false });
 
-function taskLine(task: TodoTask, liveActivity?: string): string {
+function taskLine(task: TodoTask): string {
   const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
-  const role = task.delegation ? task.delegation.role[0]!.toUpperCase() + task.delegation.role.slice(1) : undefined;
-  const current = liveActivity ?? (task.delegation ? `${role}: ${task.delegation.phase.replaceAll("_", " ")}` : task.activeForm);
-  const activity = task.status === "in_progress" && current ? ` · ${current}` : "";
+  const activity = task.status === "in_progress" && task.activeForm ? ` · ${task.activeForm}` : "";
   const blockers = task.blockedBy.length ? ` depends on ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
   return `${mark} #${task.id} ${task.subject}${activity}${blockers}`;
 }
@@ -62,13 +55,27 @@ export function formatTodoOutput(action: TodoAction["action"], snapshot: TodoSna
 }
 
 export function restoreTodoSnapshot(ctx: ExtensionContext): TodoSnapshot {
-  return restoreCoordinatedTodoSnapshot(ctx.sessionManager.getBranch());
+  let snapshot = emptyTodoSnapshot();
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { type?: unknown; message?: unknown };
+    if (candidate.type !== "message" || !candidate.message || typeof candidate.message !== "object") continue;
+    const message = candidate.message as Record<string, unknown>;
+    if (message.role !== "toolResult" || message.toolName !== TOOL_NAME) continue;
+    const details = message.details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) continue;
+    try {
+      snapshot = validateTodoSnapshot((details as Record<string, unknown>).snapshot);
+    } catch {
+      // Keep the latest validated branch snapshot.
+    }
+  }
+  return snapshot;
 }
 
 export default function todoExtension(pi: ExtensionAPI): void {
   let snapshot = emptyTodoSnapshot();
   let latestContext: ExtensionContext | undefined;
-  const liveActivity = new Map<number, string>();
 
   const syncWidget = (ctx?: ExtensionContext) => {
     latestContext = ctx ?? latestContext;
@@ -102,7 +109,7 @@ export default function todoExtension(pi: ExtensionAPI): void {
           theme.fg("accent", theme.bold(summary)),
           ...shown.map((task, index) => {
             const connector = index === shown.length - 1 && hiddenCount === 0 ? "└─" : "├─";
-            return ` ${connector} ${taskLine(task, liveActivity.get(task.id))}`;
+            return ` ${connector} ${taskLine(task)}`;
           }),
         ];
         if (hiddenCount > 0 && bodyRows > shown.length) {
@@ -121,15 +128,14 @@ export default function todoExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
     label: "Todo",
-    description: "Manage the current branch's bounded todo list. Actions: create, update, list, get, delete, clear. At most 25 tasks and one parent-owned in_progress task are allowed; parallel_agents may claim additional ready tasks. Dependencies must exist, be acyclic, and be completed first.",
+    description: "Manage the current branch's bounded todo list. Actions: create, update, list, get, delete, clear. At most 25 tasks and one in_progress task are allowed. Dependencies must exist, be acyclic, and be completed first.",
     promptSnippet: "Manage a bounded, dependency-aware todo list for the current session branch",
-    promptGuidelines: ["Use todo to track multi-step work when a durable task list would help; keep one parent-owned task in_progress, let parallel_agents claim only ready independent tasks, and complete delegated todos only after parent verification."],
+    promptGuidelines: ["Use todo to track multi-step work when a durable task list would help; keep one task in_progress and complete dependencies first."],
     parameters: Parameters,
     executionMode: "sequential",
     async execute(_toolCallId, params) {
       const change = applyTodoAction(snapshot, params as TodoAction);
       snapshot = copyTodoSnapshot(change.snapshot);
-      pi.events.emit(CONFIG_EVENTS.todoSnapshot, copyTodoSnapshot(snapshot));
       syncWidget();
       const task = change.task ?? change.deleted;
       return {
@@ -158,35 +164,10 @@ export default function todoExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.events.on(CONFIG_EVENTS.todoSnapshot, (value) => {
-    try {
-      snapshot = validateTodoSnapshot(value);
-      syncWidget();
-    } catch {
-      // Ignore invalid cross-extension state.
-    }
-  });
-  pi.events.on(CONFIG_EVENTS.subagentProgress, (value) => {
-    const event = validateSubagentProgressEvent(value);
-    if (!event) return;
-    liveActivity.clear();
-    for (const task of event.tasks) {
-      if (task.todoId === undefined || (task.status !== "queued" && task.status !== "starting" && task.status !== "running")) continue;
-      const role = task.role[0]!.toUpperCase() + task.role.slice(1);
-      liveActivity.set(task.todoId, safeDisplayLine(`${role}: ${task.activity ?? task.status}`, 200));
-    }
-    syncWidget();
-  });
-
-  pi.on("session_start", (_event, ctx) => {
-    liveActivity.clear();
-    restore(ctx);
-    pi.events.emit(CONFIG_EVENTS.todoSnapshot, copyTodoSnapshot(snapshot));
-  });
+  pi.on("session_start", (_event, ctx) => restore(ctx));
   pi.on("session_tree", (_event, ctx) => restore(ctx));
   pi.on("session_compact", (_event, ctx) => restore(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
-    liveActivity.clear();
     if (ctx.mode === "tui") ctx.ui.setWidget(WIDGET_NAME, undefined);
   });
 }

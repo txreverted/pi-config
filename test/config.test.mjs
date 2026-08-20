@@ -31,7 +31,6 @@ const extensions = [
   "./extensions/unslop.ts",
   "./extensions/ponytail.ts",
   "./node_modules/pi-context-view/src/index.ts",
-  "./extensions/subagents/index.ts",
 ];
 
 test("only documented package resources are enabled", async () => {
@@ -159,9 +158,6 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
-      "extensions/coordination-core.ts",
-      "extensions/subagents/index.ts",
-      "extensions/subagents/child.ts",
       ...promptPaths,
       ...skillPaths,
     ]) assert.ok(names.has(path), path);
@@ -275,8 +271,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
   assert.match(workflow, /npm run test:windows/);
-  assert.equal(packageJson.scripts["test:live-subagent"], "node --experimental-strip-types test/live-subagent.mjs");
-  assert.match(readme, /PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model>/);
+  assert.equal(packageJson.scripts["test:live-subagent"], undefined);
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
@@ -284,11 +279,11 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(readme, /\]\(prompts\/\)/);
   assert.match(readme, /\/skill:unslop/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
-  assert.match(readme, /parallel_agents/);
+  assert.doesNotMatch(readme, /subagent|parallel_agents|agent_patch|PI_LIVE_SUBAGENT/i);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
   for (const pattern of [
-    /Goal mode and started subagents have no token or runtime ceiling/,
-    /They can use provider quota until completion/,
+    /Goal mode has no token or runtime ceiling/,
+    /It can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
     /retains at most 10 truncated outputs or 50MB per session/,
     /By default, FFF overrides Pi's built-in `grep` and `find`/,
