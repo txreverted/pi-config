@@ -6,7 +6,7 @@ Private Pi package. Code and tests define behavior.
 
 | Feature | Source | Tests |
 |---|---|---|
-| Package and CI | [`package.json`](package.json), [`.github/workflows/check.yml`](.github/workflows/check.yml) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs), [`test/windows-portability.mjs`](test/windows-portability.mjs) |
+| Package and CI | [`package.json`](package.json), [`package-lock.json`](package-lock.json), [`tsconfig.json`](tsconfig.json), [`.gitignore`](.gitignore), [`.github/workflows/check.yml`](.github/workflows/check.yml) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs), [`test/windows-portability.mjs`](test/windows-portability.mjs) |
 | Repository workflows | [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Writing cleanup | [`extensions/unslop.ts`](extensions/unslop.ts), [`skills/unslop/SKILL.md`](skills/unslop/SKILL.md) | [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Command-line tools | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs), [`test/tools-core.test.mjs`](test/tools-core.test.mjs) |
@@ -22,17 +22,16 @@ Private Pi package. Code and tests define behavior.
 
 ## Use
 
-- `todo` manages one branch-local dependency-aware list. `/todos` shows it. One parent task and multiple delegated tasks may run together.
-- `parallel_agents` runs independent explorer, worker, or reviewer tasks. Task count, concurrency, inputs, and process output are bounded; token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch`; applying one requires the hash returned by inspection. `/agents` lists retained patches.
+- `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it. One parent task and multiple delegated tasks may run together. Successful delegated tasks stay active until the parent verifies them.
+- `parallel_agents` runs two to six independent explorer, worker, or reviewer tasks, with up to three running at once. Inputs and process output are bounded. Token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch` before applying them. Apply verifies the exact patch hash. `/agents` lists retained patches.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
-- `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. `goal_complete` and `goal_wait` must be called without sibling tools.
-- Ponytail full mode always applies to coding work.
-- Unslop always applies to writing. `/skill:unslop` also loads the skill explicitly.
+- `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. A restored active goal also pauses and needs `/goal resume`. `goal_complete` and `goal_wait` must be called without sibling tools.
+- Parent turns use Ponytail full mode for coding and Unslop for writing. Child agents use Ponytail and Caveman. `/skill:unslop` loads the writing skill explicitly.
 - The TUI hides the startup header and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
-- `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without changing it. `/r-git` turns working changes into checked pull requests and merges them when repository rules allow.
+- `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` asks Pi to create checked pull requests and merge them when repository rules allow.
 - `web_search` sends each approved query to Exa's keyless MCP service first. It may fall back to keyless DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
-- `jq` runs sequentially with bounded input, time, and output, plus a best-effort 256MB working-set monitor. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
+- `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
 
 ## Safety
 
@@ -43,7 +42,7 @@ Private Pi package. Code and tests define behavior.
 
 ## Install
 
-Requires Node 22.19.0 or newer, Pi 0.84.2 or newer, and `jq` on `PATH`.
+Requires Node 22.19.0 or newer, Pi, and `jq` on `PATH`. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
@@ -73,15 +72,16 @@ Test UI changes in an interactive terminal.
 ## Sources
 
 - [Pi docs](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi), [releases](https://github.com/earendil-works/pi/releases), and [changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md).
-- [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
-- [npm CLI docs](https://docs.npmjs.com/cli/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
-- [TypeScript docs](https://www.typescriptlang.org/docs/), [5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
+- [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
+- [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci` reference](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
+- [TypeScript 5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
 - [TypeBox docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox), [changelog](https://github.com/sinclairzx81/typebox/tree/main/changelog), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md).
 - [LinkeDOM docs and source](https://github.com/WebReflection/linkedom) and [tags](https://github.com/WebReflection/linkedom/tags).
 - [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
 - [Git reference](https://git-scm.com/docs), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
-- [Windows `taskkill` reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
-- [GitHub Actions docs](https://docs.github.com/en/actions), [`checkout` releases](https://github.com/actions/checkout/releases), and [`setup-node` releases](https://github.com/actions/setup-node/releases).
-- [MCP specification](https://modelcontextprotocol.io/specification/latest) and [source](https://github.com/modelcontextprotocol/modelcontextprotocol).
-- [Exa MCP docs](https://docs.exa.ai/reference/exa-mcp) and [server source](https://github.com/exa-labs/exa-mcp-server).
-- [DuckDuckGo results help](https://duckduckgo.com/duckduckgo-help-pages/results/).
+- [POSIX `ps` reference](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html).
+- [Windows PowerShell 5.1 executable reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1), [`Get-Process` reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1), and [`taskkill` reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
+- [GitHub Actions docs](https://docs.github.com/en/actions), [`checkout` source](https://github.com/actions/checkout) and [v7.0.0 notes](https://github.com/actions/checkout/releases/tag/v7.0.0), and [`setup-node` source](https://github.com/actions/setup-node) and [v7.0.0 notes](https://github.com/actions/setup-node/releases/tag/v7.0.0).
+- [MCP specification](https://modelcontextprotocol.io/specification/latest), [versioning](https://modelcontextprotocol.io/docs/learn/versioning), [current changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog), and [source](https://github.com/modelcontextprotocol/modelcontextprotocol).
+- [Exa MCP docs](https://docs.exa.ai/mcp), [server source](https://github.com/exa-labs/exa-mcp-server), and [releases](https://github.com/exa-labs/exa-mcp-server/releases).
+- [DuckDuckGo non-JavaScript search help](https://duckduckgo.com/duckduckgo-help-pages/features/non-javascript) and [results help](https://duckduckgo.com/duckduckgo-help-pages/results/).
