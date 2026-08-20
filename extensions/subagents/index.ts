@@ -79,6 +79,14 @@ const AgentPatchSchema = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: DEFAULT_MAX_BYTES - 1_000 })),
 }, { additionalProperties: false });
 
+export function buildSubagentSystemPrompt(role: keyof typeof ROLE_DEFINITIONS): string {
+  return [
+    ROLE_DEFINITIONS[role].prompt,
+    CONCISE_RESPONSE_POLICY,
+    PONYTAIL_INSTRUCTIONS,
+  ].join("\n\n");
+}
+
 function resolveModel(ctx: ExtensionContext, task: AgentTask) {
   if (!ctx.model) throw new Error("parallel_agents requires a selected parent model");
   if (!task.model) return ctx.model;
@@ -274,11 +282,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
                 task,
                 todo: task.todoId === undefined ? undefined : todoSnapshot.tasks.find((todo) => todo.id === task.todoId),
               }),
-              systemPrompt: [
-                ROLE_DEFINITIONS[task.role].prompt,
-                CONCISE_RESPONSE_POLICY,
-                PONYTAIL_INSTRUCTIONS,
-              ].join("\n\n"),
+              systemPrompt: buildSubagentSystemPrompt(task.role),
               trusted: ctx.isProjectTrusted(),
               signal: abortSignal,
               onUpdate(update) {
