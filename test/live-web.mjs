@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import webExtension from "../extensions/web.ts";
+import { searchParallel } from "../extensions/web-core.ts";
 
 if (process.env.PI_LIVE_WEB !== "1") {
   console.log("Set PI_LIVE_WEB=1 to run external web checks.");
@@ -16,4 +17,7 @@ const search = await tools.get("web_search").execute(
   undefined,
 );
 assert.match(search.content[0].text, /https?:\/\//);
+
+const parallel = await searchParallel("Example Domain IANA", 3);
+assert.ok(parallel.results.some((result) => result.url.startsWith("http")));
 console.log("Live web search passed.");

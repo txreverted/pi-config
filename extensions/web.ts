@@ -12,8 +12,8 @@ import { searchWeb } from "./web-core.ts";
 const SEARCH_TRUNCATION_MARKER = "\n\n[Output truncated at 50KB.]";
 
 interface SearchDetails {
-  provider: "exa-mcp" | "duckduckgo";
-  attemptedProviders: Array<"exa-mcp" | "duckduckgo">;
+  provider: "exa-mcp" | "parallel-mcp" | "duckduckgo";
+  attemptedProviders: Array<"exa-mcp" | "parallel-mcp" | "duckduckgo">;
   query: string;
   resultCount: number;
 }
@@ -38,6 +38,10 @@ const CODE_QUERY_PATTERNS = [
   /(?:^|\n)\s*(?:const|let|var|function|class|interface|enum|type|import|export|def|async\s+def|package|using|#include)\b/im,
   /(?:^|\n)\s*(?:select\s+.+\s+from|insert\s+into|update\s+\S+\s+set|create\s+table)\b/im,
   /(?:^|\n)\s*(?:if|for|while)\s*\([^\n)]*\)\s*\{/m,
+  /^\s*(?:return|throw)\b[^\n]*;?\s*$/m,
+  /^\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]\n]+\])*\s*(?:=|\+=|-=|\*=|\/=|%=|\?\?=|&&=|\|\|=)\s*\S[^\n]*$/m,
+  /^\s*(?:\+\+|--)?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]\n]+\])*(?:\+\+|--)\s*;?\s*$/m,
+  /^\s*(?:await\s+)?(?:new\s+)?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([^\n]*\)\s*;?\s*$/m,
   /<\/?[A-Za-z][^>\n]*>/,
 ] as const;
 
@@ -77,7 +81,7 @@ export default function webExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "web search",
-    description: "Search the public web without an API key. Every approved query is sent to Exa's keyless MCP service first and may also be sent to keyless DuckDuckGo HTML on fallback. High-confidence secrets are blocked; code-like queries require TUI or RPC confirmation. Returns up to 10 titles, URLs, and snippets. Output is capped at 50KB.",
+    description: "Search the public web without an API key. Every approved query is sent to Exa's keyless MCP service first and may also be sent to keyless Parallel MCP and DuckDuckGo HTML on fallback. High-confidence secrets are blocked; code-like queries require TUI or RPC confirmation. Returns up to 10 titles, URLs, and snippets. Output is capped at 50KB.",
     promptSnippet: "Search the public web without an API key",
     promptGuidelines: [
       "Use web_search for current or external information.",
