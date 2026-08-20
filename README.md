@@ -10,11 +10,13 @@ Private Pi package. Code and tests define behavior.
 | Repository workflows | [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Writing cleanup | [`extensions/unslop.ts`](extensions/unslop.ts), [`skills/unslop/SKILL.md`](skills/unslop/SKILL.md) | [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Command-line tools | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs), [`test/tools-core.test.mjs`](test/tools-core.test.mjs) |
+| Fast file search | [`extensions/fff.ts`](extensions/fff.ts), [`package.json`](package.json) | [`test/fff-extension.test.mjs`](test/fff-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Web search | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs), [`test/web-core.test.mjs`](test/web-core.test.mjs), [`test/live-web.mjs`](test/live-web.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
 | Todos | [`extensions/todo.ts`](extensions/todo.ts), [`extensions/todo-core.ts`](extensions/todo-core.ts) | [`test/todo-extension.test.mjs`](test/todo-extension.test.mjs), [`test/todo-core.test.mjs`](test/todo-core.test.mjs) |
 | Goal mode | [`extensions/goal.ts`](extensions/goal.ts), [`extensions/goal-core.ts`](extensions/goal-core.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs), [`test/goal-core.test.mjs`](test/goal-core.test.mjs) |
 | Compact layout | [`extensions/layout.ts`](extensions/layout.ts) | [`test/layout-extension.test.mjs`](test/layout-extension.test.mjs) |
+| Context usage | [`extensions/context.ts`](extensions/context.ts), [`extensions/context-core.ts`](extensions/context-core.ts) | [`test/context-extension.test.mjs`](test/context-extension.test.mjs) |
 | Caveman output | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
 | Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs) |
 | Parallel agents | [`extensions/subagents/`](extensions/subagents/), [`extensions/coordination-core.ts`](extensions/coordination-core.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-extension.test.mjs`](test/subagents-extension.test.mjs), [`test/subagents-orchestration.test.mjs`](test/subagents-orchestration.test.mjs), [`test/subagents-process.test.mjs`](test/subagents-process.test.mjs), [`test/subagents-ui.test.mjs`](test/subagents-ui.test.mjs), [`test/subagents-worktree.test.mjs`](test/subagents-worktree.test.mjs), [`test/live-subagent.mjs`](test/live-subagent.mjs) |
@@ -25,13 +27,15 @@ Private Pi package. Code and tests define behavior.
 - `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it. One parent task and multiple delegated tasks may run together. Successful delegated tasks stay active until the parent verifies them.
 - `parallel_agents` runs two to six independent explorer, worker, or reviewer tasks, with up to three running at once. Inputs and process output are bounded. Token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch` before applying them. Apply verifies the exact patch hash. `/agents` lists retained patches.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
+- `/context` shows an estimated TUI breakdown of prompts, rules, skills, active tools, messages, output, and compacted data. It adds nothing to model context.
+- By default, FFF overrides Pi's built-in `grep` and `find`. It also backs `@` file completion. Use `/fff-health` and `/fff-rescan`. Set `PI_FFF_MODE=tools-and-ui` or `PI_FFF_MODE=tools-only` before startup for prefixed tools. Switching between override and either prefixed mode with `/fff-mode` needs `/reload` to change tool names.
 - `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. A restored active goal also pauses and needs `/goal resume`. `goal_complete` and `goal_wait` must be called without sibling tools.
-- Parent turns use Ponytail, Caveman, and Unslop. Child agents use Ponytail and Caveman. `/skill:unslop` loads the writing skill explicitly.
+- Parent turns use always-on Ponytail full mode, Caveman, and Unslop. Ponytail has no runtime level controls. Child agents use the same Ponytail policy and Caveman. `/skill:unslop` loads the writing skill explicitly.
 - The TUI hides the startup header and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` groups working-tree changes into pull requests, pushes them, and merges them without local checks.
 - `web_search` sends each approved query to Exa's keyless MCP service first. It may fall back to keyless DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
-- `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session. Pi's built-in `grep` and `find` are active.
+- `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session.
 
 ## Safety
 
@@ -72,6 +76,8 @@ Test UI changes in an interactive terminal.
 ## Sources
 
 - [Pi docs](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi), [releases](https://github.com/earendil-works/pi/releases), and [changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md).
+- [FFF 0.10.5 `pi-fff` docs and source](https://github.com/dmtrKovalenko/fff/tree/v0.10.5/packages/pi-fff) and [release](https://github.com/dmtrKovalenko/fff/releases/tag/v0.10.5).
+- The local context and Ponytail implementations reference [pi-context-view 0.4.3 source](https://github.com/dimk90/pi-context-view/tree/v0.4.3) and [release](https://github.com/dimk90/pi-context-view/releases/tag/v0.4.3), plus [Ponytail 4.9.0 source](https://github.com/DietrichGebert/ponytail/tree/v4.9.0) and [release](https://github.com/DietrichGebert/ponytail/releases/tag/v4.9.0). These are not runtime dependencies.
 - [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
 - [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci` reference](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
 - [TypeScript 5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
