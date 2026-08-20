@@ -11,7 +11,7 @@ function loadTools() {
 test("extension registers only keyless web search", () => {
   const tools = loadTools();
   assert.deepEqual([...tools.keys()], ["web_search"]);
-  assert.match(tools.get("web_search").description, /Every approved query is sent to Exa.*may also be sent.*DuckDuckGo/);
+  assert.match(tools.get("web_search").description, /Every approved query is sent to Exa.*may also be sent.*Parallel.*DuckDuckGo/);
   assert.match(tools.get("web_search").description, /secrets are blocked.*code-like queries require.*confirmation/i);
 });
 
@@ -22,12 +22,19 @@ test("web search details report every attempted provider", async () => {
   globalThis.fetch = async () => {
     calls++;
     if (calls === 1) return new Response("unavailable", { status: 503 });
-    return new Response(`<div class="result"><a class="result__a" href="https://example.com/">Example</a></div>`, { status: 200 });
+    return new Response(JSON.stringify({
+      result: {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ results: [{ title: "Example", url: "https://example.com/", excerpts: [] }] }),
+        }],
+      },
+    }), { status: 200 });
   };
   try {
     const result = await tools.get("web_search").execute("search", { query: "provider routing", limit: 1 });
-    assert.equal(result.details.provider, "duckduckgo");
-    assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "duckduckgo"]);
+    assert.equal(result.details.provider, "parallel-mcp");
+    assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "parallel-mcp"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -49,6 +56,24 @@ test("web search blocks likely secrets before network access", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("one-line code statements are classified without flagging ordinary prose", () => {
+  for (const query of [
+    "return authenticate(user);",
+    "return session.user",
+    "throw new Error(\"failed\");",
+    "session.user = authenticate(request);",
+    "counter++",
+    "authenticate(user);",
+  ]) assert.equal(classifySearchQuery(query), "code", query);
+
+  for (const query of [
+    "How does authentication work?",
+    "What does authenticate(user) return?",
+    "Find examples: simple, safe, and fast.",
+    "Find (current docs).",
+  ]) assert.equal(classifySearchQuery(query), undefined, query);
 });
 
 test("code-like web queries require interactive approval", async () => {
@@ -89,7 +114,7 @@ test("code-like web queries require interactive approval", async () => {
     fetched = false;
     context.ui.confirm = async () => false;
     await assert.rejects(
-      () => tools.get("web_search").execute("search", { query }, undefined, undefined, context),
+      () => tools.get("web_search").execute("search", { query: "return authenticate(user);" }, undefined, undefined, context),
       /not approved/,
     );
     assert.equal(fetched, false);
