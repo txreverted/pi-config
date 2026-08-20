@@ -26,8 +26,7 @@
   "pi": {
     "extensions": [
       "./extensions/tools.ts",
-      "./extensions/fff.ts",
-      "./node_modules/@ff-labs/pi-fff/src/index.ts",
+      "./extensions/indexed-search.ts",
       "./extensions/web.ts",
       "./extensions/ask.ts",
       "./extensions/todo.ts",
@@ -46,14 +45,11 @@
     ]
   },
   "dependencies": {
-    "@ff-labs/pi-fff": "0.10.5",
-    "@sinclair/typebox": "0.34.52",
     "linkedom": "0.18.13",
+    "minimatch": "10.2.5",
     "pi-context-view": "0.4.3"
   },
   "bundledDependencies": [
-    "@ff-labs/pi-fff",
-    "@sinclair/typebox",
     "pi-context-view"
   ],
   "peerDependencies": {
