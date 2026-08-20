@@ -22,10 +22,7 @@ function rendererHarness(load) {
     getActiveTools: () => [...active],
     setActiveTools(names) { active = [...names]; },
   };
-  const child = process.env.PI_CONFIG_SUBAGENT_CHILD;
-  delete process.env.PI_CONFIG_SUBAGENT_CHILD;
-  try { load(pi); }
-  finally { if (child !== undefined) process.env.PI_CONFIG_SUBAGENT_CHILD = child; }
+  load(pi);
   return { tools, lifecycle };
 }
 

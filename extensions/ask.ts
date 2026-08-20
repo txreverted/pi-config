@@ -145,7 +145,6 @@ export default function askExtension(pi: ExtensionAPI): void {
       "Before using ask_user_question, inspect available code and documentation so you do not ask for facts you can determine yourself.",
       "Do not use ask_user_question for trivial uncertainties or choices that project conventions resolve; use a safe reversible default instead.",
       "Group related questions into one ask_user_question call and explain each option's main trade-off.",
-      "Use ask_user_question in the parent before parallel_agents when delegated acceptance criteria or write ownership depend on missing user intent.",
     ],
     parameters: Type.Object({
       questions: Type.Array(QuestionSchema, {
