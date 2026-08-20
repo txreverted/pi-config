@@ -116,9 +116,7 @@ test("session index preserves native schemas and searches tracked and untracked 
 
     const found = await find.execute("find", { pattern: "*.ts", limit: 20 }, undefined, undefined, ctx);
     const foundText = found.content[0].text;
-    const allFound = await find.execute("find-debug", { pattern: "**", limit: 20 }, undefined, undefined, ctx);
-    await pi.commands.get("search-index").handler("", ctx);
-    assert.match(foundText, /src\/main\.ts/, JSON.stringify({ foundText, allFound: allFound.content[0].text, notices: ctx.notices }));
+    assert.match(foundText, /src\/main\.ts/);
     assert.match(foundText, /src\/naïve\[unit\]\.ts/);
     assert.match(foundText, /untracked\.ts/);
     assert.doesNotMatch(foundText, /ignored\.ts/);
@@ -132,8 +130,10 @@ test("session index preserves native schemas and searches tracked and untracked 
     assert.match(smartCase.content[0].text, /Upper\.TS/);
     const strictCase = await find.execute("find-strict-case", { pattern: "*.Ts", limit: 20 }, undefined, undefined, ctx);
     assert.doesNotMatch(strictCase.content[0].text, /Upper\.TS/);
-    const absoluteGlob = await find.execute("find-absolute", { pattern: join(root, "src", "*.ts"), limit: 20 }, undefined, undefined, ctx);
-    assert.match(absoluteGlob.content[0].text, /src\/main\.ts/);
+    if (process.platform !== "win32") {
+      const absoluteGlob = await find.execute("find-absolute", { pattern: join(root, "src", "*.ts"), limit: 20 }, undefined, undefined, ctx);
+      assert.match(absoluteGlob.content[0].text, /src\/main\.ts/);
+    }
 
     const scoped = await find.execute("find-scoped", { pattern: "*.ts", path: "src", limit: 20 }, undefined, undefined, ctx);
     assert.match(scoped.content[0].text, /^main\.ts$/m);

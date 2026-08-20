@@ -150,8 +150,8 @@ async function metadataIsFresh() {
 async function enumerateFiles() {
   await runCommand("git", ["rev-parse", "--is-inside-work-tree"], 64 * 1024);
   const args = [
-    "--hidden", "--color=never", "--print0", "--absolute-path", "--type", "f", "--type", "l", "--type", "d",
-    "--exclude", ".git", "--search-path", root, "--", ".",
+    "--hidden", "--color=never", "--print0", "--type", "f", "--type", "l", "--type", "d",
+    "--exclude", ".git", "--", ".", root,
   ];
   let output;
   try {
@@ -561,7 +561,6 @@ function globMatches(path, pattern, allowNegation) {
     : pattern;
   return minimatch(candidate, effectivePattern, {
     dot: true,
-    platform: "linux",
     matchBase: !effectivePattern.includes("/"),
     nocase: allowNegation ? false : pattern.toLowerCase() === pattern,
     nocomment: true,
