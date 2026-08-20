@@ -44,18 +44,18 @@ function treeLines(details: ParallelAgentsDetails, theme: Theme, expanded: boole
     `${completed}/${details.progress.length} completed`,
     `${tokens(details.usage.totalTokens)} tokens`,
     duration(elapsed),
-  ].join(" │ ");
+  ].join(" · ");
   const lines = [header];
   details.progress.forEach((task, index) => {
     const last = index === details.progress.length - 1;
     const connector = last ? "└─" : "├─";
-    const continuation = last ? "  " : "│ ";
+    const continuation = last ? "    " : " │  ";
     const elapsedMs = (task.endedAt ?? now) - (task.startedAt ?? now);
     const stats = task.status === "queued"
       ? "queued"
-      : `${task.toolCalls} tool use${task.toolCalls === 1 ? "" : "s"} │ ${tokens(task.usage.totalTokens)} tokens │ ${duration(elapsedMs)}`;
-    const label = `${role(task.role)}  ${safeDisplayLine(task.title, 80)} │ ${stats}`;
-    lines.push(theme.fg("muted", `${connector} `) + theme.fg(rowColor(task), label));
+      : `${task.toolCalls} tool use${task.toolCalls === 1 ? "" : "s"} · ${tokens(task.usage.totalTokens)} tokens · ${duration(elapsedMs)}`;
+    const label = `${role(task.role)}  ${safeDisplayLine(task.title, 80)} · ${stats}`;
+    lines.push(theme.fg("muted", ` ${connector} `) + theme.fg(rowColor(task), label));
     const activity = safeDisplayLine(task.activity ?? task.status, 160);
     if (activity) lines.push(theme.fg("muted", `${continuation} ⎿ `) + theme.fg("dim", activity));
     if (!expanded) return;
