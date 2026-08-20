@@ -11,7 +11,7 @@ function loadTools() {
 test("extension registers only keyless web search", () => {
   const tools = loadTools();
   assert.deepEqual([...tools.keys()], ["web_search"]);
-  assert.match(tools.get("web_search").description, /Every approved query is sent to Exa.*may also be sent.*DuckDuckGo/);
+  assert.match(tools.get("web_search").description, /Every approved query is sent to Exa.*may also be sent.*Parallel.*DuckDuckGo/);
   assert.match(tools.get("web_search").description, /secrets are blocked.*code-like queries require.*confirmation/i);
 });
 
@@ -22,12 +22,19 @@ test("web search details report every attempted provider", async () => {
   globalThis.fetch = async () => {
     calls++;
     if (calls === 1) return new Response("unavailable", { status: 503 });
-    return new Response(`<div class="result"><a class="result__a" href="https://example.com/">Example</a></div>`, { status: 200 });
+    return new Response(JSON.stringify({
+      result: {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ results: [{ title: "Example", url: "https://example.com/", excerpts: [] }] }),
+        }],
+      },
+    }), { status: 200 });
   };
   try {
     const result = await tools.get("web_search").execute("search", { query: "provider routing", limit: 1 });
-    assert.equal(result.details.provider, "duckduckgo");
-    assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "duckduckgo"]);
+    assert.equal(result.details.provider, "parallel-mcp");
+    assert.deepEqual(result.details.attemptedProviders, ["exa-mcp", "parallel-mcp"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
