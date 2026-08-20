@@ -20,8 +20,7 @@ const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name
 
 const extensions = [
   "./extensions/tools.ts",
-  "./extensions/fff.ts",
-  "./node_modules/@ff-labs/pi-fff/src/index.ts",
+  "./extensions/indexed-search.ts",
   "./extensions/web.ts",
   "./extensions/ask.ts",
   "./extensions/todo.ts",
@@ -41,12 +40,11 @@ test("only documented package resources are enabled", async () => {
   });
   assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
   assert.deepEqual(packageJson.dependencies, {
-    "@ff-labs/pi-fff": "0.10.5",
-    "@sinclair/typebox": "0.34.52",
     linkedom: "0.18.13",
+    minimatch: "10.2.5",
     "pi-context-view": "0.4.3",
   });
-  assert.deepEqual(packageJson.bundledDependencies, ["@ff-labs/pi-fff", "@sinclair/typebox", "pi-context-view"]);
+  assert.deepEqual(packageJson.bundledDependencies, ["pi-context-view"]);
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -158,32 +156,26 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
+      "extensions/indexed-search-worker.mjs",
       ...promptPaths,
       ...skillPaths,
     ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|themes|\.github)\//.test(path)), false);
-    for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
+    assert.equal([...names].some((path) => /^(?:test|themes|\.github|extensions\/subagents)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^node_modules\/(?:@earendil-works|@anthropic-ai|@aws-sdk)\//.test(path)), false);
+    for (const path of [
+      "AGENTS.md",
+      ".gitignore",
+      "package-lock.json",
+      "settings.json",
+      "extensions/fff.ts",
+      "node_modules/@ff-labs/pi-fff/src/index.ts",
+    ]) {
       assert.equal(names.has(path), false, path);
     }
     for (const path of [
-      "node_modules/@ff-labs/pi-fff/src/index.ts",
-      "node_modules/@ff-labs/fff-node/dist/index.js",
-      "node_modules/@ff-labs/fff-bun/dist/index.js",
-      "node_modules/@sinclair/typebox/build/esm/index.mjs",
       "node_modules/pi-context-view/src/index.ts",
       "node_modules/pi-context-view/src/ui/usage-view.ts",
-      "node_modules/ffi-rs/index.js",
     ]) assert.ok(names.has(path), path);
-    const fffTarget = process.platform === "linux"
-      ? `linux-${process.arch}-gnu`
-      : `${process.platform}-${process.arch}`;
-    const ffiTarget = process.platform === "linux"
-      ? `linux-${process.arch}-gnu`
-      : process.platform === "win32"
-        ? `win32-${process.arch}-msvc`
-        : `${process.platform}-${process.arch}`;
-    assert.ok([...names].some((path) => path.startsWith(`node_modules/@ff-labs/fff-bin-${fffTarget}/`)), fffTarget);
-    assert.ok([...names].some((path) => path.startsWith(`node_modules/@yuuang/ffi-rs-${ffiTarget}/`)), ffiTarget);
   } finally {
     await rm(cache, { recursive: true, force: true });
   }
@@ -192,7 +184,7 @@ test("package contents include runtime resources and exclude repository-only sta
 test("production tarball installs without dev dependencies and loads through Pi", async () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const temporary = await mkdtemp(join(tmpdir(), "pi-config-production-install-"));
-  const application = join(temporary, "application");
+  const application = join(temporary, "application with spaces");
   try {
     const packed = spawnSync(executable("npm"), ["pack", "--json", "--ignore-scripts", "--pack-destination", temporary], {
       cwd: root,
@@ -225,34 +217,6 @@ test("production tarball installs without dev dependencies and loads through Pi"
     });
     assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
     assert.match(loaded.stdout, /No models (?:matching|available)/);
-
-    const native = spawnSync(process.execPath, [
-      "--input-type=module",
-      "--eval",
-      `import { createRequire } from "node:module";
-       import { join } from "node:path";
-       import { pathToFileURL } from "node:url";
-       const packagePath = process.argv[1];
-       const root = process.argv[2];
-       const require = createRequire(join(packagePath, "package.json"));
-       const { FileFinder } = await import(pathToFileURL(require.resolve("@ff-labs/fff-node")).href);
-       const opened = FileFinder.create({ basePath: root, aiMode: true });
-       if (!opened.ok) throw new Error(opened.error);
-       try {
-         await opened.value.waitForScan(15_000);
-         const health = opened.value.healthCheck();
-         if (!health.ok || !health.value.filePicker.initialized) throw new Error(health.ok ? "FFF picker did not initialize" : health.error);
-       } finally {
-         opened.value.destroy();
-       }`,
-      packagePath,
-      application,
-    ], {
-      cwd: application,
-      encoding: "utf8",
-      timeout: 30_000,
-    });
-    assert.equal(native.status, 0, native.stderr || native.stdout);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -286,10 +250,10 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
     /It can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
     /retains at most 10 truncated outputs or 50MB per session/,
-    /By default, FFF overrides Pi's built-in `grep` and `find`/,
     /PI_LIVE_WEB=1/,
     /weekly and on manual dispatch.*non-blocking provider-drift signals/,
   ]) assert.match(readme, pattern);
+  assert.doesNotMatch(readme, /FFF|pi-fff/);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {

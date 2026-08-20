@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 const patterns = [
   "bounded process keeps small output in memory",
   "bounded process enforces timeouts and cancellation",
+  "session index preserves native schemas",
 ];
-const files = ["test/tools-core.test.mjs"];
+const files = ["test/tools-core.test.mjs", "test/indexed-search.test.mjs"];
 if (spawnSync("jq", ["--version"], { encoding: "utf8" }).status === 0) {
   patterns.push("jq executes shell-free input", "jq excludes parent secrets");
   files.push("test/tools-extension.test.mjs");

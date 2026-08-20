@@ -51,7 +51,7 @@ function positiveInteger(value: number, name: string): number {
   return value;
 }
 
-async function processMemoryBytes(pid: number): Promise<number | undefined> {
+export async function processWorkingSetBytes(pid: number): Promise<number | undefined> {
   const command = process.platform === "win32" ? "powershell.exe" : "ps";
   const args = process.platform === "win32"
     ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).WorkingSet64`]
@@ -122,7 +122,7 @@ export async function runBoundedProcess(
   const maxMemoryBytes = positiveInteger(options.maxMemoryBytes ?? DEFAULT_PROCESS_MAX_MEMORY_BYTES, "maxMemoryBytes");
   const memoryPollMs = positiveInteger(options.memoryPollMs ?? DEFAULT_MEMORY_POLL_MS, "memoryPollMs");
   const timeoutMs = positiveInteger(options.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS, "timeoutMs");
-  const memoryUsage = options.memoryUsage ?? processMemoryBytes;
+  const memoryUsage = options.memoryUsage ?? processWorkingSetBytes;
   const tempDir = await mkdtemp(join(tmpdir(), `${options.tempPrefix ?? `pi-${basename(command)}`}-`));
   const fullOutputPath = join(tempDir, "output.txt");
   const outputStream = createWriteStream(fullOutputPath, { flags: "wx", mode: 0o600 });
