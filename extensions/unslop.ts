@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const skill = readFileSync(new URL("../skills/unslop/SKILL.md", import.meta.url), "utf8")
+  .replace(/\r\n?/g, "\n")
   .replace(/^---\n[\s\S]*?\n---\n+/, "")
   .trim();
 
