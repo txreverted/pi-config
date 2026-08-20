@@ -14,6 +14,8 @@ const readme = normalizeLines(await readFile(new URL("../README.md", import.meta
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
+const skillNames = ["unslop"];
+const skillPaths = skillNames.map((name) => `skills/${name}/SKILL.md`);
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
@@ -24,6 +26,7 @@ const extensions = [
   "./extensions/goal.ts",
   "./extensions/layout.ts",
   "./extensions/concise.ts",
+  "./extensions/unslop.ts",
   "./extensions/ponytail.ts",
   "./extensions/subagents/index.ts",
 ];
@@ -32,8 +35,9 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.pi, {
     extensions,
     prompts: ["./prompts"],
+    skills: ["./skills"],
   });
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "README.md"]);
+  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
   assert.deepEqual(packageJson.dependencies, { linkedom: "0.18.13" });
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
@@ -94,6 +98,30 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
   }
 });
 
+test("writing skill loads through Pi", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-config-skills-"));
+  try {
+    const root = fileURLToPath(new URL("../", import.meta.url));
+    const loader = new DefaultResourceLoader({
+      cwd: root,
+      agentDir,
+      additionalSkillPaths: [join(root, "skills")],
+      noExtensions: true,
+      noSkills: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const loaded = loader.getSkills();
+    assert.deepEqual(loaded.diagnostics, []);
+    assert.deepEqual(loaded.skills.map(({ name, description }) => ({ name, description })), [
+      { name: "unslop", description: "Cut AI tells from any writing. Must always apply." },
+    ]);
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("extension source uses only approved special UI glyphs", async () => {
   const approved = new Set(Array.from("□■☒⎿├─│└〉"));
   const extensionRoot = fileURLToPath(new URL("../extensions/", import.meta.url));
@@ -124,6 +152,7 @@ test("package contents include runtime resources and exclude repository-only sta
       "extensions/subagents/index.ts",
       "extensions/subagents/child.ts",
       ...promptPaths,
+      ...skillPaths,
     ]) assert.ok(names.has(path), path);
     assert.equal([...names].some((path) => /^(?:test|themes|\.github)\//.test(path)), false);
     for (const path of ["AGENTS.md", ".gitignore", "package-lock.json", "settings.json"]) {
@@ -193,8 +222,9 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
-  for (const path of promptPaths) await access(new URL(`../${path}`, import.meta.url));
+  for (const path of [...promptPaths, ...skillPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
+  assert.match(readme, /\/skill:unslop/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
   assert.match(readme, /parallel_agents/);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
