@@ -9,7 +9,7 @@ Private Pi package. Code and tests define behavior.
 | Package and CI | [`package.json`](package.json), [`package-lock.json`](package-lock.json), [`tsconfig.json`](tsconfig.json), [`.gitignore`](.gitignore), [`.github/workflows/check.yml`](.github/workflows/check.yml) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs), [`test/windows-portability.mjs`](test/windows-portability.mjs) |
 | Repository workflows | [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Writing cleanup | [`extensions/unslop.ts`](extensions/unslop.ts), [`skills/unslop/SKILL.md`](skills/unslop/SKILL.md) | [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
-| Command-line tools | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs), [`test/tools-core.test.mjs`](test/tools-core.test.mjs) |
+| Bounded jq | [`extensions/tools.ts`](extensions/tools.ts), [`extensions/tools-core.ts`](extensions/tools-core.ts) | [`test/tools-extension.test.mjs`](test/tools-extension.test.mjs), [`test/tools-core.test.mjs`](test/tools-core.test.mjs) |
 | Indexed code search | [`extensions/indexed-search.ts`](extensions/indexed-search.ts), [`extensions/indexed-search-worker.mjs`](extensions/indexed-search-worker.mjs) | [`test/indexed-search.test.mjs`](test/indexed-search.test.mjs) |
 | Web search | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs), [`test/web-core.test.mjs`](test/web-core.test.mjs), [`test/live-web.mjs`](test/live-web.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
@@ -32,7 +32,7 @@ Private Pi package. Code and tests define behavior.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without code changes. `/r-git` creates branches, pushes them, opens pull requests, and merges them without local checks.
 - `web_search` sends each permitted query to Exa's keyless MCP service first. It may fall back to DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
 - `grep` and `find` switch to a session-local index after it scans a Git-backed working directory. Regex, unsupported searches, stale scans, and non-Git directories use Pi's native tools. `/search-index` shows its state. `/search-index rescan` rebuilds it.
-- `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session.
+- `jq` runs sequentially with bounded direct input, a 16KB argument-vector limit, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session.
 
 ## Safety
 
