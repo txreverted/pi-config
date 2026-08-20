@@ -76,6 +76,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     const docs = expandPromptTemplate("/r-docs", loaded.prompts);
     assert.match(docs, /Scope: entire repository\./);
     assert.match(docs, /Inventory every `\.md` file in scope/);
+    assert.match(docs, /End the main README with `## Sources`/);
     assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
     const implementation = expandPromptTemplate("/r-impl extensions tests", loaded.prompts);
