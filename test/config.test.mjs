@@ -30,7 +30,7 @@ const extensions = [
   "./extensions/concise.ts",
   "./extensions/unslop.ts",
   "./extensions/ponytail.ts",
-  "./extensions/context.ts",
+  "./node_modules/pi-context-view/src/index.ts",
   "./extensions/subagents/index.ts",
 ];
 
@@ -45,8 +45,9 @@ test("only documented package resources are enabled", async () => {
     "@ff-labs/pi-fff": "0.10.5",
     "@sinclair/typebox": "0.34.52",
     linkedom: "0.18.13",
+    "pi-context-view": "0.4.3",
   });
-  assert.deepEqual(packageJson.bundledDependencies, ["@ff-labs/pi-fff", "@sinclair/typebox"]);
+  assert.deepEqual(packageJson.bundledDependencies, ["@ff-labs/pi-fff", "@sinclair/typebox", "pi-context-view"]);
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -158,7 +159,6 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
-      "extensions/context-core.ts",
       "extensions/coordination-core.ts",
       "extensions/subagents/index.ts",
       "extensions/subagents/child.ts",
@@ -174,6 +174,8 @@ test("package contents include runtime resources and exclude repository-only sta
       "node_modules/@ff-labs/fff-node/dist/index.js",
       "node_modules/@ff-labs/fff-bun/dist/index.js",
       "node_modules/@sinclair/typebox/build/esm/index.mjs",
+      "node_modules/pi-context-view/src/index.ts",
+      "node_modules/pi-context-view/src/ui/usage-view.ts",
       "node_modules/ffi-rs/index.js",
     ]) assert.ok(names.has(path), path);
     const fffTarget = process.platform === "linux"
