@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { Container, Spacer, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import layoutExtension, {
   compactCwd,
-  compactStartupSpacing,
   createAnswerTimer,
   formatCompactFooter,
   formatElapsed,
@@ -101,41 +100,6 @@ test("cost label distinguishes subscription-backed auth from API access", () => 
   assert.equal(getCostLabel(context("anthropic", true)), "sub");
   assert.equal(getCostLabel(context("anthropic", true, false)), "api");
   assert.equal(getCostLabel(context("kimi-coding", false, false)), "sub");
-});
-
-test("startup layout moves context below extensions and collapses only redundant spacers", () => {
-  const adjustedSpacers = new Set();
-  const header = { render: () => [], invalidate() {} };
-  const headerContainer = new Container();
-  headerContainer.addChild(new Spacer(1));
-  headerContainer.addChild(header);
-  headerContainer.addChild(new Spacer(1));
-  const resources = new Container();
-  resources.addChild(new Text("[Context]\n  AGENTS.md", 0, 0));
-  resources.addChild(new Spacer(1));
-  resources.addChild(new Text("[Extensions]\n  layout.ts", 0, 0));
-  resources.addChild(new Spacer(1));
-  const chat = new Container();
-  const document = new Container();
-  document.addChild(headerContainer);
-  document.addChild(resources);
-  document.addChild(chat);
-  const tui = { children: [document] };
-
-  compactStartupSpacing(tui, header, adjustedSpacers);
-  assert.deepEqual(headerContainer.render(80), []);
-  assert.deepEqual(resources.render(80).map((line) => line.trimEnd()), [
-    "[Extensions]",
-    "  layout.ts",
-    "",
-    "[Context]",
-    "  AGENTS.md",
-  ]);
-
-  chat.addChild(new Text("message", 0, 0));
-  compactStartupSpacing(tui, header, adjustedSpacers);
-  assert.equal(resources.render(80).at(-1), "");
-  assert.equal(adjustedSpacers.size, 3);
 });
 
 test("session cost includes assistant, tool, compaction, and branch-summary usage", () => {
@@ -238,7 +202,6 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     assert.match(footer.render(200)[0], /\$0\.250 \(api\)/);
 
     footer.dispose();
-    header.dispose();
     assert.equal(unsubscribed, true);
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
