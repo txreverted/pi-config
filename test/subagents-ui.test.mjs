@@ -49,7 +49,7 @@ test("agent tree rendering is Claude-like, sanitized, and width bounded", () => 
   assert.match(text, /⎿ searching/);
 });
 
-test("agent status colors exclude tree connectors", () => {
+test("agent row colors exclude tree connectors", () => {
   const colored = details();
   colored.progress[2] = {
     ...colored.progress[2],
@@ -59,9 +59,11 @@ test("agent status colors exclude tree connectors", () => {
     endedAt: Date.now(),
   };
   const lines = renderAgents(colored, ansiTheme, false).render(160);
+  const activity = lines.find((line) => line.includes("searching"));
   const succeeded = lines.find((line) => line.includes("Worker"));
   const failed = lines.find((line) => line.includes("Reviewer"));
 
+  assert.ok(activity?.startsWith("\x1b[90m│  ⎿ \x1b[0m\x1b[2msearching"));
   assert.ok(succeeded?.startsWith("\x1b[90m├─ \x1b[0m\x1b[32mWorker"));
   assert.ok(failed?.startsWith("\x1b[90m└─ \x1b[0m\x1b[31mReviewer"));
 });

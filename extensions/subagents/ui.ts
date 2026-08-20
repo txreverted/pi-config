@@ -57,7 +57,7 @@ function treeLines(details: ParallelAgentsDetails, theme: Theme, expanded: boole
     const label = `${role(task.role)}  ${safeDisplayLine(task.title, 80)} │ ${stats}`;
     lines.push(theme.fg("muted", `${connector} `) + theme.fg(rowColor(task), label));
     const activity = safeDisplayLine(task.activity ?? task.status, 160);
-    if (activity) lines.push(theme.fg("dim", `${continuation} ⎿ ${activity}`));
+    if (activity) lines.push(theme.fg("muted", `${continuation} ⎿ `) + theme.fg("dim", activity));
     if (!expanded) return;
     const result = details.results.find((candidate) => candidate.id === task.id);
     if (!result) return;
