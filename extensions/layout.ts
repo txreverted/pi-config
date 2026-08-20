@@ -133,9 +133,9 @@ function joinFooterSides(left: string, right: string, width: number): string {
   return `${fittedLeft}${" ".repeat(Math.max(1, width - visibleWidth(fittedLeft) - fittedRightWidth))}${fittedRight}`;
 }
 
-export function formatCompactFooter(values: CompactFooterValues, width: number): string {
+export function formatCompactFooter(values: CompactFooterValues, width: number): string[] {
   const safeWidth = Math.max(0, Math.floor(width));
-  if (!safeWidth) return "";
+  if (!safeWidth) return ["", ""];
 
   const location = `${safeDisplayLine(values.cwd, 2_000)}${values.branch ? `(${safeDisplayLine(values.branch, 500)})` : ""}`;
   const status = values.statuses.map((value) => safeDisplayLine(value, 500)).filter(Boolean).join(" ");
@@ -147,40 +147,16 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
     : "";
   const model = `${safeDisplayLine(values.model ?? "no-model", 500)}${values.thinking ? ` (${safeDisplayLine(values.thinking, 50)})` : ""}`;
   const cost = Number.isFinite(values.cost) ? Math.max(0, values.cost) : 0;
+  const details = [
+    `$${cost.toFixed(3)} (${values.costLabel})`,
+    context,
+    formatElapsed(values.elapsedSeconds),
+    status,
+  ].filter(Boolean).join(" ");
+  const detailWidth = visibleWidth(details) + 1 + visibleWidth(model);
+  const fittedDetails = status && detailWidth > safeWidth ? status : details;
 
-  let showElapsed = true;
-  let showCost = true;
-  let showLocation = true;
-  let showContext = true;
-  let showModel = true;
-  const build = () => {
-    const left = [
-      showLocation ? location : "",
-      showElapsed ? formatElapsed(values.elapsedSeconds) : "",
-      status,
-    ].filter(Boolean).join(" ");
-    const right = [
-      showCost ? `$${cost.toFixed(3)} (${values.costLabel})` : "",
-      showContext ? context : "",
-      showModel ? model : "",
-    ].filter(Boolean).join(" ");
-    return { left, right };
-  };
-
-  for (const hide of [
-    () => { showElapsed = false; },
-    () => { showCost = false; },
-    () => { if (status) showLocation = false; },
-    () => { if (status) showModel = false; },
-    () => { if (status) showContext = false; },
-  ]) {
-    const { left, right } = build();
-    if (visibleWidth(left) + (left && right ? 1 : 0) + visibleWidth(right) <= safeWidth) break;
-    hide();
-  }
-
-  const { left, right } = build();
-  return joinFooterSides(left, right, safeWidth);
+  return [truncateToWidth(location, safeWidth, "..."), joinFooterSides(fittedDetails, model, safeWidth)];
 }
 
 function installLayout(
@@ -233,7 +209,7 @@ function installLayout(
         const statuses = [...footerData.getExtensionStatuses().entries()]
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([, text]) => text);
-        const line = formatCompactFooter({
+        return formatCompactFooter({
           cwd: compactCwd(ctx.sessionManager.getCwd()),
           branch: footerData.getGitBranch(),
           elapsedSeconds: answerElapsedSeconds(),
@@ -245,8 +221,7 @@ function installLayout(
           autoCompact,
           model: ctx.model?.id,
           thinking: ctx.model?.reasoning ? ctx.thinkingLevel : undefined,
-        }, width);
-        return [theme.fg("dim", line)];
+        }, width).map((line) => theme.fg("dim", line));
       },
       invalidate() {},
       dispose() {
