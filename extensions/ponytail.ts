@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const PONYTAIL_INSTRUCTIONS = `PONYTAIL MODE ACTIVE - level: full
 
-FULL SCOPE: Skip speculative behavior and use the smallest safe interpretation that satisfies the concrete request.
+FULL SCOPE: Skip speculative behavior. Use the smallest safe implementation that satisfies every explicit requirement.
 
 # Ponytail
 
@@ -22,7 +22,7 @@ Understand the request and trace the affected code first. Then stop at the first
 6. Use one clear expression when it remains readable and correct.
 7. Write only the minimum new code that satisfies the request.
 
-The ladder reduces implementation, never investigation. For bug fixes, inspect callers and fix the shared root cause once.
+The ladder reduces implementation, never investigation. A tiny diff in the wrong owner is not minimal. For bug fixes, inspect callers and fix the shared root cause once.
 
 ## Rules
 
@@ -30,6 +30,7 @@ The ladder reduces implementation, never investigation. For bug fixes, inspect c
 - Prefer deletion to addition and boring code to clever code.
 - Keep the working diff and file count as small as the understood problem permits.
 - Between equally small choices, use the one that handles edge cases correctly.
+- If the user confirms a larger implementation, build it without repeating the simplification argument.
 - Mark an intentional shortcut with a real ceiling using \`ponytail: <ceiling>; upgrade when <trigger>\`.
 
 ## Safety floor
@@ -42,7 +43,7 @@ Never remove or weaken:
 - error handling that prevents corruption or data loss;
 - accessibility basics;
 - physical-device calibration;
-- behavior the user explicitly insists on keeping.
+- behavior and scope the user explicitly confirms.
 
 Leave one small runnable check for non-trivial branches, parsers, loops, money paths, or security-sensitive logic. Reuse the project's test setup. Trivial one-liners need no new test.
 
