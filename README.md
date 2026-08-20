@@ -25,7 +25,7 @@ Private Pi package. Code and tests define behavior.
 - Caveman keeps output terse without dropping requested detail.
 - Unslop is always on. `/skill:unslop` explicitly invokes the same skill.
 - The TUI hides the startup header. Its two-line footer shows the working directory above cost, context use, and answer time. The model stays at the lower right.
-- `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without code changes. `/r-git` creates branches, pushes them, opens pull requests, and merges them without local checks.
+- `/r-docs [scope]` trims documentation for coding agents. `/r-impl [scope]` audits implementation without code changes. `/r-git` splits unstaged changes into pull requests and merges them without local checks.
 - `web_search` sends each permitted query to Exa's keyless MCP service first. It falls back to keyless Parallel MCP, then DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
 - `grep` and `find` use Pi's native tools. No background code index runs.
 
