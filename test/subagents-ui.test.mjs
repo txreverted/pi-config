@@ -42,11 +42,11 @@ test("agent tree rendering is Claude-like, sanitized, and width bounded", () => 
     assert.ok(lines.every((line) => visibleWidth(line) <= width));
   }
   const text = renderAgents(details(), theme, false).render(120).join("\n");
-  assert.match(text, /^1\/3 completed │ 12k tokens/m);
-  assert.doesNotMatch(text, /^Agents(?: │|$)/m);
-  assert.match(text, /├─ Explorer/);
-  assert.match(text, /└─ Reviewer/);
-  assert.match(text, /⎿ searching/);
+  assert.match(text, /^1\/3 completed · 12k tokens/m);
+  assert.doesNotMatch(text, /^Agents(?: ·|$)/m);
+  assert.match(text, /^ ├─ Explorer .* · 3 tool uses · 12k tokens · /m);
+  assert.match(text, /^ └─ Reviewer  Inspect API · queued$/m);
+  assert.match(text, /^ │   ⎿ searching$/m);
 });
 
 test("agent row colors exclude tree connectors", () => {
@@ -63,9 +63,9 @@ test("agent row colors exclude tree connectors", () => {
   const succeeded = lines.find((line) => line.includes("Worker"));
   const failed = lines.find((line) => line.includes("Reviewer"));
 
-  assert.ok(activity?.startsWith("\x1b[90m│  ⎿ \x1b[0m\x1b[2msearching"));
-  assert.ok(succeeded?.startsWith("\x1b[90m├─ \x1b[0m\x1b[32mWorker"));
-  assert.ok(failed?.startsWith("\x1b[90m└─ \x1b[0m\x1b[31mReviewer"));
+  assert.ok(activity?.startsWith("\x1b[90m │   ⎿ \x1b[0m\x1b[2msearching"));
+  assert.ok(succeeded?.startsWith("\x1b[90m ├─ \x1b[0m\x1b[32mWorker"));
+  assert.ok(failed?.startsWith("\x1b[90m └─ \x1b[0m\x1b[31mReviewer"));
 });
 
 test("expanded agent rendering shows measured patch state", () => {

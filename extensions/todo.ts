@@ -43,7 +43,7 @@ function taskLine(task: TodoTask, liveActivity?: string): string {
   const mark = task.status === "completed" ? "☒" : task.status === "in_progress" ? "■" : "□";
   const role = task.delegation ? task.delegation.role[0]!.toUpperCase() + task.delegation.role.slice(1) : undefined;
   const current = liveActivity ?? (task.delegation ? `${role}: ${task.delegation.phase.replaceAll("_", " ")}` : task.activeForm);
-  const activity = task.status === "in_progress" && current ? ` │ ${current}` : "";
+  const activity = task.status === "in_progress" && current ? ` · ${current}` : "";
   const blockers = task.blockedBy.length ? ` depends on ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
   return `${mark} #${task.id} ${task.subject}${activity}${blockers}`;
 }
@@ -97,12 +97,16 @@ export default function todoExtension(pi: ExtensionAPI): void {
         let shownCount = Math.min(WIDGET_TASK_LINES, bodyRows, unfinished.length);
         if (unfinished.length > shownCount && shownCount === bodyRows) shownCount = Math.max(0, shownCount - 1);
         const shown = unfinished.slice(0, shownCount);
+        const hiddenCount = unfinished.length - shown.length;
         const lines = [
           theme.fg("accent", theme.bold(summary)),
-          ...shown.map((task) => taskLine(task, liveActivity.get(task.id))),
+          ...shown.map((task, index) => {
+            const connector = index === shown.length - 1 && hiddenCount === 0 ? "└─" : "├─";
+            return ` ${connector} ${taskLine(task, liveActivity.get(task.id))}`;
+          }),
         ];
-        if (unfinished.length > shown.length && bodyRows > shown.length) {
-          lines.push(theme.fg("dim", `${unfinished.length - shown.length} more`));
+        if (hiddenCount > 0 && bodyRows > shown.length) {
+          lines.push(theme.fg("dim", ` └─ ${hiddenCount} more`));
         }
         return lines.map(row);
       },

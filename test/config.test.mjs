@@ -124,7 +124,7 @@ test("writing skill loads through Pi", async () => {
 });
 
 test("extension source uses only approved special UI glyphs", async () => {
-  const approved = new Set(Array.from("□■☒⎿├─│└〉"));
+  const approved = new Set(Array.from("□■☒⎿├─│└〉·"));
   const extensionRoot = fileURLToPath(new URL("../extensions/", import.meta.url));
   const files = (await readdir(extensionRoot, { recursive: true })).filter((name) => name.endsWith(".ts"));
   for (const file of files) {
