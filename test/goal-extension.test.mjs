@@ -86,6 +86,7 @@ test("fresh sessions hide goal tools; activation reveals them and uses untrusted
   const injected = await h.events.get("before_agent_start")({ prompt: h.messages[0], systemPrompt: "BASE" }, h.context);
   assert.match(injected.systemPrompt, /goal controller user message/);
   assert.match(injected.systemPrompt, /Current goal_id:/);
+  assert.match(injected.systemPrompt, /run one final aggregate check after all edits/);
   assert.doesNotMatch(injected.systemPrompt, new RegExp(sentinel));
   assert.ok(["goal_complete", "goal_wait"].every((name) => h.active().includes(name)));
   assert.match(h.statuses.at(-1).value, /goal: active/);
