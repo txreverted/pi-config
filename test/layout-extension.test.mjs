@@ -77,15 +77,15 @@ test("compact footer prioritizes extension status and sanitizes it", () => {
   const prioritized = {
     ...values,
     cwd: "~/a/very/long/project/directory/that/will/not/fit",
-    statuses: ["goal:\nactive"],
+    statuses: ["sync:\nactive"],
   };
   const line = formatCompactFooter(prioritized, 60);
 
   assert.equal(visibleWidth(line), 60);
-  assert.match(line, /goal: active/);
+  assert.match(line, /sync: active/);
   assert.doesNotMatch(line, /pi v|1m30|\$0\.000/);
-  assert.equal(formatCompactFooter(prioritized, 20), "goal: active");
-  assert.equal(formatCompactFooter(prioritized, 12), "goal: active");
+  assert.equal(formatCompactFooter(prioritized, 20), "sync: active");
+  assert.equal(formatCompactFooter(prioritized, 12), "sync: active");
 });
 
 test("cost label distinguishes subscription-backed auth from API access", () => {
@@ -179,7 +179,7 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
       { fg: (_color, text) => text },
       {
         getGitBranch: () => "main",
-        getExtensionStatuses: () => new Map([["goal", "goal: active"]]),
+        getExtensionStatuses: () => new Map([["sync", "sync: active"]]),
         onBranchChange: () => () => { unsubscribed = true; },
       },
     );
@@ -187,7 +187,7 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     footer.render(80);
     assert.equal(lines.length, 1);
     assert.equal(visibleWidth(lines[0]), 80);
-    assert.match(lines[0], /goal: active/);
+    assert.match(lines[0], /sync: active/);
     assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
 
     entries.push({ type: "message", message: { role: "toolResult", usage: { cost: { total: 0.5 } } } });

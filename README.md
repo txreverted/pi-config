@@ -11,7 +11,6 @@ Private Pi package. Code and tests define behavior.
 | Writing cleanup | [`extensions/unslop.ts`](extensions/unslop.ts), [`skills/unslop/SKILL.md`](skills/unslop/SKILL.md) | [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Web search | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts) | [`test/web-extension.test.mjs`](test/web-extension.test.mjs), [`test/web-core.test.mjs`](test/web-core.test.mjs), [`test/live-web.mjs`](test/live-web.mjs) |
 | User questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
-| Goal mode | [`extensions/goal.ts`](extensions/goal.ts), [`extensions/goal-core.ts`](extensions/goal-core.ts) | [`test/goal-extension.test.mjs`](test/goal-extension.test.mjs), [`test/goal-core.test.mjs`](test/goal-core.test.mjs) |
 | Compact layout | [`extensions/layout.ts`](extensions/layout.ts) | [`test/layout-extension.test.mjs`](test/layout-extension.test.mjs) |
 | Context views | [`pi-context-view 0.4.3`](https://github.com/dimk90/pi-context-view/tree/v0.4.3), [`package.json`](package.json) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Caveman output | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
@@ -22,7 +21,6 @@ Private Pi package. Code and tests define behavior.
 
 - `ask_user_question` asks one to four questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/context` runs in TUI mode. It shows estimated context usage. `/context injections` shows the captured system prompt, tool definitions, skills, context files, extension prompt additions, and injected messages. The extension adds no instructions or messages to normal model context.
-- `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. Failed and restored active goals pause. `goal_complete` and `goal_wait` must run without sibling tools.
 - Ponytail full mode instructs the model to batch edits before one final project check. It does not repeat a passing check unless later edits can affect it. This is a prompt policy, not a command blocker.
 - Caveman keeps output terse without dropping requested detail.
 - Unslop is always on. `/skill:unslop` explicitly invokes the same skill.
@@ -33,7 +31,6 @@ Private Pi package. Code and tests define behavior.
 
 ## Safety
 
-- Goal mode has no token or runtime ceiling. It can use provider quota until completion, waiting, user cancellation, or provider failure.
 - Never send secrets or private code through `web_search`.
 - [`.gitignore`](.gitignore) excludes local settings, auth, keys, sessions, and transcripts.
 
