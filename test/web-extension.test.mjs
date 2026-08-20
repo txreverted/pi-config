@@ -58,6 +58,24 @@ test("web search blocks likely secrets before network access", async () => {
   }
 });
 
+test("one-line code statements are classified without flagging ordinary prose", () => {
+  for (const query of [
+    "return authenticate(user);",
+    "return session.user",
+    "throw new Error(\"failed\");",
+    "session.user = authenticate(request);",
+    "counter++",
+    "authenticate(user);",
+  ]) assert.equal(classifySearchQuery(query), "code", query);
+
+  for (const query of [
+    "How does authentication work?",
+    "What does authenticate(user) return?",
+    "Find examples: simple, safe, and fast.",
+    "Find (current docs).",
+  ]) assert.equal(classifySearchQuery(query), undefined, query);
+});
+
 test("code-like web queries require interactive approval", async () => {
   const tools = loadTools();
   const query = "const privateValue = loadProjectData();";
@@ -96,7 +114,7 @@ test("code-like web queries require interactive approval", async () => {
     fetched = false;
     context.ui.confirm = async () => false;
     await assert.rejects(
-      () => tools.get("web_search").execute("search", { query }, undefined, undefined, context),
+      () => tools.get("web_search").execute("search", { query: "return authenticate(user);" }, undefined, undefined, context),
       /not approved/,
     );
     assert.equal(fetched, false);

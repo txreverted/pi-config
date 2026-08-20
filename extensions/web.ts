@@ -38,6 +38,10 @@ const CODE_QUERY_PATTERNS = [
   /(?:^|\n)\s*(?:const|let|var|function|class|interface|enum|type|import|export|def|async\s+def|package|using|#include)\b/im,
   /(?:^|\n)\s*(?:select\s+.+\s+from|insert\s+into|update\s+\S+\s+set|create\s+table)\b/im,
   /(?:^|\n)\s*(?:if|for|while)\s*\([^\n)]*\)\s*\{/m,
+  /^\s*(?:return|throw)\b[^\n]*;?\s*$/m,
+  /^\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]\n]+\])*\s*(?:=|\+=|-=|\*=|\/=|%=|\?\?=|&&=|\|\|=)\s*\S[^\n]*$/m,
+  /^\s*(?:\+\+|--)?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]\n]+\])*(?:\+\+|--)\s*;?\s*$/m,
+  /^\s*(?:await\s+)?(?:new\s+)?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([^\n]*\)\s*;?\s*$/m,
   /<\/?[A-Za-z][^>\n]*>/,
 ] as const;
 
