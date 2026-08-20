@@ -24,17 +24,16 @@ Private Pi package. Code and tests define behavior.
 
 ## Use
 
-- `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it. One parent task and multiple delegated tasks may run together. Successful delegated tasks stay active until the parent verifies them.
-- `parallel_agents` runs two to six independent explorer, worker, or reviewer tasks, with up to three running at once. Inputs and process output are bounded. Token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch` before applying them. Apply verifies the exact patch hash. `/agents` lists retained patches.
-- `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
+- `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it. Successful delegated tasks stay active until the parent verifies them.
+- `parallel_agents` runs two to six independent tasks, with up to three running at once. Workers edit isolated Git worktrees without shell tools. Inspect each patch with `agent_patch` before applying its exact hash. `/agents` lists retained patches.
+- `ask_user_question` asks one to four questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/context` shows an estimated TUI breakdown of prompts, rules, skills, active tools, messages, output, and compacted data. It adds nothing to model context.
 - By default, FFF overrides Pi's built-in `grep` and `find`. It also backs `@` file completion. Use `/fff-health` and `/fff-rescan`. Set `PI_FFF_MODE=tools-and-ui` or `PI_FFF_MODE=tools-only` before startup for prefixed tools. Switching between override and either prefixed mode with `/fff-mode` needs `/reload` to change tool names.
-- `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. A restored active goal also pauses and needs `/goal resume`. `goal_complete` and `goal_wait` must be called without sibling tools.
-- Parent turns use always-on Ponytail full mode, Caveman, and Unslop. Ponytail has no runtime level controls. Child agents use the same Ponytail policy and Caveman. `/skill:unslop` loads the writing skill explicitly.
+- `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. Failed and restored active goals pause. `goal_complete` and `goal_wait` must run without sibling tools.
+- Parent turns use always-on Ponytail full mode, Caveman, and Unslop. Child agents use the same Ponytail policy and Caveman. Caveman keeps output terse without dropping requested detail. `/skill:unslop` loads the writing skill.
 - The TUI hides the startup header and uses a responsive one-line footer.
-- Caveman output stays terse while preserving technical details and requested depth.
-- `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` groups working-tree changes into pull requests, pushes them, and merges them without local checks.
-- `web_search` sends each approved query to Exa's keyless MCP service first. It may fall back to keyless DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
+- `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without code changes. `/r-git` creates, pushes, and merges pull requests without local checks.
+- `web_search` sends each permitted query to Exa's keyless MCP service first. It may fall back to DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
 - `jq` runs sequentially with bounded direct input and arguments, a two-minute timeout, a 10MB combined output cap, and a best-effort 256MB working-set monitor. File contents are not pre-bounded. It retains at most 10 truncated outputs or 50MB per session.
 
 ## Safety
@@ -46,7 +45,7 @@ Private Pi package. Code and tests define behavior.
 
 ## Install
 
-Requires Node 22.19.0 or newer, Pi, and `jq` on `PATH`. Worker agents also require Git. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
+Use Node 22.19.0 or newer and Pi. Install `jq` on `PATH` for the `jq` tool. Worker agents require Git. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
@@ -60,7 +59,7 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-[`.github/workflows/check.yml`](.github/workflows/check.yml) runs `npm run check` on Ubuntu and Windows. Windows also runs `npm run test:windows`.
+[`.github/workflows/check.yml`](.github/workflows/check.yml) runs `npm run check` against pinned and latest Pi on Ubuntu. Windows runs the pinned version plus `npm run test:windows`.
 
 Live checks use external services.
 
@@ -69,26 +68,23 @@ PI_LIVE_WEB=1 npm run test:live-web
 PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model> npm run test:live-subagent
 ```
 
-CI runs the web check weekly and on manual dispatch. Its failures are non-blocking provider-drift signals. The subagent smoke is manual because it spends configured provider quota.
+The workflow runs the full matrix weekly and on manual dispatch. Web failures are non-blocking provider-drift signals. The subagent check is local only because it spends configured provider quota.
 
 Test UI changes in an interactive terminal.
 
 ## Sources
 
-- [Pi docs](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi), [releases](https://github.com/earendil-works/pi/releases), and [changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md).
+- [Pi 0.84.2 docs](https://github.com/earendil-works/pi/tree/v0.84.2/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi/tree/v0.84.2), [release](https://github.com/earendil-works/pi/releases/tag/v0.84.2), and [changelog with migrations](https://github.com/earendil-works/pi/blob/v0.84.2/packages/coding-agent/CHANGELOG.md).
 - [FFF 0.10.5 `pi-fff` docs and source](https://github.com/dmtrKovalenko/fff/tree/v0.10.5/packages/pi-fff) and [release](https://github.com/dmtrKovalenko/fff/releases/tag/v0.10.5).
 - The local context and Ponytail implementations reference [pi-context-view 0.4.3 source](https://github.com/dimk90/pi-context-view/tree/v0.4.3) and [release](https://github.com/dimk90/pi-context-view/releases/tag/v0.4.3), plus [Ponytail 4.9.0 source](https://github.com/DietrichGebert/ponytail/tree/v4.9.0) and [release](https://github.com/DietrichGebert/ponytail/releases/tag/v4.9.0). These are not runtime dependencies.
-- [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
-- [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci` reference](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
-- [TypeScript 5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
-- [`@types/node` source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) and [DefinitelyTyped releases](https://github.com/DefinitelyTyped/DefinitelyTyped/releases).
-- [TypeBox docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox), [changelog](https://github.com/sinclairzx81/typebox/tree/main/changelog), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md).
-- [LinkeDOM docs and source](https://github.com/WebReflection/linkedom) and [tags](https://github.com/WebReflection/linkedom/tags).
+- [Node.js 22.19.0 API](https://nodejs.org/download/release/v22.19.0/docs/api/), [source](https://github.com/nodejs/node/tree/v22.19.0), [release](https://nodejs.org/en/blog/release/v22.19.0), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), and [release schedule](https://nodejs.org/en/about/previous-releases).
+- [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci`](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
+- [TypeScript 5.9 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [5.9.3 source](https://github.com/microsoft/TypeScript/tree/v5.9.3), and [5.9.3 release](https://github.com/microsoft/TypeScript/releases/tag/v5.9.3). [`@types/node` 22.20.1](https://www.npmjs.com/package/@types/node/v/22.20.1) comes from [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node).
+- [`typebox` 1.3.14 docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox/tree/1.3.14), [release](https://github.com/sinclairzx81/typebox/releases/tag/1.3.14), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md). Bundled [`@sinclair/typebox` 0.34.52 source](https://github.com/sinclairzx81/sinclair-typebox/tree/0.34.52) and [release](https://github.com/sinclairzx81/sinclair-typebox/releases/tag/0.34.52) cover FFF's legacy peer.
+- [LinkeDOM docs and source](https://github.com/WebReflection/linkedom) and [release tags](https://github.com/WebReflection/linkedom/tags).
 - [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
-- [Git reference](https://git-scm.com/docs), [`git worktree` reference](https://git-scm.com/docs/git-worktree), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
-- [POSIX `ps` reference](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html).
-- [Windows PowerShell 5.1 executable reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1), [`Get-Process` reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1), and [`taskkill` reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
-- [GitHub Actions docs](https://docs.github.com/en/actions), [`checkout` source](https://github.com/actions/checkout) and [v7.0.0 notes](https://github.com/actions/checkout/releases/tag/v7.0.0), and [`setup-node` source](https://github.com/actions/setup-node) and [v7.0.0 notes](https://github.com/actions/setup-node/releases/tag/v7.0.0).
-- [MCP specification](https://modelcontextprotocol.io/specification/latest), [versioning](https://modelcontextprotocol.io/docs/learn/versioning), [current changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog), and [source](https://github.com/modelcontextprotocol/modelcontextprotocol).
-- [Exa MCP docs](https://docs.exa.ai/mcp), [server source](https://github.com/exa-labs/exa-mcp-server), and [releases](https://github.com/exa-labs/exa-mcp-server/releases).
-- [DuckDuckGo non-JavaScript search help](https://duckduckgo.com/duckduckgo-help-pages/features/non-javascript) and [results help](https://duckduckgo.com/duckduckgo-help-pages/results/).
+- [Git reference](https://git-scm.com/docs), [`git worktree`](https://git-scm.com/docs/git-worktree), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
+- [POSIX `ps`](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html), [Windows PowerShell 5.1](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1), [`Get-Process`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1), and [`taskkill`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill) document process monitoring and cancellation.
+- [GitHub Actions docs](https://docs.github.com/en/actions), [pull request docs](https://docs.github.com/en/pull-requests), [`checkout` pinned source](https://github.com/actions/checkout/tree/9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0) and [v7.0.0 release](https://github.com/actions/checkout/releases/tag/v7.0.0), and [`setup-node` pinned source](https://github.com/actions/setup-node/tree/820762786026740c76f36085b0efc47a31fe5020) and [v7.0.0 release](https://github.com/actions/setup-node/releases/tag/v7.0.0).
+- [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28), [versioning](https://modelcontextprotocol.io/docs/learn/versioning), [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog), [source](https://github.com/modelcontextprotocol/modelcontextprotocol), and [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification).
+- [Exa MCP docs](https://docs.exa.ai/mcp), [server source](https://github.com/exa-labs/exa-mcp-server), and [releases](https://github.com/exa-labs/exa-mcp-server/releases). [DuckDuckGo non-JavaScript search help](https://duckduckgo.com/duckduckgo-help-pages/features/non-javascript) covers the fallback service.
