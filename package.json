@@ -37,7 +37,7 @@
       "./extensions/concise.ts",
       "./extensions/unslop.ts",
       "./extensions/ponytail.ts",
-      "./extensions/context.ts",
+      "./node_modules/pi-context-view/src/index.ts",
       "./extensions/subagents/index.ts"
     ],
     "prompts": [
@@ -50,11 +50,13 @@
   "dependencies": {
     "@ff-labs/pi-fff": "0.10.5",
     "@sinclair/typebox": "0.34.52",
-    "linkedom": "0.18.13"
+    "linkedom": "0.18.13",
+    "pi-context-view": "0.4.3"
   },
   "bundledDependencies": [
     "@ff-labs/pi-fff",
-    "@sinclair/typebox"
+    "@sinclair/typebox",
+    "pi-context-view"
   ],
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
