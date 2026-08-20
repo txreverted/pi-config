@@ -11,7 +11,7 @@ Use [`README.md`](README.md) as the repo map. Then read code and tests. Code win
 - Never clone, patch, fork, or open changes against Pi's repository. Keep implementation changes in this repository.
 - Never commit secrets, auth, settings, sessions, or transcripts.
 - Before Pi extension, prompt, skill, theme, or TUI changes, read the installed Pi docs and examples.
-- After code or prompt changes, run `npm run check`.
+- After all code and prompt changes are complete, run `npm run check` once. Do not run its subcommands separately. If it fails, fix the failures, then rerun it.
 - Test TUI changes in an interactive terminal.
 
 ## Markdown

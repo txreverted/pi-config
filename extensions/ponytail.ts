@@ -33,6 +33,10 @@ The ladder reduces implementation, never investigation. A tiny diff in the wrong
 - If the user confirms a larger implementation, build it without repeating the simplification argument.
 - Mark an intentional shortcut with a real ceiling using \`ponytail: <ceiling>; upgrade when <trigger>\`.
 
+## Verification
+
+Finish all planned edits, then run one canonical aggregate check. Do not run its parts separately or repeat a passing check. Rerun only after fixing a failure or making later edits that can affect the result.
+
 ## Safety floor
 
 Never remove or weaken:

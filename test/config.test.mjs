@@ -19,11 +19,8 @@ const skillPaths = skillNames.map((name) => `skills/${name}/SKILL.md`);
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
-  "./extensions/tools.ts",
-  "./extensions/indexed-search.ts",
   "./extensions/web.ts",
   "./extensions/ask.ts",
-  "./extensions/todo.ts",
   "./extensions/goal.ts",
   "./extensions/layout.ts",
   "./extensions/concise.ts",
@@ -41,10 +38,11 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
   assert.deepEqual(packageJson.dependencies, {
     linkedom: "0.18.13",
-    minimatch: "10.2.5",
     "pi-context-view": "0.4.3",
   });
   assert.deepEqual(packageJson.bundledDependencies, ["pi-context-view"]);
+  assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
+  assert.equal(packageJson.scripts["test:windows"], undefined);
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -123,7 +121,7 @@ test("writing skill loads through Pi", async () => {
     const loaded = loader.getSkills();
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.skills.map(({ name, description }) => ({ name, description })), [
-      { name: "unslop", description: "Cut AI tells from any writing. Must always apply." },
+      { name: "unslop", description: "Detailed reference for removing AI writing tells. Use for prose edits or when the user invokes /skill:unslop." },
     ]);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
@@ -156,7 +154,6 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
-      "extensions/indexed-search-worker.mjs",
       ...promptPaths,
       ...skillPaths,
     ]) assert.ok(names.has(path), path);
@@ -167,8 +164,6 @@ test("package contents include runtime resources and exclude repository-only sta
       ".gitignore",
       "package-lock.json",
       "settings.json",
-      "extensions/fff.ts",
-      "node_modules/@ff-labs/pi-fff/src/index.ts",
     ]) {
       assert.equal(names.has(path), false, path);
     }
@@ -234,7 +229,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
-  assert.match(workflow, /npm run test:windows/);
+  assert.doesNotMatch(workflow, /test:windows/);
   assert.equal(packageJson.scripts["test:live-subagent"], undefined);
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
@@ -242,6 +237,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   for (const path of [...promptPaths, ...skillPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
   assert.match(readme, /\/skill:unslop/);
+  assert.match(readme, /prompt policy, not a command blocker/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
   assert.doesNotMatch(readme, /subagent|parallel_agents|agent_patch|PI_LIVE_SUBAGENT/i);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
@@ -249,11 +245,10 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
     /Goal mode has no token or runtime ceiling/,
     /It can use provider quota until completion/,
     /Never send secrets or private code through `web_search`/,
-    /retains at most 10 truncated outputs or 50MB per session/,
+    /No background code index runs/,
     /PI_LIVE_WEB=1/,
     /weekly and on manual dispatch.*non-blocking provider-drift signals/,
   ]) assert.match(readme, pattern);
-  assert.doesNotMatch(readme, /FFF|pi-fff/);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {
