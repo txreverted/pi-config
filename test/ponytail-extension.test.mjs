@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import ponytailExtension, { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
-import { buildSubagentSystemPrompt } from "../extensions/subagents/index.ts";
 
 test("Ponytail always injects the full policy without registering controls", () => {
   const events = new Map();
@@ -20,11 +19,4 @@ test("Ponytail always injects the full policy without registering controls", () 
   assert.match(result.systemPrompt, /behavior and scope the user explicitly confirms/);
   assert.match(result.systemPrompt, /Never remove or weaken/);
   assert.deepEqual(commands, []);
-});
-
-test("child agents receive the exact tightened Ponytail policy", () => {
-  const prompt = buildSubagentSystemPrompt("worker");
-  assert.ok(prompt.endsWith(PONYTAIL_INSTRUCTIONS));
-  assert.match(prompt, /smallest safe implementation that satisfies every explicit requirement/);
-  assert.match(prompt, /build it without repeating the simplification argument/);
 });

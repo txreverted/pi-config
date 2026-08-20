@@ -166,26 +166,6 @@ test("goal completion requires separate verification evidence", async () => {
   assert.ok(note.endsWith("E".repeat(100)));
 });
 
-test("goal completion waits for every worker patch to be resolved", async () => {
-  const branch = [{
-    type: "message",
-    message: {
-      role: "toolResult",
-      toolName: "parallel_agents",
-      details: { runId: "run", results: [{ id: "worker", role: "worker", patchState: "ready" }] },
-    },
-  }];
-  const h = harness(branch);
-  await h.events.get("session_start")({}, h.context);
-  await h.commands.get("goal").handler("Finish delegated work", h.context);
-  const id = h.entries.at(-1).data.goal.id;
-  await startRun(h);
-  await assert.rejects(
-    () => h.tools.get("goal_complete").execute("x", { goal_id: id, summary: "done", evidence: "verified" }, undefined, undefined, h.context),
-    /unresolved worker patches/,
-  );
-});
-
 test("continuations dispatch only when settled, idle, and without pending messages", async () => {
   const h = harness();
   await h.events.get("session_start")({}, h.context);

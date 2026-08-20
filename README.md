@@ -19,18 +19,16 @@ Private Pi package. Code and tests define behavior.
 | Context views | [`pi-context-view 0.4.3`](https://github.com/dimk90/pi-context-view/tree/v0.4.3), [`package.json`](package.json) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Caveman output | [`extensions/concise.ts`](extensions/concise.ts) | [`test/concise-extension.test.mjs`](test/concise-extension.test.mjs) |
 | Ponytail | [`extensions/ponytail.ts`](extensions/ponytail.ts) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs) |
-| Parallel agents | [`extensions/subagents/`](extensions/subagents/), [`extensions/coordination-core.ts`](extensions/coordination-core.ts) | [`test/subagents-core.test.mjs`](test/subagents-core.test.mjs), [`test/subagents-extension.test.mjs`](test/subagents-extension.test.mjs), [`test/subagents-orchestration.test.mjs`](test/subagents-orchestration.test.mjs), [`test/subagents-process.test.mjs`](test/subagents-process.test.mjs), [`test/subagents-ui.test.mjs`](test/subagents-ui.test.mjs), [`test/subagents-worktree.test.mjs`](test/subagents-worktree.test.mjs), [`test/live-subagent.mjs`](test/live-subagent.mjs) |
 | Display safety | [`extensions/text-safety.ts`](extensions/text-safety.ts) | [`test/text-safety.test.mjs`](test/text-safety.test.mjs), [`test/ui-render-normalization.test.mjs`](test/ui-render-normalization.test.mjs) |
 
 ## Use
 
-- `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it. Successful delegated tasks stay active until the parent verifies them.
-- `parallel_agents` runs two to six independent tasks, with up to three running at once. Workers edit isolated Git worktrees without shell tools. Inspect each patch with `agent_patch` before applying its exact hash. `/agents` lists retained patches.
+- `todo` manages one branch-local list of at most 25 tasks. `/todos` shows it.
 - `ask_user_question` asks one to four questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/context` shows estimated context usage. `/context injections` shows the captured system prompt, tool definitions, skills, context files, extension prompt additions, and injected messages. The extension adds no instructions or messages to normal model context.
 - By default, FFF overrides Pi's built-in `grep` and `find`. It also backs `@` file completion. Use `/fff-health` and `/fff-rescan`. Set `PI_FFF_MODE=tools-and-ui` or `PI_FFF_MODE=tools-only` before startup for prefixed tools. Switching between override and either prefixed mode with `/fff-mode` needs `/reload` to change tool names.
 - `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. Failed and restored active goals pause. `goal_complete` and `goal_wait` must run without sibling tools.
-- Parent turns use always-on Ponytail full mode, Caveman, and Unslop. Child agents use the same Ponytail policy and Caveman. Caveman keeps output terse without dropping requested detail. `/skill:unslop` loads the writing skill.
+- Ponytail full mode, Caveman, and Unslop are always on. Caveman keeps output terse without dropping requested detail. `/skill:unslop` loads the writing skill.
 - The TUI hides the startup header and uses a responsive one-line footer.
 - `/r-docs [scope]` audits documentation. `/r-impl [scope]` audits implementation without code changes. `/r-git` creates branches, pushes them, opens pull requests, and merges them without local checks.
 - `web_search` sends each permitted query to Exa's keyless MCP service first. It may fall back to DuckDuckGo HTML. It blocks likely credentials. Code-like queries require TUI or RPC approval.
@@ -38,14 +36,13 @@ Private Pi package. Code and tests define behavior.
 
 ## Safety
 
-- Goal mode and started subagents have no token or runtime ceiling. They can use provider quota until completion, waiting, user cancellation, process/provider failure, or an output safety limit. Parallel waves multiply that usage.
-- Child summaries and worker patches are untrusted. Workers require a trusted clean Git checkout. Patch application rejects files outside each worker's write scope. Worktrees isolate edits, not the child model process or provider access.
+- Goal mode has no token or runtime ceiling. It can use provider quota until completion, waiting, user cancellation, or provider failure.
 - Never send secrets or private code through `web_search`.
 - [`.gitignore`](.gitignore) excludes local settings, auth, keys, sessions, and transcripts.
 
 ## Install
 
-Use Node 22.19.0 or newer and Pi. Install `jq` on `PATH` for the `jq` tool. Worker agents require Git. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
+Use Node 22.19.0 or newer and Pi. Install `jq` on `PATH` for the `jq` tool. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
@@ -65,10 +62,9 @@ Live checks use external services.
 
 ```bash
 PI_LIVE_WEB=1 npm run test:live-web
-PI_LIVE_SUBAGENT=1 PI_PROVIDER=<provider> PI_MODEL=<model> npm run test:live-subagent
 ```
 
-The workflow runs the full matrix weekly and on manual dispatch. Web failures are non-blocking provider-drift signals. The subagent check is local only because it spends configured provider quota.
+The workflow runs the full matrix weekly and on manual dispatch. Web failures are non-blocking provider-drift signals.
 
 Test UI changes in an interactive terminal.
 
@@ -83,7 +79,7 @@ Test UI changes in an interactive terminal.
 - [`typebox` 1.3.14 docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox/tree/1.3.14), [release](https://github.com/sinclairzx81/typebox/releases/tag/1.3.14), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md). Bundled [`@sinclair/typebox` 0.34.52 source](https://github.com/sinclairzx81/sinclair-typebox/tree/0.34.52) and [release](https://github.com/sinclairzx81/sinclair-typebox/releases/tag/0.34.52) cover FFF's legacy peer.
 - [LinkeDOM 0.18.13 docs and source](https://github.com/WebReflection/linkedom/tree/v0.18.13), [npm package](https://www.npmjs.com/package/linkedom/v/0.18.13), and [release tags](https://github.com/WebReflection/linkedom/tags).
 - [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
-- [Git reference](https://git-scm.com/docs), [`git worktree`](https://git-scm.com/docs/git-worktree), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
+- [Git reference](https://git-scm.com/docs), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
 - [POSIX `ps`](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html), [Windows PowerShell 5.1](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1), [`Get-Process`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1), and [`taskkill`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill) document process monitoring and cancellation.
 - [GitHub Actions docs](https://docs.github.com/en/actions), [pull request docs](https://docs.github.com/en/pull-requests), [`checkout` pinned source](https://github.com/actions/checkout/tree/9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0) and [v7.0.0 release](https://github.com/actions/checkout/releases/tag/v7.0.0), and [`setup-node` pinned source](https://github.com/actions/setup-node/tree/820762786026740c76f36085b0efc47a31fe5020) and [v7.0.0 release](https://github.com/actions/setup-node/releases/tag/v7.0.0).
 - [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28), [versioning](https://modelcontextprotocol.io/docs/learn/versioning), [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog), [source](https://github.com/modelcontextprotocol/modelcontextprotocol), and [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification).
