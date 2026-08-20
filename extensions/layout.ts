@@ -8,7 +8,7 @@ import {
   type ExtensionContext,
   type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, truncateToWidth, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { safeDisplayLine } from "./text-safety.ts";
 
 export interface CompactFooterValues {
@@ -159,6 +159,38 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   return [truncateToWidth(location, safeWidth, "..."), joinFooterSides(fittedDetails, model, safeWidth)];
 }
 
+function patchStartupSpacing(tui: Pick<TUI, "children">) {
+  // ponytail: handles Pi's current document/header/resource containers; upgrade when Pi exposes startup spacing through ctx.ui.
+  const document = tui.children[0];
+  if (!(document instanceof Container)) return { refresh() {}, dispose() {} };
+  const header = document.children[0];
+  const resources = document.children[1];
+  const chat = document.children[2];
+  if (!(header instanceof Container) || !(resources instanceof Container) || !(chat instanceof Container)) {
+    return { refresh() {}, dispose() {} };
+  }
+
+  const patched = new Map<Spacer, (width: number) => string[]>();
+  const setHidden = (spacer: Spacer, hidden: boolean) => {
+    const render = patched.get(spacer) ?? spacer.render;
+    patched.set(spacer, render);
+    spacer.render = hidden ? () => [] : render;
+  };
+  for (const child of header.children) {
+    if (child instanceof Spacer) setHidden(child, true);
+  }
+
+  return {
+    refresh() {
+      const trailing = resources.children.at(-1);
+      if (trailing instanceof Spacer) setHidden(trailing, chat.children.length === 0);
+    },
+    dispose() {
+      for (const [spacer, render] of patched) spacer.render = render;
+    },
+  };
+}
+
 function installLayout(
   ctx: ExtensionContext,
   answerElapsedSeconds: () => number,
@@ -174,7 +206,17 @@ function installLayout(
   ).getCompactionEnabled();
   let autoCompact = readAutoCompact();
 
-  ctx.ui.setHeader(() => ({ render: () => [], invalidate() {} }));
+  ctx.ui.setHeader((tui) => {
+    const spacing = patchStartupSpacing(tui);
+    return {
+      render: () => {
+        spacing.refresh();
+        return [];
+      },
+      invalidate() {},
+      dispose: spacing.dispose,
+    };
+  });
 
   ctx.ui.setFooter((tui, theme, footerData: ReadonlyFooterDataProvider) => {
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
