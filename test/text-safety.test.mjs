@@ -9,11 +9,11 @@ test("multiline display text removes terminal and directional controls", () => {
     "title\u001b]0;changed\u001b\\end\r\n" +
     "c1\u009b31mred\u009d52;c;C1CLIP\u009cend\n" +
     "dcs\u001bPsecret\u001b\\end\n" +
-    "left\u202eright\u2066end\u2069\tkept\u0085";
+    "left\u202eright\u2066end\u2069\tkept\u0085\u200bzero\u2060word\ufeffend";
   const sanitized = safeDisplayText(value);
 
-  assert.equal(sanitized, "safe red\nclipend\ntitleend\nc1redend\ndcsend\nleftrightend\tkept");
-  assert.doesNotMatch(sanitized, /[\u001b\u0007\u009b\u202e\u2066\u2069]/);
+  assert.equal(sanitized, "safe red\nclipend\ntitleend\nc1redend\ndcsend\nleftrightend\tkeptzerowordend");
+  assert.doesNotMatch(sanitized, /[\u001b\u0007\u009b\u200b\u202e\u2060\u2066\u2069\ufeff]/);
 });
 
 test("unsafe display characters can be rendered visibly without active terminal controls", () => {
