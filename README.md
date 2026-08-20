@@ -26,7 +26,7 @@ Private Pi package. Code and tests define behavior.
 - `parallel_agents` runs two to six independent explorer, worker, or reviewer tasks, with up to three running at once. Inputs and process output are bounded. Token use and runtime are not. Workers edit isolated Git worktrees without shell tools. Inspect patches with `agent_patch` before applying them. Apply verifies the exact patch hash. `/agents` lists retained patches.
 - `ask_user_question` asks one to four structured questions with review and revision in TUI or RPC mode. Every question offers Other.
 - `/goal <objective>` continues while active. Use `/goal status`, `/goal pause`, `/goal resume`, `/goal edit <objective>`, or `/goal clear`. A failed turn pauses safely. A restored active goal also pauses and needs `/goal resume`. `goal_complete` and `goal_wait` must be called without sibling tools.
-- Parent turns use Ponytail full mode for coding and Unslop for writing. Child agents use Ponytail and Caveman. `/skill:unslop` loads the writing skill explicitly.
+- Parent turns use Ponytail, Caveman, and Unslop. Child agents use Ponytail and Caveman. `/skill:unslop` loads the writing skill explicitly.
 - The TUI hides the startup header and uses a responsive one-line footer.
 - Caveman output stays terse while preserving technical details and requested depth.
 - `/r-docs [scope]` asks Pi to audit documentation. `/r-impl [scope]` asks for an implementation audit without changes. `/r-git` groups working-tree changes into pull requests, pushes them, and merges them without local checks.
@@ -36,13 +36,13 @@ Private Pi package. Code and tests define behavior.
 ## Safety
 
 - Goal mode and started subagents have no token or runtime ceiling. They can use provider quota until completion, waiting, user cancellation, process/provider failure, or an output safety limit. Parallel waves multiply that usage.
-- Child summaries and worker patches are untrusted. Workers require a trusted clean Git checkout. Worktrees isolate edits, not the child model process or provider access.
+- Child summaries and worker patches are untrusted. Workers require a trusted clean Git checkout. Patch application rejects files outside each worker's write scope. Worktrees isolate edits, not the child model process or provider access.
 - Never send secrets or private code through `web_search`.
 - [`.gitignore`](.gitignore) excludes local settings, auth, keys, sessions, and transcripts.
 
 ## Install
 
-Requires Node 22.19.0 or newer, Pi, and `jq` on `PATH`. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
+Requires Node 22.19.0 or newer, Pi, and `jq` on `PATH`. Worker agents also require Git. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
@@ -75,10 +75,11 @@ Test UI changes in an interactive terminal.
 - [Node.js 22 API](https://nodejs.org/docs/latest-v22.x/api/), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), [source](https://github.com/nodejs/node), and [release schedule](https://nodejs.org/en/about/previous-releases).
 - [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci` reference](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
 - [TypeScript 5.9 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [source](https://github.com/microsoft/TypeScript), and [releases](https://github.com/microsoft/TypeScript/releases).
+- [`@types/node` source](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) and [DefinitelyTyped releases](https://github.com/DefinitelyTyped/DefinitelyTyped/releases).
 - [TypeBox docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox), [changelog](https://github.com/sinclairzx81/typebox/tree/main/changelog), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md).
 - [LinkeDOM docs and source](https://github.com/WebReflection/linkedom) and [tags](https://github.com/WebReflection/linkedom/tags).
 - [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
-- [Git reference](https://git-scm.com/docs), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
+- [Git reference](https://git-scm.com/docs), [`git worktree` reference](https://git-scm.com/docs/git-worktree), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
 - [POSIX `ps` reference](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html).
 - [Windows PowerShell 5.1 executable reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1), [`Get-Process` reference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1), and [`taskkill` reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
 - [GitHub Actions docs](https://docs.github.com/en/actions), [`checkout` source](https://github.com/actions/checkout) and [v7.0.0 notes](https://github.com/actions/checkout/releases/tag/v7.0.0), and [`setup-node` source](https://github.com/actions/setup-node) and [v7.0.0 notes](https://github.com/actions/setup-node/releases/tag/v7.0.0).
