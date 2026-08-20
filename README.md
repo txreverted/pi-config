@@ -43,7 +43,7 @@ Private Pi package. Code and tests define behavior.
 
 ## Install
 
-Use Node 22.19.0 or newer and Pi. Install `jq` on `PATH` for the `jq` tool. The development lock pins Pi 0.84.2. CI also tests the latest Pi release.
+Use Node 22.19.0 or newer. Install `jq` on `PATH` for the `jq` tool. CI tests Pi 0.84.2 and the latest release.
 
 ```bash
 npm ci --ignore-scripts --omit=dev --legacy-peer-deps
@@ -67,18 +67,17 @@ PI_LIVE_WEB=1 npm run test:live-web
 
 The workflow runs the full matrix weekly and on manual dispatch. Web failures are non-blocking provider-drift signals.
 
-Test UI changes in an interactive terminal.
-
 ## Sources
 
 - [Pi 0.84.2 docs](https://github.com/earendil-works/pi/tree/v0.84.2/packages/coding-agent/docs), [source](https://github.com/earendil-works/pi/tree/v0.84.2), [release](https://github.com/earendil-works/pi/releases/tag/v0.84.2), and [changelog with migrations](https://github.com/earendil-works/pi/blob/v0.84.2/packages/coding-agent/CHANGELOG.md).
-- Context views use the pinned [pi-context-view 0.4.3 docs and source](https://github.com/dimk90/pi-context-view/tree/v0.4.3), [npm package](https://www.npmjs.com/package/pi-context-view/v/0.4.3), [release](https://github.com/dimk90/pi-context-view/releases/tag/v0.4.3), and [changelog](https://github.com/dimk90/pi-context-view/blob/v0.4.3/CHANGELOG.md). The local Ponytail implementation references [Ponytail 4.9.0 source](https://github.com/DietrichGebert/ponytail/tree/v4.9.0) and [release](https://github.com/DietrichGebert/ponytail/releases/tag/v4.9.0).
+- Context views use [pi-context-view 0.4.3 docs and source](https://github.com/dimk90/pi-context-view/tree/v0.4.3), its [release](https://github.com/dimk90/pi-context-view/releases/tag/v0.4.3), and its [changelog](https://github.com/dimk90/pi-context-view/blob/v0.4.3/CHANGELOG.md).
+- [`extensions/ponytail.ts`](extensions/ponytail.ts) adapts [Ponytail 4.9.0 source](https://github.com/DietrichGebert/ponytail/tree/v4.9.0). See its [release](https://github.com/DietrichGebert/ponytail/releases/tag/v4.9.0).
 - [Node.js 22.19.0 API](https://nodejs.org/download/release/v22.19.0/docs/api/), [`node:sqlite`](https://nodejs.org/download/release/v22.19.0/docs/api/sqlite.html), [source](https://github.com/nodejs/node/tree/v22.19.0), [release](https://nodejs.org/en/blog/release/v22.19.0), [20 to 22 migration guide](https://nodejs.org/en/blog/migrations/v20-to-v22), and [release schedule](https://nodejs.org/en/about/previous-releases).
 - [`minimatch` 10.2.5 docs and source](https://github.com/isaacs/minimatch/tree/v10.2.5) and [release](https://github.com/isaacs/minimatch/releases/tag/v10.2.5).
 - [npm CLI docs](https://docs.npmjs.com/cli/), [`npm ci`](https://docs.npmjs.com/cli/commands/npm-ci/), [source](https://github.com/npm/cli), and [releases](https://github.com/npm/cli/releases).
 - [TypeScript 5.9 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-9.html), [5.9.3 source](https://github.com/microsoft/TypeScript/tree/v5.9.3), and [5.9.3 release](https://github.com/microsoft/TypeScript/releases/tag/v5.9.3). [`@types/node` 22.20.1](https://www.npmjs.com/package/@types/node/v/22.20.1) comes from [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node).
 - [`typebox` 1.3.14 docs](https://sinclairzx81.github.io/typebox/), [source](https://github.com/sinclairzx81/typebox/tree/1.3.14), [release](https://github.com/sinclairzx81/typebox/releases/tag/1.3.14), and [1.0 migration guide](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.0.0-migration.md).
-- [LinkeDOM 0.18.13 docs and source](https://github.com/WebReflection/linkedom/tree/v0.18.13), [npm package](https://www.npmjs.com/package/linkedom/v/0.18.13), and [release tags](https://github.com/WebReflection/linkedom/tags).
+- [LinkeDOM 0.18.13 docs and source](https://github.com/WebReflection/linkedom/tree/v0.18.13) and [release tags](https://github.com/WebReflection/linkedom/tags).
 - [jq manual](https://jqlang.org/manual/), [source](https://github.com/jqlang/jq), and [releases](https://github.com/jqlang/jq/releases).
 - [Git reference](https://git-scm.com/docs), [source](https://github.com/git/git), and [release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
 - [`fd` docs and source](https://github.com/sharkdp/fd) and [releases](https://github.com/sharkdp/fd/releases). [ripgrep guide](https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md), [source](https://github.com/BurntSushi/ripgrep), and [releases](https://github.com/BurntSushi/ripgrep/releases).
