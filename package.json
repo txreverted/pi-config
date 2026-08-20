@@ -9,6 +9,7 @@
   "files": [
     "extensions",
     "prompts",
+    "skills",
     "README.md"
   ],
   "scripts": {
@@ -32,11 +33,15 @@
       "./extensions/goal.ts",
       "./extensions/layout.ts",
       "./extensions/concise.ts",
+      "./extensions/unslop.ts",
       "./extensions/ponytail.ts",
       "./extensions/subagents/index.ts"
     ],
     "prompts": [
       "./prompts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "dependencies": {
