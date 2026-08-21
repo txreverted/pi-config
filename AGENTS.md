@@ -18,8 +18,8 @@ Use [`README.md`](README.md) as the repo map. Then read code and tests. Code win
 
 - `README.md` is the only human guide.
 - `AGENTS.md` holds agent rules.
-- `prompts/*.md` and `skills/*/SKILL.md` files are runtime code.
-- Keep one file per command or skill.
+- `prompts/*.md` and `policies/*.md` files are runtime code.
+- Keep one file per command or policy.
 - Write present facts. No roadmap. No history.
 - Use short sentences and exact paths.
 - Link to source and tests. Do not copy implementation detail.
