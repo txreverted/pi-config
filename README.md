@@ -57,7 +57,7 @@ This replaces `node_modules/`. The canonical local check is:
 npm run check
 ```
 
-It type-checks `extensions/**/*.ts`, runs `test/*.test.mjs`, then loads all manifest resources and the complete package through Pi with startup networking disabled. The tests also dry-pack the package and install its production tarball in a temporary directory. They remove temporary files, but npm may read or update its cache and may contact the registry if required packages are absent.
+It type-checks `extensions/**/*.ts`, runs `test/*.test.mjs`, then loads all manifest resources and the complete package through Pi with startup networking disabled. The tests also dry-pack the package and install its production tarball in a temporary directory. They remove temporary files, but npm may read or update its cache and may contact the registry if required packages are absent. The check produces no coverage report and enforces no coverage threshold.
 
 The canonical check makes no model or search-provider calls. It does not run `npm audit`, deploy, migrate, push, or publish. On pushes and pull requests, CI runs `npm audit --omit=dev` for pinned Pi jobs before the same check.
 
@@ -67,7 +67,7 @@ The live web test is separate and sends queries to external services:
 PI_LIVE_WEB=1 npm run test:live-web
 ```
 
-The live web job runs weekly and on manual dispatch. Failures are non-blocking provider-drift signals.
+The script sends `Example Domain IANA` through `web_search` and directly to Parallel. These providers are keyless, but the traffic is external. The live web job runs weekly and on manual dispatch. Failures are non-blocking provider-drift signals.
 
 ## Run
 
@@ -91,7 +91,7 @@ This writes the local package path to Pi's user settings. Remove it with `npx --
 ## Runtime state and constraints
 
 - `ask_user_question` works in TUI and RPC mode. It accepts one to four questions with two to four options each, adds `Other`, sanitizes display text, and returns no partial answers after cancellation.
-- `web_search` sends every approved query to Exa first, then may use Parallel and DuckDuckGo. Never send secrets or private code through `web_search`. Its secret detector is pattern-based, code-like text needs TUI or RPC approval, results are untrusted, and model-visible output is capped at 50KB.
+- `web_search` sends every approved query to Exa first, then may use Parallel and DuckDuckGo. Never send secrets or private code through `web_search`. Its secret detector is pattern-based, code-like text needs TUI or RPC approval, and results are untrusted. Queries are capped at 500 characters and 10 results. The provider chain has a 30-second timeout, each response is capped at 2MB, and model-visible output is capped at 50KB. The tool does not fetch linked pages.
 - [`extensions/layout.ts`](extensions/layout.ts) runs only in TUI mode. It hides the startup header and renders a two-line footer with working directory, branch, session cost, context use, answer time, status, and model. It reads Pi settings and watches them for compaction changes; it does not write them.
 - `/context` requires TUI mode. Its usage figures are estimates. Before the first real turn, `pi-context-view` may create and filter one silent synthetic turn; it persists only probe role and timestamp identities. It adds no instructions or messages to normal model context. Context previews can contain prompts, context files, and session messages.
 - Pi owns model authentication and JSONL sessions. [`.gitignore`](.gitignore) excludes credentials, settings, `.pi/`, session directories, and transcripts. Treat `/context` previews and Pi session files as private.
