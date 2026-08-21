@@ -1,6 +1,6 @@
 # pi-config
 
-Pi loads this private package's manifest, TypeScript extensions, and Markdown prompt templates. The package adds two tools, an off-by-default OpenAI Fast mode, a compact TUI layout, three fixed per-turn policies, and `/r-*` workflow prompts. On request, the bundled `/context` command shows estimated context use and captured injections, while `web_search` can send an approved query to public providers. Repository work must follow [`AGENTS.md`](AGENTS.md).
+Pi reads `package.json`, TypeScript extensions, and Markdown prompt templates from this private package. It registers `ask_user_question`, `web_search`, `/fast`, `/context`, three `/r-*` prompts, three fixed per-turn policies, and a compact TUI layout. Fast mode starts off; `/context` runs only on command, and `web_search` contacts public providers only on a tool call. Repository work must follow [`AGENTS.md`](AGENTS.md).
 
 ## Current state
 
@@ -10,7 +10,7 @@ Pi loads this private package's manifest, TypeScript extensions, and Markdown pr
 | Runtime floor | [Node 22.19.0 or newer](package.json) |
 | Manifest resources | [Seven local extension entry points, bundled `pi-context-view` 0.4.3, and three prompt templates](package.json); no skills |
 | Runtime dependencies | [Bundled `pi-context-view` 0.4.3](package-lock.json) |
-| Pi validation scope | [Pi packages pinned at 0.84.2 for development](package.json); [CI also checks the latest Pi packages on Ubuntu and the pinned set on Windows](.github/workflows/check.yml) |
+| Pi validation scope | [Pi packages pinned at 0.84.2 for development](package.json); [CI checks pinned and latest Pi packages on Ubuntu, plus pinned packages on Windows](.github/workflows/check.yml) |
 | Fixed policy limit | [Ponytail, Unslop, and Caveman compose once in that order with a 2,600-token test ceiling](test/caveman-extension.test.mjs); the ceiling uses Pi's estimator, not a provider tokenizer |
 
 ## Flow
@@ -19,6 +19,8 @@ Pi loads this private package's manifest, TypeScript extensions, and Markdown pr
 Pi startup
   -> package.json
   -> extension entry points + prompts/*.md
+/r-* command
+  -> prompt template expansion -> user prompt
 user prompt
   -> Ponytail -> Unslop -> Caveman -> model
 model tool call
@@ -31,7 +33,7 @@ model tool call
 ```
 
 - [`package.json`](package.json) owns resource selection and policy order. Pi owns package loading, prompt expansion, session lifecycle, model access, and built-in tools. See Pi's [package](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/packages.md) and [prompt template](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/prompt-templates.md) contracts.
-- [`extensions/ask.ts`](extensions/ask.ts) and [`extensions/web.ts`](extensions/web.ts) own Pi-facing schemas, guards, and rendering. Their core and UI modules contain reusable logic.
+- [`extensions/ask.ts`](extensions/ask.ts) owns tool registration and the RPC flow; [`extensions/ask-core.ts`](extensions/ask-core.ts) owns question state and validation, while [`extensions/ask-ui.ts`](extensions/ask-ui.ts) owns the TUI. [`extensions/web.ts`](extensions/web.ts) owns query approval and result formatting; [`extensions/web-core.ts`](extensions/web-core.ts) owns provider calls and parsers.
 - [`extensions/fast.ts`](extensions/fast.ts) owns OpenAI Fast mode state and request selection. [`extensions/layout.ts`](extensions/layout.ts) owns TUI-only session display state.
 - `pi-context-view` owns `/context` and remains a bundled dependency. Public search providers are outside this repository. No background code index runs.
 
@@ -55,15 +57,15 @@ Node 22.19.0 or newer and npm are required. Install the lockfile exactly:
 npm ci --ignore-scripts
 ```
 
-This replaces `node_modules/`. The canonical local check is:
+This replaces `node_modules/`. Setup and the production-install test may read or update npm's cache and contact the registry. The canonical local check is:
 
 ```bash
 npm run check
 ```
 
-It type-checks `extensions/**/*.ts`, runs `test/*.test.mjs`, then loads all manifest resources and the complete package through Pi with startup networking disabled. The tests also dry-pack the package and install its production tarball in a temporary directory. They remove temporary files, but npm may read or update its cache and may contact the registry if required packages are absent. The check produces no coverage report and enforces no coverage threshold.
+It type-checks `extensions/**/*.ts`, runs `test/*.test.mjs`, then loads all manifest resources and the complete package through Pi with startup networking disabled. The tests also dry-pack the package, install its production tarball in a temporary directory, and remove the temporary files. The check produces no coverage report and enforces no coverage threshold.
 
-The canonical check makes no model or search-provider calls. It does not run `npm audit`, deploy, migrate, push, or publish. On pushes and pull requests, CI runs `npm audit --omit=dev` for pinned Pi jobs before the same check.
+The canonical check makes no model or search-provider calls. It does not run `npm audit`, deploy, migrate, push, or publish. CI runs the check on pushes, pull requests, the weekly schedule, and manual dispatches. Pinned Pi jobs first run `npm audit --omit=dev`.
 
 The live web test is separate and sends queries to external services:
 
@@ -97,7 +99,7 @@ This writes the local package path to Pi's user settings. Remove it with `npx --
 - `ask_user_question` works in TUI and RPC mode. It accepts one to four questions with two to four options each, adds `Other`, sanitizes display text, and returns no partial answers after cancellation.
 - `web_search` sends every approved query to Exa first, then may use Parallel and DuckDuckGo. Never send secrets or private code through `web_search`. Its secret detector is pattern-based, code-like text needs TUI or RPC approval, and results are untrusted. Queries are capped at 500 characters and 10 results. The provider chain has a 30-second timeout, each response is capped at 2MB, and model-visible output is capped at 50KB. The tool does not fetch linked pages.
 - OpenAI Fast mode starts off. Use `/fast`, `/fast on`, `/fast off`, or `/fast status`; pass `--fast` to enable it at startup. Each `session_start` resets the in-memory mode to the `--fast` flag. It sends `service_tier: "priority"` only for allowlisted `openai` and `openai-codex` models in [`extensions/fast.ts`](extensions/fast.ts). The footer shows `model (thinking) fast`, or `model fast` without a thinking level. This marker means the extension will request priority, not that OpenAI accepted the tier. Fast mode has higher API pricing or ChatGPT credit use. The layout does not reprice Pi's recorded session cost. See OpenAI's [API](https://developers.openai.com/api/docs/guides/fast-mode) and [Codex](https://developers.openai.com/codex/speed) documentation.
-- [`extensions/layout.ts`](extensions/layout.ts) runs only in TUI mode. It hides the startup header and renders a two-line footer with working directory, branch, session cost, context use, answer time, status, and model. It reads Pi settings and watches them for compaction changes; it does not write them.
+- [`extensions/layout.ts`](extensions/layout.ts) runs only in TUI mode. It hides the startup header and renders a two-line footer with working directory, branch, Pi-recorded session cost, context use, answer time, extension status, and model/thinking data. It reads Pi settings and watches them for compaction changes; it does not write them.
 - `/context` requires TUI mode. Its usage figures are estimates. Before the first real turn, `pi-context-view` may create and filter one silent synthetic turn; it persists only probe role and timestamp identities. It adds no instructions or messages to normal model context. Context previews can contain prompts, context files, and session messages.
 - Pi owns model authentication and JSONL sessions. [`.gitignore`](.gitignore) excludes credentials, settings, `.pi/`, session directories, and transcripts. Treat `/context` previews and Pi session files as private.
 - Pi packages execute with the user's full system access. Review this checkout before loading it. [`extensions/text-safety.ts`](extensions/text-safety.ts) strips terminal and directional controls from package tool output, but this package does not sandbox Pi or gate its other tools.
@@ -114,7 +116,7 @@ This writes the local package path to Pi's user settings. Remove it with `npx --
 ### Workflow prompts
 
 - [`prompts/r-docs.md`](prompts/r-docs.md) powers `/r-docs [scope]` for scoped documentation work.
-- [`prompts/r-git.md`](prompts/r-git.md) powers `/r-git` for grouping and merging dirty work.
+- [`prompts/r-git.md`](prompts/r-git.md) powers `/r-git` for splitting dirty work into pull requests and merging them.
 - [`prompts/r-impl.md`](prompts/r-impl.md) powers `/r-impl [scope]` for evidence-based implementation audits.
 
 ### Policy maintenance
