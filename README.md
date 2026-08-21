@@ -6,7 +6,7 @@ Pi loads this private package's manifest, TypeScript extensions, and Markdown pr
 
 | Item | Current value |
 |---|---|
-| Package | [`@txreverted/pi-config` 0.2.0](package.json), marked `private` |
+| Package | [`@txreverted/pi-config` 0.3.0](package.json), marked `private` |
 | Runtime floor | [Node 22.19.0 or newer](package.json) |
 | Manifest resources | [Six local extension entry points, bundled `pi-context-view` 0.4.3, and three prompt templates](package.json); no skills |
 | Runtime dependencies | [`linkedom` 0.18.13 and bundled `pi-context-view` 0.4.3](package-lock.json) |
