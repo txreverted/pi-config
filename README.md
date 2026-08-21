@@ -1,6 +1,6 @@
 # pi-config
 
-Pi loads this private package's manifest, TypeScript extensions, and Markdown prompt templates. The package adds two tools, a compact TUI layout, three fixed per-turn policies, and `/r-*` workflow prompts. On request, the bundled `/context` command shows estimated context use and captured injections, while `web_search` can send an approved query to public providers. Repository work must follow [`AGENTS.md`](AGENTS.md).
+Pi loads this private package's manifest, TypeScript extensions, and Markdown prompt templates. The package adds two tools, an off-by-default OpenAI Fast mode, a compact TUI layout, three fixed per-turn policies, and `/r-*` workflow prompts. On request, the bundled `/context` command shows estimated context use and captured injections, while `web_search` can send an approved query to public providers. Repository work must follow [`AGENTS.md`](AGENTS.md).
 
 ## Current state
 
@@ -8,7 +8,7 @@ Pi loads this private package's manifest, TypeScript extensions, and Markdown pr
 |---|---|
 | Package | [`@txreverted/pi-config` 0.3.0](package.json), marked `private` |
 | Runtime floor | [Node 22.19.0 or newer](package.json) |
-| Manifest resources | [Six local extension entry points, bundled `pi-context-view` 0.4.3, and three prompt templates](package.json); no skills |
+| Manifest resources | [Seven local extension entry points, bundled `pi-context-view` 0.4.3, and three prompt templates](package.json); no skills |
 | Runtime dependencies | [Bundled `pi-context-view` 0.4.3](package-lock.json) |
 | Pi validation scope | [Pi packages pinned at 0.84.2 for development](package.json); [CI also checks the latest Pi packages on Ubuntu and the pinned set on Windows](.github/workflows/check.yml) |
 | Fixed policy limit | [Ponytail, Unslop, and Caveman compose once in that order with a 2,600-token test ceiling](test/caveman-extension.test.mjs); the ceiling uses Pi's estimator, not a provider tokenizer |
@@ -24,12 +24,15 @@ user prompt
 model tool call
   -> ask_user_question -> TUI or RPC -> bounded answer text
   -> web_search -> secret/code guard -> Exa -> Parallel -> DuckDuckGo -> bounded results
+/fast or --fast
+  -> supported OpenAI request -> service_tier: priority
 /context
   -> pi-context-view -> estimated usage or captured injections -> TUI
 ```
 
 - [`package.json`](package.json) owns resource selection and policy order. Pi owns package loading, prompt expansion, session lifecycle, model access, and built-in tools. See Pi's [package](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/packages.md) and [prompt template](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/prompt-templates.md) contracts.
-- [`extensions/ask.ts`](extensions/ask.ts) and [`extensions/web.ts`](extensions/web.ts) own Pi-facing schemas, guards, and rendering. Their core and UI modules contain reusable logic. [`extensions/layout.ts`](extensions/layout.ts) owns TUI-only session display state.
+- [`extensions/ask.ts`](extensions/ask.ts) and [`extensions/web.ts`](extensions/web.ts) own Pi-facing schemas, guards, and rendering. Their core and UI modules contain reusable logic.
+- [`extensions/fast.ts`](extensions/fast.ts) owns OpenAI Fast mode state and request selection. [`extensions/layout.ts`](extensions/layout.ts) owns TUI-only session display state.
 - `pi-context-view` owns `/context` and remains a bundled dependency. Public search providers are outside this repository. No background code index runs.
 
 ## Code
@@ -39,6 +42,7 @@ model tool call
 | Package loading and prompts | [`package.json`](package.json), [`prompts/`](prompts/) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Structured questions | [`extensions/ask.ts`](extensions/ask.ts), [`extensions/ask-core.ts`](extensions/ask-core.ts), [`extensions/ask-ui.ts`](extensions/ask-ui.ts) | [`test/ask-core.test.mjs`](test/ask-core.test.mjs), [`test/ask-extension.test.mjs`](test/ask-extension.test.mjs), [`test/ask-ui.test.mjs`](test/ask-ui.test.mjs) |
 | Keyless web search | [`extensions/web.ts`](extensions/web.ts), [`extensions/web-core.ts`](extensions/web-core.ts), [`extensions/text-safety.ts`](extensions/text-safety.ts) | [`test/web-core.test.mjs`](test/web-core.test.mjs), [`test/web-extension.test.mjs`](test/web-extension.test.mjs), [`test/text-safety.test.mjs`](test/text-safety.test.mjs) |
+| OpenAI Fast mode | [`extensions/fast.ts`](extensions/fast.ts) | [`test/fast-extension.test.mjs`](test/fast-extension.test.mjs) |
 | TUI layout | [`extensions/layout.ts`](extensions/layout.ts), [`extensions/text-safety.ts`](extensions/text-safety.ts) | [`test/layout-extension.test.mjs`](test/layout-extension.test.mjs), [`test/ui-render-normalization.test.mjs`](test/ui-render-normalization.test.mjs) |
 | Fixed policies | [`extensions/ponytail.ts`](extensions/ponytail.ts), [`extensions/unslop.ts`](extensions/unslop.ts), [`extensions/caveman.ts`](extensions/caveman.ts), [`policies/unslop.md`](policies/unslop.md) | [`test/ponytail-extension.test.mjs`](test/ponytail-extension.test.mjs), [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/caveman-extension.test.mjs`](test/caveman-extension.test.mjs) |
 | Context inspection | [`package.json`](package.json), [`pi-context-view` v0.4.3](https://github.com/dimk90/pi-context-view/tree/v0.4.3/src) | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
@@ -86,12 +90,13 @@ npx --no-install pi install "$PWD"
 npx --no-install pi
 ```
 
-This writes the local package path to Pi's user settings. Remove it with `npx --no-install pi remove "$PWD"`. Model prompts use the selected Pi provider and may incur its normal charges.
+This writes the local package path to Pi's user settings. Remove it with `npx --no-install pi remove "$PWD"`. Model prompts call the selected Pi provider and may incur charges.
 
 ## Runtime state and constraints
 
 - `ask_user_question` works in TUI and RPC mode. It accepts one to four questions with two to four options each, adds `Other`, sanitizes display text, and returns no partial answers after cancellation.
 - `web_search` sends every approved query to Exa first, then may use Parallel and DuckDuckGo. Never send secrets or private code through `web_search`. Its secret detector is pattern-based, code-like text needs TUI or RPC approval, and results are untrusted. Queries are capped at 500 characters and 10 results. The provider chain has a 30-second timeout, each response is capped at 2MB, and model-visible output is capped at 50KB. The tool does not fetch linked pages.
+- OpenAI Fast mode starts off. Use `/fast`, `/fast on`, `/fast off`, or `/fast status`; pass `--fast` to enable it at startup. Each `session_start` resets the in-memory mode to the `--fast` flag. It sends `service_tier: "priority"` only for allowlisted `openai` and `openai-codex` models in [`extensions/fast.ts`](extensions/fast.ts). The footer shows `model (thinking) fast`, or `model fast` without a thinking level. This marker means the extension will request priority, not that OpenAI accepted the tier. Fast mode has higher API pricing or ChatGPT credit use. The layout does not reprice Pi's recorded session cost. See OpenAI's [API](https://developers.openai.com/api/docs/guides/fast-mode) and [Codex](https://developers.openai.com/codex/speed) documentation.
 - [`extensions/layout.ts`](extensions/layout.ts) runs only in TUI mode. It hides the startup header and renders a two-line footer with working directory, branch, session cost, context use, answer time, status, and model. It reads Pi settings and watches them for compaction changes; it does not write them.
 - `/context` requires TUI mode. Its usage figures are estimates. Before the first real turn, `pi-context-view` may create and filter one silent synthetic turn; it persists only probe role and timestamp identities. It adds no instructions or messages to normal model context. Context previews can contain prompts, context files, and session messages.
 - Pi owns model authentication and JSONL sessions. [`.gitignore`](.gitignore) excludes credentials, settings, `.pi/`, session directories, and transcripts. Treat `/context` previews and Pi session files as private.
