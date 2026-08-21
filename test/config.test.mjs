@@ -20,6 +20,7 @@ const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name
 const extensions = [
   "./extensions/web.ts",
   "./extensions/ask.ts",
+  "./extensions/fast.ts",
   "./extensions/layout.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
