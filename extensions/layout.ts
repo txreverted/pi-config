@@ -9,6 +9,7 @@ import {
   type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, truncateToWidth, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { FAST_MODE_STATUS_KEY } from "./fast.ts";
 import { safeDisplayLine } from "./text-safety.ts";
 
 export interface CompactFooterValues {
@@ -23,6 +24,7 @@ export interface CompactFooterValues {
   autoCompact: boolean;
   model: string | undefined;
   thinking: string | undefined;
+  fast: boolean;
 }
 
 export function createAnswerTimer(now: () => number = () => performance.now()) {
@@ -145,7 +147,7 @@ export function formatCompactFooter(values: CompactFooterValues, width: number):
   const context = values.contextWindow && values.contextWindow > 0
     ? `${percent}/${formatTokens(values.contextWindow)}${values.autoCompact ? " (auto)" : ""}`
     : "";
-  const model = `${safeDisplayLine(values.model ?? "no-model", 500)}${values.thinking ? ` (${safeDisplayLine(values.thinking, 50)})` : ""}`;
+  const model = `${safeDisplayLine(values.model ?? "no-model", 500)}${values.thinking ? ` (${safeDisplayLine(values.thinking, 50)})` : ""}${values.fast ? " fast" : ""}`;
   const cost = Number.isFinite(values.cost) ? Math.max(0, values.cost) : 0;
   const details = [
     `$${cost.toFixed(3)} (${values.costLabel})`,
@@ -248,8 +250,11 @@ function installLayout(
     return {
       render(width: number): string[] {
         const context = ctx.getContextUsage();
-        const statuses = [...footerData.getExtensionStatuses().entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
+        const extensionStatuses = [...footerData.getExtensionStatuses().entries()]
+          .sort(([left], [right]) => left.localeCompare(right));
+        const fast = extensionStatuses.some(([key]) => key === FAST_MODE_STATUS_KEY);
+        const statuses = extensionStatuses
+          .filter(([key]) => key !== FAST_MODE_STATUS_KEY)
           .map(([, text]) => text);
         return formatCompactFooter({
           cwd: compactCwd(ctx.sessionManager.getCwd()),
@@ -263,6 +268,7 @@ function installLayout(
           autoCompact,
           model: ctx.model?.id,
           thinking: ctx.model?.reasoning ? ctx.thinkingLevel : undefined,
+          fast,
         }, width).map((line) => theme.fg("dim", line));
       },
       invalidate() {},

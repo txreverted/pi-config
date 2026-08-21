@@ -26,6 +26,7 @@ const values = {
   autoCompact: true,
   model: "gpt-5.6-sol",
   thinking: "xhigh",
+  fast: false,
 };
 
 test("answer timer runs only for the current answer and resets for the next prompt", () => {
@@ -75,6 +76,15 @@ test("compact footer matches the wide layout and never exceeds narrow terminals"
     assert.equal(lines.length, 2);
     assert.ok(lines.every((line) => visibleWidth(line) <= width), String(width));
   }
+});
+
+test("compact footer groups Fast mode with the model and thinking level", () => {
+  const withThinking = formatCompactFooter({ ...values, fast: true }, 120)[1];
+  assert.match(withThinking, /gpt-5\.6-sol \(xhigh\) fast$/);
+  assert.doesNotMatch(withThinking, /1m30 fast/);
+
+  const withoutThinking = formatCompactFooter({ ...values, thinking: undefined, fast: true }, 120)[1];
+  assert.match(withoutThinking, /gpt-5\.6-sol fast$/);
 });
 
 test("compact footer prioritizes extension status and sanitizes it", () => {
@@ -219,7 +229,10 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
       { fg: (_color, text) => text },
       {
         getGitBranch: () => "main",
-        getExtensionStatuses: () => new Map([["sync", "sync: active"]]),
+        getExtensionStatuses: () => new Map([
+          ["openai-fast", "fast"],
+          ["sync", "sync: active"],
+        ]),
         onBranchChange: () => () => { unsubscribed = true; },
       },
     );
@@ -229,6 +242,8 @@ test("layout installs only in TUI mode, caches cost, and disposes footer resourc
     assert.ok(visibleWidth(lines[0]) <= 80);
     assert.match(lines[0], /\(main\)$/);
     assert.match(lines[1], /sync: active/);
+    assert.match(lines[1], /model \(high\) fast$/);
+    assert.doesNotMatch(lines[1], /0s fast/);
     assert.equal(entryReads, 1, "footer renders use the session-start cost snapshot");
 
     entries.push({ type: "message", message: { role: "toolResult", usage: { cost: { total: 0.5 } } } });
