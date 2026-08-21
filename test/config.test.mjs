@@ -14,17 +14,16 @@ const readme = normalizeLines(await readFile(new URL("../README.md", import.meta
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
-const skillNames = ["unslop"];
-const skillPaths = skillNames.map((name) => `skills/${name}/SKILL.md`);
+const policyPaths = ["policies/unslop.md", "policies/unslop.LICENSE"];
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
   "./extensions/web.ts",
   "./extensions/ask.ts",
   "./extensions/layout.ts",
-  "./extensions/concise.ts",
-  "./extensions/unslop.ts",
   "./extensions/ponytail.ts",
+  "./extensions/unslop.ts",
+  "./extensions/caveman.ts",
   "./node_modules/pi-context-view/src/index.ts",
 ];
 
@@ -32,9 +31,8 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.pi, {
     extensions,
     prompts: ["./prompts"],
-    skills: ["./skills"],
   });
-  assert.deepEqual(packageJson.files, ["extensions", "prompts", "skills", "README.md"]);
+  assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
   assert.deepEqual(packageJson.dependencies, {
     linkedom: "0.18.13",
     "pi-context-view": "0.4.3",
@@ -129,28 +127,12 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
   }
 });
 
-test("writing skill loads through Pi", async () => {
-  const agentDir = await mkdtemp(join(tmpdir(), "pi-config-skills-"));
-  try {
-    const root = fileURLToPath(new URL("../", import.meta.url));
-    const loader = new DefaultResourceLoader({
-      cwd: root,
-      agentDir,
-      additionalSkillPaths: [join(root, "skills")],
-      noExtensions: true,
-      noSkills: true,
-      noThemes: true,
-      noContextFiles: true,
-    });
-    await loader.reload();
-    const loaded = loader.getSkills();
-    assert.deepEqual(loaded.diagnostics, []);
-    assert.deepEqual(loaded.skills.map(({ name, description }) => ({ name, description })), [
-      { name: "unslop", description: "Detailed reference for removing AI writing tells. Use for prose edits or when the user invokes /skill:unslop." },
-    ]);
-  } finally {
-    await rm(agentDir, { recursive: true, force: true });
-  }
+test("Unslop is packaged as a plain extension policy", async () => {
+  const policy = normalizeLines(await readFile(new URL("../policies/unslop.md", import.meta.url), "utf8"));
+  assert.match(policy, /^# Unslop\n/);
+  assert.doesNotMatch(policy, /^---\n/);
+  assert.equal(packageJson.pi.skills, undefined);
+  assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), ["unslop.LICENSE", "unslop.md"]);
 });
 
 test("extension source uses only approved special UI glyphs", async () => {
@@ -180,9 +162,9 @@ test("package contents include runtime resources and exclude repository-only sta
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/text-safety.ts",
       ...promptPaths,
-      ...skillPaths,
+      ...policyPaths,
     ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|themes|\.github|extensions\/subagents)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^(?:test|themes|skills|\.github|extensions\/subagents)\//.test(path)), false);
     assert.equal([...names].some((path) => /^node_modules\/(?:@earendil-works|@anthropic-ai|@aws-sdk)\//.test(path)), false);
     for (const path of [
       "AGENTS.md",
@@ -259,10 +241,13 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd/);
 
-  for (const path of [...promptPaths, ...skillPaths]) await access(new URL(`../${path}`, import.meta.url));
+  for (const path of [...promptPaths, ...policyPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
-  assert.match(readme, /\/skill:unslop/);
+  assert.match(readme, /\]\(policies\/unslop\.md\)/);
+  assert.doesNotMatch(readme, /\/skill:unslop|hidden from automatic model invocation/);
   assert.match(readme, /prompt policy, not a command blocker/);
+  assert.match(readme, /does not include the Caveman proxy or Engine/);
+  for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
   assert.doesNotMatch(readme, /subagent|parallel_agents|agent_patch|PI_LIVE_SUBAGENT/i);
   assert.doesNotMatch(readme, /web_fetch|themes\//i);
