@@ -97,6 +97,20 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       assert.match(implementation, new RegExp(`^- ${category}$`, "m"));
     }
     assert.match(implementation, /evidence and a short rationale for every score/i);
+    assert.match(implementation, /callers, inputs, state changes, outputs, and failure paths/);
+    assert.match(implementation, /whether the behavior belongs in its current owner/);
+    assert.match(implementation, /Severity: critical, high, medium, or low/);
+    assert.match(implementation, /Confidence: high, medium, or low/);
+    assert.match(implementation, /Observed behavior/);
+    assert.match(implementation, /Concrete impact/);
+    assert.match(implementation, /Smallest root-cause fix/);
+    assert.match(implementation, /Verification method/);
+    assert.match(implementation, /Keep bugs, security flaws, and data-loss risks separate/);
+    assert.match(implementation, /`not applicable`/);
+    assert.match(implementation, /`not verified`/);
+    assert.match(implementation, /important branches, failure paths, boundaries, and regressions/);
+    assert.match(implementation, /Do not use test count as evidence of quality/);
+    assert.match(implementation, /If there are no actionable findings, state that explicitly/);
     assert.doesNotMatch(implementation, /Correctness: 3|Tests: 1/);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
