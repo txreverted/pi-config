@@ -6,10 +6,8 @@
 |---|---|---|---|
 | Human docs | `README.md` | Repository map and commands | [`test/config.test.mjs`](test/config.test.mjs) |
 | Instructions | [`AGENTS.md`](AGENTS.md) | Repository rules | — |
-| Runtime code | [`prompts/`](prompts/): [`r-docs.md`](prompts/r-docs.md), [`r-git.md`](prompts/r-git.md), [`r-impl.md`](prompts/r-impl.md) | `/r-docs [scope]` improves technical docs; `/r-git` delivers changes; `/r-impl [scope]` audits implementation | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
+| Runtime code | [`prompts/`](prompts/): [`r-docs.md`](prompts/r-docs.md), [`r-git.md`](prompts/r-git.md), [`r-impl.md`](prompts/r-impl.md) | `/r-docs [scope]`, `/r-git`, `/r-impl [scope]` | [`test/config.test.mjs`](test/config.test.mjs), [`test/smoke.mjs`](test/smoke.mjs) |
 | Runtime code | [`skills/unslop/SKILL.md`](skills/unslop/SKILL.md) | Writing policy and `/skill:unslop` | [`test/unslop-extension.test.mjs`](test/unslop-extension.test.mjs), [`test/config.test.mjs`](test/config.test.mjs) |
-
-No tracked Markdown is frozen.
 
 ## Code
 
