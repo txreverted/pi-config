@@ -69,7 +69,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
-      { name: "r-docs", description: "Make repository docs terse and agent-first", argumentHint: "[scope]" },
+      { name: "r-docs", description: "Make repository docs technical and agent-friendly", argumentHint: "[scope]" },
       { name: "r-git", description: "Split unstaged changes into PRs and merge them", argumentHint: undefined },
       { name: "r-impl", description: "Evidence-based implementation audit", argumentHint: "[scope]" },
     ]);
@@ -78,12 +78,15 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
     const docs = expandPromptTemplate("/r-docs", loaded.prompts);
     assert.match(docs, /Scope: entire repository\./);
-    assert.match(docs, /Simplify the repository documentation\. Edit it now\./);
+    assert.match(docs, /Improve the repository documentation\. Edit it now\./);
     assert.match(docs, /Read every applicable `AGENTS\.md` first/);
-    assert.match(docs, /Write for coding agents first/);
-    assert.match(docs, /Link every other tracked project `\.md` file with a relative link/);
-    assert.match(docs, /Keep an external source only when it supports a retained claim/);
-    assert.match(docs, /Remove redundant docs, source, release, changelog, and migration links/);
+    assert.match(docs, /a few lines explaining what the codebase does/);
+    assert.match(docs, /its important technical concepts/);
+    assert.match(docs, /a rough architecture with concrete paths and component relationships/);
+    assert.match(docs, /a table linking every other tracked project `\.md` file/);
+    assert.match(docs, /Keep every other Markdown file scoped to its own area/);
+    assert.match(docs, /canonical first-party sources close to the concepts they support/);
+    assert.match(docs, /Do not merge, move, or delete Markdown files unless the scope explicitly requests it/);
     assert.match(docs, /Omit unchanged-file lists/);
     assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
