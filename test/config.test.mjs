@@ -34,7 +34,6 @@ test("only documented package resources are enabled", async () => {
   });
   assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
   assert.deepEqual(packageJson.dependencies, {
-    linkedom: "0.18.13",
     "pi-context-view": "0.4.3",
   });
   assert.deepEqual(packageJson.bundledDependencies, ["pi-context-view"]);

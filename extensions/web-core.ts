@@ -1,5 +1,3 @@
-import { parseHTML } from "linkedom";
-
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp?tools=web_search_exa";
 const EXA_TOOL = "web_search_exa";
 const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
@@ -293,23 +291,51 @@ function decodeDuckDuckGoUrl(href: string): string | null {
   }
 }
 
+function decodeHtmlText(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&#(\d+);|&#x([\da-f]+);|&([a-z]+);/gi, (_match, decimal, hex, named) => {
+      if (decimal) return String.fromCodePoint(Number(decimal));
+      if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+      return ({ amp: "&", apos: "'", gt: ">", lt: "<", nbsp: " ", quot: '"' } as Record<string, string>)[named.toLowerCase()] ?? `&${named};`;
+    });
+}
+
+function htmlAttribute(tag: string, name: string): string {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+}
+
+function hasHtmlClass(tag: string, className: string): boolean {
+  return htmlAttribute(tag, "class").split(/\s+/).includes(className);
+}
+
 export function parseDuckDuckGoHtml(html: string, limit = 5): SearchResponse {
-  const { document } = parseHTML(html);
   const results: SearchResult[] = [];
   const seen = new Set<string>();
+  const resultStart = /<([a-z][\w:-]*)\b[^>]*\bclass\s*=\s*(?:"[^"]*\bresult\b[^"]*"|'[^']*\bresult\b[^']*')[^>]*>/gi;
+  const starts = [...html.matchAll(resultStart)];
 
-  for (const container of document.querySelectorAll(".result")) {
-    if (container.classList.contains("result--ad")) continue;
-    const anchor = container.querySelector(".result__a");
-    const url = decodeDuckDuckGoUrl(anchor?.getAttribute("href")?.trim() ?? "");
+  for (let index = 0; index < starts.length; index++) {
+    const openingTag = starts[index][0];
+    if (hasHtmlClass(openingTag, "result--ad")) continue;
+    const container = html.slice(starts[index].index, starts[index + 1]?.index ?? html.length);
+    const anchors = [...container.matchAll(/<a\b[^>]*>[\s\S]*?<\/a\s*>/gi)];
+    const anchor = anchors.find((match) => hasHtmlClass(match[0].slice(0, match[0].indexOf(">") + 1), "result__a"));
+    if (!anchor) continue;
+    const anchorTag = anchor[0].slice(0, anchor[0].indexOf(">") + 1);
+    const url = decodeDuckDuckGoUrl(decodeHtmlText(htmlAttribute(anchorTag, "href")).trim());
     if (!url || seen.has(url)) continue;
-    const title = cleanSnippet(anchor?.textContent, 300);
+    const title = cleanSnippet(decodeHtmlText(anchor[0]), 300);
     if (!title) continue;
+    const snippetElement = container.match(/<([a-z][\w:-]*)\b[^>]*\bclass\s*=\s*(?:"[^"]*\bresult__snippet\b[^"]*"|'[^']*\bresult__snippet\b[^']*')[^>]*>[\s\S]*?<\/\1\s*>/i)?.[0] ?? "";
     seen.add(url);
     results.push({
       title,
       url,
-      snippet: cleanSnippet(container.querySelector(".result__snippet")?.textContent),
+      snippet: cleanSnippet(decodeHtmlText(snippetElement)),
     });
     if (results.length >= limit) break;
   }
