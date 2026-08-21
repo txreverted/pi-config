@@ -37,7 +37,6 @@
     ]
   },
   "dependencies": {
-    "linkedom": "0.18.13",
     "pi-context-view": "0.4.3"
   },
   "bundledDependencies": [

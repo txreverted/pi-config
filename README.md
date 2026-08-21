@@ -9,7 +9,7 @@ Pi loads this private package's manifest, TypeScript extensions, and Markdown pr
 | Package | [`@txreverted/pi-config` 0.3.0](package.json), marked `private` |
 | Runtime floor | [Node 22.19.0 or newer](package.json) |
 | Manifest resources | [Six local extension entry points, bundled `pi-context-view` 0.4.3, and three prompt templates](package.json); no skills |
-| Runtime dependencies | [`linkedom` 0.18.13 and bundled `pi-context-view` 0.4.3](package-lock.json) |
+| Runtime dependencies | [Bundled `pi-context-view` 0.4.3](package-lock.json) |
 | Pi validation scope | [Pi packages pinned at 0.84.2 for development](package.json); [CI also checks the latest Pi packages on Ubuntu and the pinned set on Windows](.github/workflows/check.yml) |
 | Fixed policy limit | [Ponytail, Unslop, and Caveman compose once in that order with a 2,600-token test ceiling](test/caveman-extension.test.mjs); the ceiling uses Pi's estimator, not a provider tokenizer |
 
@@ -98,7 +98,7 @@ This writes the local package path to Pi's user settings. Remove it with `npx --
 - Pi packages execute with the user's full system access. Review this checkout before loading it. [`extensions/text-safety.ts`](extensions/text-safety.ts) strips terminal and directional controls from package tool output, but this package does not sandbox Pi or gate its other tools.
 - Ponytail, Unslop, and Caveman are always active. Ponytail is a prompt policy, not a command blocker. Their text cannot enforce filesystem, network, or shell restrictions.
 - Policy text adapts MIT sources at pinned revisions: [Ponytail](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/skills/ponytail/SKILL.md), [Caveman](https://github.com/JuliusBrussee/caveman/blob/2f49f0e1a352aa810e70056b7930aeb0b3d219b4/src/rules/caveman-activate.md), and pstack's [Unslop](https://github.com/cursor/plugins/blob/99559f2f52047978602ef365589275831e76af07/pstack/skills/unslop/SKILL.md). The copied Unslop checklist carries its [MIT notice](policies/unslop.LICENSE). This package uses the writing rules only. It does not include the Caveman proxy or Engine.
-- The root package declares no package-wide license. The lockfile records `pi-context-view` as MIT and `linkedom` as ISC. The manifest is private, and [the only workflow](.github/workflows/check.yml) checks the code without publishing a release.
+- The root package declares no package-wide license. The lockfile records bundled `pi-context-view` as MIT. The manifest is private, and [the only workflow](.github/workflows/check.yml) checks the code without publishing a release.
 
 ## Related docs
 
