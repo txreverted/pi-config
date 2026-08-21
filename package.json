@@ -26,6 +26,7 @@
     "extensions": [
       "./extensions/web.ts",
       "./extensions/ask.ts",
+      "./extensions/fast.ts",
       "./extensions/layout.ts",
       "./extensions/ponytail.ts",
       "./extensions/unslop.ts",
