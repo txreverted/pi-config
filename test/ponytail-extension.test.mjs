@@ -12,14 +12,15 @@ test("Ponytail always injects the full policy without registering controls", () 
 
   const result = events.get("before_agent_start")({ systemPrompt: "BASE" });
   assert.equal(result.systemPrompt, `BASE\n\n${PONYTAIL_INSTRUCTIONS}`);
-  assert.match(result.systemPrompt, /PONYTAIL MODE ACTIVE - level: full/);
+  assert.match(result.systemPrompt, /PONYTAIL MODE ACTIVE - fixed full/);
   assert.match(result.systemPrompt, /smallest safe implementation that satisfies every explicit requirement/);
   assert.match(result.systemPrompt, /tiny diff in the wrong owner is not minimal/);
   assert.match(result.systemPrompt, /build it without repeating the simplification argument/);
-  assert.match(result.systemPrompt, /Finish all planned edits, then run one canonical aggregate check/);
-  assert.match(result.systemPrompt, /Do not run its parts separately or repeat a passing check/);
-  assert.match(result.systemPrompt, /Rerun only after fixing a failure or making later edits/);
-  assert.match(result.systemPrompt, /behavior and scope the user explicitly confirms/);
-  assert.match(result.systemPrompt, /Never remove or weaken/);
+  assert.match(result.systemPrompt, /Follow repository verification rules/);
+  assert.match(result.systemPrompt, /run one canonical check that covers the change/);
+  assert.match(result.systemPrompt, /Do not repeat a passing check/);
+  assert.match(result.systemPrompt, /Rerun only after a relevant fix or later edit/);
+  assert.match(result.systemPrompt, /explicit behavior and scope/);
+  assert.match(result.systemPrompt, /Never weaken/);
   assert.deepEqual(commands, []);
 });
