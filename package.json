@@ -8,8 +8,8 @@
   ],
   "files": [
     "extensions",
+    "policies",
     "prompts",
-    "skills",
     "README.md"
   ],
   "scripts": {
@@ -27,16 +27,13 @@
       "./extensions/web.ts",
       "./extensions/ask.ts",
       "./extensions/layout.ts",
-      "./extensions/concise.ts",
-      "./extensions/unslop.ts",
       "./extensions/ponytail.ts",
+      "./extensions/unslop.ts",
+      "./extensions/caveman.ts",
       "./node_modules/pi-context-view/src/index.ts"
     ],
     "prompts": [
       "./prompts"
-    ],
-    "skills": [
-      "./skills"
     ]
   },
   "dependencies": {
