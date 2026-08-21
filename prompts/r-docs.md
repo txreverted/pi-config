@@ -15,10 +15,12 @@ Scope: ${ARGUMENTS:-entire repository}.
   - a few lines explaining what the codebase does;
   - its important technical concepts;
   - a rough architecture with concrete paths and component relationships;
-  - a table linking every other tracked project `.md` file, with its class, purpose, and covered area.
+  - a bullet list linking every other tracked project `.md` file, with its class, purpose, and covered area.
 - Keep every other Markdown file scoped to its own area. Briefly state its purpose, explain non-obvious technical concepts, and show where it fits in the architecture when that helps its reader. Do not repeat the whole-codebase overview.
 - Treat prompts, skills, and instruction files as runtime code. Do not add prose that weakens or changes their behavior.
-- Write for coding agents and humans working on the code. Prefer exact paths, symbols, commands, links, tables, and short examples.
+- Write for coding agents and humans working on the code. Prefer exact paths, symbols, commands, links, bullet lists, and short examples.
+- Use tables only when readers must compare values across columns. Replace other tables with compact bullet lists.
+- Keep Markdown concise and dense. Use short sentences, few headings, little vertical space, and no filler. Apply the active concise, compact, and Caveman output style to docs and the final report.
 - Preserve useful explanations. Remove stale facts, needless repetition, history, roadmap, speculation, generic advice, and code-obvious detail.
 - Keep useful canonical first-party sources close to the concepts they support. Put app-wide sources in the root README. Use versioned sources for version-specific claims. Do not add sources merely to fill a section.
 - Verify every edited claim, command, path, and link.

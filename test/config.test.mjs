@@ -83,7 +83,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.match(docs, /a few lines explaining what the codebase does/);
     assert.match(docs, /its important technical concepts/);
     assert.match(docs, /a rough architecture with concrete paths and component relationships/);
-    assert.match(docs, /a table linking every other tracked project `\.md` file/);
+    assert.match(docs, /a bullet list linking every other tracked project `\.md` file/);
+    assert.match(docs, /Use tables only when readers must compare values across columns/);
+    assert.match(docs, /active concise, compact, and Caveman output style/);
     assert.match(docs, /Keep every other Markdown file scoped to its own area/);
     assert.match(docs, /canonical first-party sources close to the concepts they support/);
     assert.match(docs, /Do not merge, move, or delete Markdown files unless the scope explicitly requests it/);
