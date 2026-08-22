@@ -74,9 +74,9 @@ Stop with `/quit` or Ctrl+C twice. Restart after source changes. If package star
 
 ### Runtime workflows
 
-- [`prompts/r-docs.md`](prompts/r-docs.md) improves scoped documentation with `/r-docs [scope]`.
+- [`prompts/r-docs.md`](prompts/r-docs.md) rebuilds minimal documentation with `/r-docs [scope]`.
 - [`prompts/r-git.md`](prompts/r-git.md) splits dirty work into pull requests with `/r-git`.
-- [`prompts/r-impl.md`](prompts/r-impl.md) performs evidence-based audits with `/r-impl [scope]`.
+- [`prompts/r-impl.md`](prompts/r-impl.md) audits core behavior and implementation size with `/r-impl [scope]`.
 
 ### Runtime policy
 
