@@ -1,6 +1,6 @@
 # pi-config
 
-Pi loads this private package as TypeScript extensions and Markdown prompt templates. It adds `ask_user_question`, three `/r-*` workflows, and fixed Ponytail, Unslop, and Caveman policies. Follow [`AGENTS.md`](AGENTS.md) when changing the repository.
+This private Pi package loads TypeScript extensions and Markdown prompt templates. It adds one structured question tool, three `/r-*` workflows, and fixed Ponytail, Unslop, and Caveman prompt policies. Pi's built-in tools stay unchanged. Follow [`AGENTS.md`](AGENTS.md) when changing the repository.
 
 ## Current state
 
@@ -9,7 +9,8 @@ Pi loads this private package as TypeScript extensions and Markdown prompt templ
 | Package | [`@txreverted/pi-config` 0.3.0](package.json), private |
 | Runtime | [Node 22.19.0 or newer](package.json) |
 | Resources | [Four extensions and three prompts](package.json); no skills or themes |
-| Dependencies | No runtime dependencies |
+| Tools | Pi's built-ins plus [`ask_user_question`](extensions/ask.ts) in TUI and RPC; no `jq` integration |
+| npm contract | No `dependencies`; Pi APIs and TypeBox are peer dependencies |
 | Pi checks | [Pinned Pi 0.84.2 and latest Pi on Ubuntu; pinned Pi on Windows](.github/workflows/check.yml) |
 | Policy size | [At most 2,600 estimated tokens](test/caveman-extension.test.mjs), using Pi's estimator |
 
@@ -59,7 +60,7 @@ Stop with `/quit` or Ctrl+C twice. Restart after source changes. If package star
 
 ## Runtime state and constraints
 
-- `ask_user_question` works in TUI and RPC mode. It accepts one to four questions with two to four options, adds `Other`, sanitizes display text, and discards partial answers on cancellation.
+- `ask_user_question` is active only in TUI and RPC modes. It accepts one to four questions with two to four options, adds `Other`, sanitizes display text, and discards partial answers on cancellation.
 - Ponytail, Unslop, and Caveman modify every per-turn system prompt in that order. Ponytail is a prompt policy, not a command blocker. None of the policies controls filesystem, network, or shell access.
 - Pi owns authentication and JSONL sessions. [`.gitignore`](.gitignore) excludes credentials, settings, `.pi/`, session directories, and transcripts. Treat session files as private.
 - Pi packages run with full user access. [`extensions/text-safety.ts`](extensions/text-safety.ts) strips terminal and directional controls from package tool output. It does not sandbox Pi.
