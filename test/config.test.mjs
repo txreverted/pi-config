@@ -62,55 +62,62 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
-      { name: "r-docs", description: "Make repository docs technical and agent-friendly", argumentHint: "[scope]" },
+      { name: "r-docs", description: "Rebuild minimal documentation from current code", argumentHint: "[scope]" },
       { name: "r-git", description: "Split unstaged changes into PRs and merge them", argumentHint: undefined },
-      { name: "r-impl", description: "Evidence-based implementation audit", argumentHint: "[scope]" },
+      { name: "r-impl", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
     ]);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
     const docs = expandPromptTemplate("/r-docs", loaded.prompts);
     assert.match(docs, /Scope: entire repository\./);
-    assert.match(docs, /Improve repository documentation\. Edit it now\./);
+    assert.match(docs, /Rebuild repository documentation from scratch\. Edit it now\./);
     assert.match(docs, /Read applicable `AGENTS\.md` files first/);
-    assert.match(docs, /operational map/);
-    assert.match(docs, /two to four concrete sentences naming inputs, outputs, and optional behavior/);
-    assert.match(docs, /`Current state`:[\s\S]*`Flow`:[\s\S]*`Code`:[\s\S]*`Setup and checks`:[\s\S]*`Run`:/);
-    assert.match(docs, /Preserve generation markers/);
-    assert.match(docs, /Use tables only for column comparisons/);
-    assert.match(docs, /Item \| Current value/);
-    assert.match(docs, /Area \| Source \| Tests/);
-    assert.match(docs, /grouped by reader task/);
-    assert.match(docs, /paid calls, deploys, migrations, pushes, and live operations/);
-    assert.match(docs, /active Caveman policy/);
-    assert.match(docs, /Keep non-root Markdown scoped to its area/);
-    assert.match(docs, /useful canonical first-party sources beside claims/);
-    assert.match(docs, /Do not merge, move, or delete Markdown unless scope explicitly requests it/);
+    assert.match(docs, /Do not use their claims, wording, structure, links, or examples as evidence/);
+    assert.match(docs, /Delete every human documentation file in scope before drafting replacements/);
+    assert.match(docs, /authorizes replacing dirty in-scope human docs/);
+    for (const protectedKind of ["instruction files", "runtime prompts and policies", "generated or frozen files", "licenses and notices", "vendored content"]) {
+      assert.match(docs, new RegExp(protectedKind));
+    }
+    assert.match(docs, /Inspect current code, config, tests, dependency contracts, and safe observed command output/);
+    assert.match(docs, /Choose the smallest useful documentation set/);
+    assert.match(docs, /Create a root `README\.md`/);
+    assert.match(docs, /Add another human doc only when it serves a separate concrete task/);
+    assert.match(docs, /Do not recreate an old path merely because it existed/);
+    assert.match(docs, /Prefer fewer than 80 lines/);
+    assert.match(docs, /Omit file inventories, dependency and version tables, test counts, CI matrix details, implementation narration/);
+    assert.match(docs, /Do not change non-Markdown files/);
+    assert.match(docs, /Run only checks required by repository rules or a documented Markdown-specific check/);
+    assert.match(docs, /Never run paid calls, deploys, migrations, pushes, publishes, or live operations/);
+    assert.match(docs, /Report deleted, created, and updated docs/);
     assert.match(docs, /Omit unchanged-file lists/);
+    assert.doesNotMatch(docs, /`Current state`:[\s\S]*`Flow`:[\s\S]*`Code`:[\s\S]*`Setup and checks`:[\s\S]*`Run`:/);
     assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
     const implementation = expandPromptTemplate("/r-impl extensions tests", loaded.prompts);
     assert.match(implementation, /Scope: extensions tests\./);
-    assert.match(implementation, /Score each category independently out of 10/);
-    for (const category of ["Correctness", "Simplicity", "Maintainability", "Tests", "Performance", "Security"]) {
-      assert.match(implementation, new RegExp(`^- ${category}$`, "m"));
-    }
-    assert.match(implementation, /evidence and a short rationale for every score/i);
-    assert.match(implementation, /callers, inputs, state changes, outputs, and failure paths/);
-    assert.match(implementation, /whether the behavior belongs in its current owner/);
-    assert.match(implementation, /Severity: critical, high, medium, or low/);
-    assert.match(implementation, /Confidence: high, medium, or low/);
-    assert.match(implementation, /Observed behavior/);
-    assert.match(implementation, /Concrete impact/);
-    assert.match(implementation, /Smallest root-cause fix/);
-    assert.match(implementation, /Verification method/);
-    assert.match(implementation, /Keep bugs, security flaws, and data-loss risks separate/);
-    assert.match(implementation, /`not applicable`/);
-    assert.match(implementation, /`not verified`/);
-    assert.match(implementation, /important branches, failure paths, boundaries, and regressions/);
-    assert.match(implementation, /Do not use test count as evidence of quality/);
-    assert.match(implementation, /If there are no actionable findings, state that explicitly/);
-    assert.doesNotMatch(implementation, /Correctness: 3|Tests: 1/);
+    assert.match(implementation, /main features work with the least code needed/);
+    assert.match(implementation, /Prefer "no change needed" over optional improvement/);
+    assert.match(implementation, /Do not turn assumptions into requirements/);
+    assert.match(implementation, /caller, input, state change, output, and important failure path/);
+    assert.match(implementation, /Prefer one root-cause fix or deletion over local patches/);
+    assert.match(implementation, /Apply Ponytail to implementation scope, Caveman to report length, and Unslop to prose/);
+    assert.match(implementation, /bugs that break a main feature or explicit requirement/);
+    assert.match(implementation, /reachable data-loss or security flaws at a real trust boundary/);
+    assert.match(implementation, /existing complexity that can be removed now/);
+    assert.match(implementation, /missing focused tests for non-trivial core behavior or a reported regression/);
+    assert.match(implementation, /Do not report theoretical hardening, unmeasured performance work, speculative scale concerns/);
+    assert.match(implementation, /Discuss performance only with evidence of a user-visible problem/);
+    assert.match(implementation, /Discuss security only with a reachable path and concrete impact/);
+    assert.match(implementation, /exact file and symbol or line/);
+    assert.match(implementation, /smallest fix, preferably deletion or reuse/);
+    assert.match(implementation, /Keep cleanup separate from bugs/);
+    assert.match(implementation, /Do not assign category scores/);
+    assert.match(implementation, /Do not manufacture findings/);
+    assert.match(implementation, /state that no change is needed/);
+    assert.match(implementation, /Do not modify files unless explicitly asked/);
+    assert.match(implementation, /Keep the report short/);
+    assert.doesNotMatch(implementation, /Score each category|Severity: critical|Correctness: 3|Tests: 1/);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
     assert.match(git, /^Analyze every unstaged change and untracked file/);
