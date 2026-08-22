@@ -18,14 +18,10 @@ const policyPaths = ["policies/unslop.md", "policies/unslop.LICENSE"];
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 
 const extensions = [
-  "./extensions/web.ts",
   "./extensions/ask.ts",
-  "./extensions/fast.ts",
-  "./extensions/layout.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
   "./extensions/caveman.ts",
-  "./node_modules/pi-context-view/src/index.ts",
 ];
 
 test("only documented package resources are enabled", async () => {
@@ -34,12 +30,11 @@ test("only documented package resources are enabled", async () => {
     prompts: ["./prompts"],
   });
   assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
-  assert.deepEqual(packageJson.dependencies, {
-    "pi-context-view": "0.4.3",
-  });
-  assert.deepEqual(packageJson.bundledDependencies, ["pi-context-view"]);
+  assert.equal(packageJson.dependencies, undefined);
+  assert.equal(packageJson.bundledDependencies, undefined);
   assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
   assert.equal(packageJson.scripts["test:windows"], undefined);
+  assert.equal(packageJson.scripts["test:live-web"], undefined);
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -178,10 +173,6 @@ test("package contents include runtime resources and exclude repository-only sta
     ]) {
       assert.equal(names.has(path), false, path);
     }
-    for (const path of [
-      "node_modules/pi-context-view/src/index.ts",
-      "node_modules/pi-context-view/src/ui/usage-view.ts",
-    ]) assert.ok(names.has(path), path);
   } finally {
     await rm(cache, { recursive: true, force: true });
   }
@@ -236,14 +227,13 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /schedule:\n    - cron: "17 9 \* \* 1"/);
-  assert.match(workflow, /live-web:[\s\S]*continue-on-error: true[\s\S]*PI_LIVE_WEB: "1"/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
   assert.doesNotMatch(workflow, /test:windows/);
   assert.equal(packageJson.scripts["test:live-subagent"], undefined);
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
-  assert.doesNotMatch(workflow, /curl|Install fd/);
+  assert.doesNotMatch(workflow, /curl|Install fd|live-web|PI_LIVE_WEB/);
 
   for (const path of [...promptPaths, ...policyPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.match(readme, /\]\(prompts\/\)/);
@@ -254,13 +244,7 @@ test("CI checks pushes and the human guide matches runtime scope", async () => {
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
   assert.doesNotMatch(readme, /subagent|parallel_agents|agent_patch|PI_LIVE_SUBAGENT/i);
-  assert.doesNotMatch(readme, /web_fetch|themes\//i);
-  for (const pattern of [
-    /Never send secrets or private code through `web_search`/,
-    /No background code index runs/,
-    /PI_LIVE_WEB=1/,
-    /weekly and on manual dispatch.*non-blocking provider-drift signals/,
-  ]) assert.match(readme, pattern);
+  assert.doesNotMatch(readme, /web_search|web_fetch|PI_LIVE_WEB|\bExa\b|\bParallel\b|\bDuckDuckGo\b|extensions\/fast|\/fast|--fast|service_tier|themes\//i);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {
