@@ -14,7 +14,6 @@ const readme = normalizeLines(await readFile(new URL("../README.md", import.meta
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const smoke = normalizeLines(await readFile(new URL("./smoke.mjs", import.meta.url), "utf8"));
 const fastSource = normalizeLines(await readFile(new URL("../extensions/fast.ts", import.meta.url), "utf8"));
-const subagentsSource = normalizeLines(await readFile(new URL("../extensions/subagents.ts", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
@@ -43,7 +42,6 @@ function relativeMarkdownTargets(markdown) {
 
 const extensions = [
   "./extensions/ask.ts",
-  "./extensions/subagents.ts",
   "./extensions/fast.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
@@ -233,15 +231,12 @@ test("package contents include runtime resources and exclude repository-only sta
       "README.md",
       ...extensions.map((path) => path.replace(/^\.\//, "")),
       "extensions/fast-core.ts",
-      "extensions/subagents-core.ts",
-      "extensions/subagents-guard.ts",
-      "extensions/subagents-pool.ts",
-      "extensions/subagents-ui.ts",
       "extensions/text-safety.ts",
       ...promptPaths,
       ...policyPaths,
     ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|themes|skills|\.github|extensions\/subagents)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^(?:test|themes|skills|\.github)\//.test(path)), false);
+    assert.equal([...names].some((path) => /^extensions\/subagents(?:[./])/.test(path)), false);
     assert.equal([...names].some((path) => /^node_modules\/(?:@earendil-works|@anthropic-ai|@aws-sdk)\//.test(path)), false);
     for (const path of [
       "AGENTS.md",
@@ -324,11 +319,10 @@ test("CI, smoke isolation, and the human guide match runtime scope", async () =>
   assert.match(workflow, /- run: npm run check/);
   assert.doesNotMatch(workflow, /test:windows/);
   assert.equal(packageJson.scripts["test:live-subagent"], undefined);
-  assert.equal(
-    packageJson.scripts["bench:subagents:live"],
-    "node --experimental-strip-types test/live-subagents.mjs",
-  );
-  assert.doesNotMatch(workflow, /bench:subagents:live|PI_LIVE_SUBAGENTS|PI_LIVE_MODEL/);
+  assert.equal(packageJson.scripts["bench:subagents:live"], undefined);
+  assert.doesNotMatch(JSON.stringify(packageJson.pi), /subagent|scout/i);
+  assert.doesNotMatch(JSON.stringify(packageJson.scripts), /subagent|scout/i);
+  assert.doesNotMatch(workflow, /subagent|scout|PI_LIVE_/i);
   assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
   assert.doesNotMatch(workflow, /curl|Install fd|live-web|PI_LIVE_WEB/);
   assert.match(smoke, /PI_CODING_AGENT_DIR/);
@@ -336,12 +330,7 @@ test("CI, smoke isolation, and the human guide match runtime scope", async () =>
   assert.match(smoke, /PI_OFFLINE/);
   assert.doesNotMatch(fastSource, /before_provider_request/);
   assert.doesNotMatch(fastSource, /setStatus/);
-  assert.doesNotMatch(subagentsSource, /node:child_process|\bspawn\(|\.pi\/agents|agentScope/);
-  assert.doesNotMatch(subagentsSource, /pi\.on\("agent_end"/);
-  assert.doesNotMatch(subagentsSource, /tool_execution_end/);
-  assert.doesNotMatch(subagentsSource, /from "\.\/fast\.ts"/);
-  assert.doesNotMatch(fastSource, /parallel_scouts|registerCommand\("r-fast"|createAgentSession/);
-  assert.doesNotMatch(subagentsSource, /registerCommand\("fast"|FooterComponent|setFooter/);
+  assert.doesNotMatch(fastSource, /subagent|scout|parallel_scouts|createAgentSession|\/r-fast/i);
 
   for (const path of [...promptPaths, ...policyPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.ok(readme.trimEnd().split("\n").length < 80, "README must stay below 80 lines");
@@ -358,36 +347,15 @@ test("CI, smoke isolation, and the human guide match runtime scope", async () =>
   for (const notice of ["ponytail.LICENSE", "unslop.LICENSE", "caveman.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
-  assert.match(readme, /\[`\/r-fast <task>`\]\(extensions\/subagents\.ts\)/);
   assert.match(readme, /\[`\/fast`\]\(extensions\/fast\.ts\)/);
   assert.match(readme, /Run it once to enable fast mode and again to disable it/);
   assert.match(readme, /`fast` appears beside the model and thinking level in the footer/);
   assert.doesNotMatch(readme, /\/fast \[on\|off\|status\]/);
-  assert.match(readme, /priority tier applies to the main agent and `\/r-fast` scouts/);
   assert.match(readme, /Fast mode uses higher provider pricing/);
-  assert.match(readme, /delegates two to ten natural read-only investigations only when parallel work should beat direct work/);
-  assert.match(readme, /at most four scouts active/);
-  assert.match(readme, /Scout thinking targets `survey` low, `trace` medium, and `audit` high without exceeding the parent/);
-  assert.match(readme, /parent alone decides, edits, tests, synthesizes, and uses Git/);
-  assert.match(readme, /up to ten additional provider runs in four concurrent slots/);
-  assert.match(readme, /guarded repository read\/search tools, but they are not an OS sandbox/);
-  assert.match(readme, /bench:subagents:live/);
-  assert.match(readme, /never part of `npm run check` or CI/);
+  assert.doesNotMatch(readme, /subagent|scout|parallel_scouts|bench:subagents|PI_LIVE_/i);
   assert.doesNotMatch(readme, /## Current state|\| Policy size \||\| Pi checks \|/);
-  assert.doesNotMatch(readme, /parallel_agents|agent_patch|PI_LIVE_SUBAGENT|project agents|recursive delegation/i);
+  assert.doesNotMatch(readme, /\/r-fast/);
   assert.doesNotMatch(readme, /web_search|web_fetch|PI_LIVE_WEB|\bExa\b|\bDuckDuckGo\b|--fast|service_tier|themes\//i);
-});
-
-test("the paid subagent benchmark refuses to run without both explicit gates", () => {
-  const env = { ...process.env };
-  delete env.PI_LIVE_SUBAGENTS;
-  delete env.PI_LIVE_MODEL;
-  const result = spawnSync(process.execPath, [
-    "--experimental-strip-types",
-    fileURLToPath(new URL("./live-subagents.mjs", import.meta.url)),
-  ], { encoding: "utf8", env, timeout: 10_000 });
-  assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.match(result.stderr, /Refusing paid benchmark: set PI_LIVE_SUBAGENTS=1/);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {

@@ -193,7 +193,7 @@ test("the provider command persists per-branch state and rewrites only supported
     data: { enabled: true },
   });
   assert.notEqual(state.provider(), state.baseProvider);
-  assert.match(state.notices.at(-1).message, /main agent and \/r-fast scouts; pricing is higher/);
+  assert.match(state.notices.at(-1).message, /enabled for the selected model; pricing is higher/);
   for (const width of [120, 40]) {
     const lines = renderFooter(state.footer(), width);
     assert.equal(lines.some((line) => line.endsWith("gpt-5.6-sol (low) fast")), true);

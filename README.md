@@ -1,6 +1,6 @@
 # pi-config
 
-This private Pi package adds structured questions, adaptive parallel research, three repository workflows, and fixed Ponytail, Unslop, and Caveman policies. Pi still owns models, sessions, and built-in tools. Follow [AGENTS.md](https://github.com/txreverted/pi-config/blob/main/AGENTS.md) when changing the repository.
+This private Pi package adds structured questions, provider fast mode, three repository workflows, and fixed Ponytail, Unslop, and Caveman policies. Pi still owns models, sessions, and built-in tools. Follow [AGENTS.md](https://github.com/txreverted/pi-config/blob/main/AGENTS.md) when changing the repository.
 
 ## Use
 
@@ -17,8 +17,7 @@ The check type-checks, tests, dry-packs, production-installs, and loads the pack
 ## Runtime
 
 - [`ask_user_question`](extensions/ask.ts) asks one to four questions in TUI or RPC mode. Each has two to four choices plus `Other`. Custom answers are sanitized and capped at 2,000 UTF-8 bytes and 400 lines; truncation is reported.
-- [`/r-fast <task>`](extensions/subagents.ts) enables one adaptive speed run. It delegates two to ten natural read-only investigations only when parallel work should beat direct work, with at most four scouts active. Scout thinking targets `survey` low, `trace` medium, and `audit` high without exceeding the parent. The parent alone decides, edits, tests, synthesizes, and uses Git.
-- [`/fast`](extensions/fast.ts) toggles OpenAI provider fast mode for the current session branch. Run it once to enable fast mode and again to disable it. While active on a supported model, `fast` appears beside the model and thinking level in the footer. The priority tier applies to the main agent and `/r-fast` scouts. Unsupported models keep their normal provider requests. Fast mode uses higher provider pricing.
+- [`/fast`](extensions/fast.ts) toggles OpenAI provider fast mode for the current session branch. Run it once to enable fast mode and again to disable it. While active on a supported model, `fast` appears beside the model and thinking level in the footer. Unsupported models keep their normal provider requests. Fast mode uses higher provider pricing.
 - [`Ponytail`](extensions/ponytail.ts), [`Unslop`](extensions/unslop.ts), and [`Caveman`](extensions/caveman.ts) modify every per-turn system prompt in that order. Their combined Pi estimate is at most 500 tokens.
 - [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from code. Invocation permits replacing dirty in-scope docs without confirmation. It prepares replacements before overwriting or deleting files.
 - [`/r-git`](prompts/r-git.md) splits all dirty work into checked pull requests, pushes them, waits for required gates, and merges green PRs without confirmation.
@@ -35,9 +34,7 @@ Run only the canonical check after code or prompt changes. Restart Pi after sour
 
 ## Safety and state
 
-Pi packages run with full user access. Policies guide the model; they do not control filesystem, shell, network, Git, or provider access. `/r-fast` can make up to ten additional provider runs in four concurrent slots. Its scouts expose only guarded repository read/search tools, but they are not an OS sandbox. Do not use scouts for credentials, private keys, settings, sessions, or transcripts. `/r-git` changes remote repositories, and model prompts may incur provider charges.
-
-The opt-in `npm run bench:subagents:live` benchmark uses generated fixtures and reports wall time, overlap, usage, and cost. It requires explicit environment gates, makes paid model calls, and is never part of `npm run check` or CI. It defaults to four scouts and four-way concurrency. `PI_LIVE_CONCURRENCY=2..4` selects the candidate concurrency. `PI_LIVE_COMPARE=1` adds an equivalent serial run and reports speedup, doubling the provider work. Speed still depends on task shape and provider capacity.
+Pi packages run with full user access. Policies guide the model; they do not control filesystem, shell, network, Git, or provider access. `/r-git` changes remote repositories, and model prompts may incur provider charges.
 
 Pi owns authentication and JSONL sessions. The repository [ignores](https://github.com/txreverted/pi-config/blob/main/.gitignore) credentials, settings, Pi state, sessions, and transcripts. Treat session files as private.
 
