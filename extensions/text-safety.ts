@@ -15,18 +15,6 @@ export function safeDisplayText(value: unknown): string {
     .replace(UNSAFE_TEXT, "");
 }
 
-export function normalizeDisplayText(value: unknown): string {
-  const lines: string[] = [];
-  let previousBlank = false;
-  for (const line of safeDisplayText(value).split("\n")) {
-    const blank = line.trim().length === 0;
-    if (blank && previousBlank) continue;
-    lines.push(blank ? "" : line);
-    previousBlank = blank;
-  }
-  return lines.join("\n");
-}
-
 export function safeDisplayLine(value: unknown, maxChars?: number): string {
   const text = safeDisplayText(value).replace(/\s+/g, " ").trim();
   if (maxChars === undefined) return text;

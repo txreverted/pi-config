@@ -2,10 +2,15 @@ name: check
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
     - cron: "17 9 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,10 +22,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        node: ["22.19.0", "22.x"]
-        pi: [pinned, latest]
         include:
+          - os: ubuntu-latest
+            node: "22.19.0"
+            pi: pinned
+          - os: ubuntu-latest
+            node: "22.x"
+            pi: latest
           - os: windows-latest
             node: "22.19.0"
             pi: pinned
@@ -34,5 +42,5 @@ jobs:
       - if: matrix.os == 'ubuntu-latest' && matrix.node == '22.19.0' && matrix.pi == 'pinned'
         run: npm audit --audit-level=high
       - if: matrix.pi == 'latest'
-        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
+        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
       - run: npm run check

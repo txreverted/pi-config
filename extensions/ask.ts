@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   ASK_LIMITS,
@@ -13,29 +12,32 @@ import {
   type AskOption,
   type AskQuestion,
 } from "./ask-core.ts";
-import { createAskComponent, type AskUiResult } from "./ask-ui.ts";
-import { normalizeDisplayText } from "./text-safety.ts";
 
 const TOOL_NAME = "ask_user_question";
 
 const OptionSchema = Type.Object({
-  label: Type.String({ minLength: 1, maxLength: ASK_LIMITS.label, description: "Concise option label" }),
-  description: Type.String({ minLength: 1, maxLength: ASK_LIMITS.description, description: "What this choice means or its main trade-off" }),
+  label: Type.String({ minLength: 1, maxLength: ASK_LIMITS.label, description: "Choice label" }),
+  description: Type.String({ minLength: 1, maxLength: ASK_LIMITS.description, description: "Meaning or main trade-off" }),
 }, { additionalProperties: false });
 
 const QuestionSchema = Type.Object({
-  header: Type.String({ minLength: 1, maxLength: ASK_LIMITS.header, description: "Short tab label, maximum 12 characters" }),
-  question: Type.String({ minLength: 1, maxLength: ASK_LIMITS.question, description: "Complete question to display" }),
+  header: Type.String({ minLength: 1, maxLength: ASK_LIMITS.header, description: "Short question label" }),
+  question: Type.String({ minLength: 1, maxLength: ASK_LIMITS.question, description: "Question to display" }),
   options: Type.Array(OptionSchema, {
     minItems: ASK_LIMITS.options.min,
     maxItems: ASK_LIMITS.options.max,
-    description: "Choices to present. The tool adds Other automatically.",
+    description: "Choices; Other is added automatically",
   }),
-  multiSelect: Type.Boolean({ description: "Allow more than one choice" }),
+  multiSelect: Type.Boolean({ description: "Allow multiple choices" }),
 }, { additionalProperties: false });
 
 interface AskDetails {
   questions: AskQuestion[];
+  answers: AskAnswer[];
+  cancelled: boolean;
+}
+
+interface AskDialogResult {
   answers: AskAnswer[];
   cancelled: boolean;
 }
@@ -62,7 +64,7 @@ async function customAnswer(ctx: ExtensionContext, prompt: string, signal: Abort
   return boundCustomAnswer(written);
 }
 
-async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AskUiResult> {
+async function askQuestions(questions: AskQuestion[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AskDialogResult> {
   const state = new AskState(questions);
   const dialogOptions = signal ? { signal } : undefined;
   let returnToReview = false;
@@ -96,7 +98,7 @@ async function askRpc(questions: AskQuestion[], signal: AbortSignal | undefined,
     const prompt = title(question, questionIndex, questions.length);
     const choices = question.options.map((option, optionIndex) =>
       optionText(option, optionIndex, state.selectedIndexes.includes(optionIndex)));
-    const other = `└─ ${state.customAnswer ? "■" : "□"} ${CUSTOM_CHOICE}`;
+    const other = `${state.customAnswer ? "■" : "□"} ${CUSTOM_CHOICE}`;
 
     if (!question.multiSelect) {
       const selected = await ctx.ui.select(prompt, [...choices, other], dialogOptions);
@@ -139,13 +141,11 @@ export default function askExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
     label: "ask user",
-    description: `Ask the user 1-4 Claude Code-like clarification questions. Each question has 2-4 explained choices, supports one or multiple selections, and includes an automatic Other answer capped at ${CUSTOM_ANSWER_LIMIT_TEXT}. Requires interactive TUI or RPC UI.`,
-    promptSnippet: "Ask the user structured clarification questions before making consequential assumptions",
+    description: `Ask 1-4 interactive questions with 2-4 choices, single or multi-select, and automatic Other answers limited to ${CUSTOM_ANSWER_LIMIT_TEXT}. TUI or RPC only.`,
+    promptSnippet: "Ask structured questions when missing intent would change the work",
     promptGuidelines: [
-      "Use ask_user_question before implementation when missing product intent, scope, constraints, priorities, UX, or acceptance criteria would materially change the work.",
-      "Before using ask_user_question, inspect available code and documentation so you do not ask for facts you can determine yourself.",
-      "Do not use ask_user_question for trivial uncertainties or choices that project conventions resolve; use a safe reversible default instead.",
-      "Group related questions into one ask_user_question call and explain each option's main trade-off.",
+      "Inspect available evidence first; use ask_user_question only when missing intent would materially change the work.",
+      "Group consequential questions; use a safe reversible default for trivial uncertainty.",
     ],
     parameters: Type.Object({
       questions: Type.Array(QuestionSchema, {
@@ -161,33 +161,13 @@ export default function askExtension(pi: ExtensionAPI): void {
       const questions = normalizeQuestions(params.questions);
       if (signal?.aborted) return cancelledResult(questions);
 
-      let result: AskUiResult;
-      if (ctx.mode === "rpc") {
-        result = await askRpc(questions, signal, ctx);
-      } else {
-        let abort: (() => void) | undefined;
-        try {
-          result = await ctx.ui.custom<AskUiResult>((tui, theme, keybindings, done) => {
-            const component = createAskComponent(tui, theme, keybindings, questions, done);
-            abort = () => done(component.snapshot(true));
-            signal?.addEventListener("abort", abort, { once: true });
-            if (signal?.aborted) queueMicrotask(abort);
-            return component;
-          });
-        } finally {
-          if (abort) signal?.removeEventListener("abort", abort);
-        }
-      }
+      const result = await askQuestions(questions, signal, ctx);
 
       if (result.cancelled || result.answers.length !== questions.length) return cancelledResult(questions);
       return {
         content: [{ type: "text" as const, text: formatAnswers(result.answers) }],
         details: { questions, answers: result.answers, cancelled: false } satisfies AskDetails,
       };
-    },
-    renderResult(result) {
-      const content = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
-      return new Text(normalizeDisplayText(content), 0, 0);
     },
   });
 
