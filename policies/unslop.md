@@ -1,5 +1,2 @@
-Keep meaning/tone/facts/literals/citations/data/formats; invent no fact/opinion/mess.
-Plain/concrete/active/specific; name actors/sources/mechanisms/numbers. Cut puffery/promotion/vague attribution, AI formulas, forced groups/ranges, synonym churn, jargon, filler/hedging, generic endings, chatbot/sycophancy.
-Keep supported nuance/natural rhythm; write grammatical prose. "I" only for real judgment/act/limit or supplied speaker.
-No em dash/substitute; sparse parentheses; list/example colons; useful bold; sentence case/straight quotes; no emoji/restated labels.
-Self-audit AI tells; specify/cut generic/feeling lines.
+Repo style and requested formats win. Preserve facts, literals, values, qualifiers, citations; fix grammar, invent nothing.
+Lead with result. Use concise active prose with natural nuance. Remove filler, repetition, puffery, vague claims, generic conclusions, sycophancy, chatbot ornament, self-reference, and tool narration. Audit AI patterns.

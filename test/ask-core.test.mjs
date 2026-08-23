@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import {
   ASK_LIMITS,
+  AskState,
   CUSTOM_ANSWER_LIMIT_TEXT,
   boundCustomAnswer,
   formatAnswers,
@@ -37,7 +38,7 @@ test("questions are normalized and terminal controls are removed", () => {
   })]);
 });
 
-test("Claude-like question boundaries are enforced", () => {
+test("structured question boundaries are enforced", () => {
   assert.throws(() => normalizeQuestions([]), /between 1 and 4/);
   assert.throws(() => normalizeQuestions(Array.from({ length: 5 }, () => question())), /between 1 and 4/);
   assert.throws(() => normalizeQuestions([question({ header: "x".repeat(ASK_LIMITS.header + 1) })]), /header/);
@@ -51,6 +52,38 @@ test("Claude-like question boundaries are enforced", () => {
   assert.throws(() => normalizeQuestions([question({ multiSelect: undefined })]), /requires multiSelect/);
   assert.throws(() => normalizeQuestions([question(), question()]), /Questions must be unique/);
   assert.doesNotThrow(() => normalizeQuestions([question({ header: "e\u0301".repeat(ASK_LIMITS.header) })]));
+});
+
+test("question state supports selection, custom answers, and review edits", () => {
+  const state = new AskState(normalizeQuestions([question({ multiSelect: true })]));
+  state.choose(0);
+  state.choose(1);
+  state.write("Also mobile");
+  state.movePage(1);
+
+  assert.equal(state.review, true);
+  assert.equal(state.allAnswered, true);
+  assert.deepEqual(state.answers(), [{
+    question: "Which scope?",
+    answer: "Small, Complete, Also mobile",
+    optionIndexes: [1, 2],
+    custom: true,
+  }]);
+
+  state.movePage(-1);
+  state.write("Revised");
+  assert.equal(state.answers()[0].answer, "Small, Complete, Revised");
+  state.write("   ");
+  assert.equal(state.answers()[0].answer, "Small, Complete");
+});
+
+test("blank revisions clear a single-choice custom answer", () => {
+  const state = new AskState(normalizeQuestions([question()]));
+  state.write("custom answer");
+  assert.equal(state.customAnswer, "custom answer");
+  state.write("   ");
+  assert.equal(state.customAnswer, undefined);
+  assert.equal(state.isAnswered(0), false);
 });
 
 test("custom answers are sanitized and bounded by lines and UTF-8 bytes", () => {

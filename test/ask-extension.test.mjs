@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { ASK_LIMITS, CUSTOM_ANSWER_LIMIT_TEXT } from "../extensions/ask-core.ts";
 import askExtension from "../extensions/ask.ts";
@@ -32,10 +32,22 @@ function setup() {
   return { tool: tools.get("ask_user_question"), events, active: () => active };
 }
 
-test("ask tool exposes the bounded Claude-like schema", () => {
+test("ask tool exposes a bounded schema and compact prompt metadata", () => {
   const { tool } = setup();
   assert.equal(tool.executionMode, "sequential");
-  assert.match(tool.description, /Other answer capped at 400 lines or 2,000 UTF-8 bytes/);
+  assert.match(tool.description, /Other answers limited to 400 lines or 2,000 UTF-8 bytes/);
+  assert.equal(tool.promptGuidelines.length, 2);
+  assert.match(tool.promptGuidelines[0], /Inspect available evidence first/);
+  assert.match(tool.promptGuidelines[1], /safe reversible default for trivial uncertainty/);
+  const metadata = JSON.stringify({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    promptSnippet: tool.promptSnippet,
+    promptGuidelines: tool.promptGuidelines,
+  });
+  const tokens = estimateTokens({ role: "user", content: [{ type: "text", text: metadata }], timestamp: 0 });
+  assert.ok(tokens <= 400, `ask metadata estimate ${tokens} exceeds 400 tokens`);
   assert.equal(Value.Check(tool.parameters, input()), true);
   assert.equal(Value.Check(tool.parameters, input({ multiSelect: undefined })), false);
   assert.equal(Value.Check(tool.parameters, input({ options: [{ label: "One", description: "Only" }] })), false);
@@ -45,22 +57,20 @@ test("ask tool exposes the bounded Claude-like schema", () => {
 
 test("TUI single choice pauses for review and returns the selected label", async () => {
   const { tool } = setup();
-  const theme = { fg: (_color, text) => text, bold: (text) => text };
-  const keybindings = { matches: (data, action) => data === "\r" && action === "tui.select.confirm" };
+  const calls = [];
   const result = await tool.execute("call", input(), undefined, undefined, {
     mode: "tui",
     hasUI: true,
     ui: {
-      custom: async (factory) => {
-        let completed;
-        const component = factory({ terminal: { rows: 30, columns: 80 }, requestRender() {} }, theme, keybindings, (value) => { completed = value; });
-        component.handleInput("\r");
-        component.handleInput("\r");
-        return completed;
+      select: async (title, choices) => {
+        calls.push({ title, choices });
+        return calls.length === 1 ? choices[0] : choices.at(-1);
       },
     },
   });
 
+  assert.equal(calls[0].choices[0], "□ 1. Small │ Smallest useful change");
+  assert.equal(calls[1].title, "Review answers");
   assert.match(result.content[0].text, /Answer: Small/);
   assert.deepEqual(result.details.answers[0].optionIndexes, [1]);
   assert.equal(result.details.cancelled, false);
@@ -77,7 +87,11 @@ test("RPC supports multi-select and an automatic custom answer", async () => {
       select: async (_title, choices) => {
         selection++;
         if (selection === 1) return choices[0];
-        if (selection === 2) return choices.at(-2);
+        if (selection === 2) {
+          assert.equal(choices[0], "■ 1. Small │ Smallest useful change");
+          return choices.at(-2);
+        }
+        if (selection === 3) assert.equal(choices.at(-2), "■ Other");
         return choices.at(-1);
       },
       input: async (_prompt, shownPlaceholder) => {
@@ -156,7 +170,10 @@ test("RPC review can revise an earlier answer", async () => {
         step++;
         if (step <= 2) return choices[0];
         if (step === 3) return choices[0];
-        if (step === 4) return choices[1];
+        if (step === 4) {
+          assert.equal(choices[0], "■ 1. Small │ Smallest useful change");
+          return choices[1];
+        }
         return choices.at(-1);
       },
     },
@@ -164,7 +181,7 @@ test("RPC review can revise an earlier answer", async () => {
   assert.deepEqual(result.details.answers.map(({ answer }) => answer), ["Complete", "Web"]);
 });
 
-test("RPC blank custom revision clears the stale answer and waits for a valid answer", async () => {
+test("native dialogs clear a blank custom revision and wait for a valid answer", async () => {
   const { tool } = setup();
   let step = 0;
   let inputStep = 0;
@@ -188,12 +205,12 @@ test("RPC blank custom revision clears the stale answer and waits for a valid an
     },
   });
 
-  assert.equal(choicesAfterBlank.at(-1), "└─ □ Other");
+  assert.equal(choicesAfterBlank.at(-1), "□ Other");
   assert.equal(result.details.answers[0].answer, "Small");
   assert.equal(result.details.answers[0].custom, false);
 });
 
-test("RPC display and custom answers are sanitized", async () => {
+test("native dialog text and custom answers are sanitized", async () => {
   const { tool } = setup();
   let shownTitle;
   let shownChoices;
@@ -223,7 +240,7 @@ test("RPC display and custom answers are sanitized", async () => {
   assert.doesNotMatch(result.content[0].text, /[\u001b\u0007\u202e]/);
 });
 
-test("malformed RPC custom answers are rejected", async () => {
+test("malformed native custom answers are rejected", async () => {
   const { tool } = setup();
   await assert.rejects(() => tool.execute("call", input(), undefined, undefined, {
     mode: "rpc",
@@ -233,6 +250,22 @@ test("malformed RPC custom answers are rejected", async () => {
       input: async () => ({ answer: "invalid" }),
     },
   }), /invalid custom answer/);
+});
+
+test("cancelling Other input drops partial answers in both interactive modes", async () => {
+  for (const mode of ["tui", "rpc"]) {
+    const { tool } = setup();
+    const cancelled = await tool.execute("call", input(), undefined, undefined, {
+      mode,
+      hasUI: true,
+      ui: {
+        select: async (_title, choices) => choices.at(-1),
+        input: async () => undefined,
+      },
+    });
+    assert.equal(cancelled.details.cancelled, true);
+    assert.deepEqual(cancelled.details.answers, []);
+  }
 });
 
 test("cancellation returns no partial answers and headless sessions disable the tool", async () => {
@@ -258,13 +291,8 @@ test("an active TUI ask aborts without returning partial answers", async () => {
     mode: "tui",
     hasUI: true,
     ui: {
-      custom: async (factory) => await new Promise((resolve) => {
-        factory(
-          { terminal: { rows: 30, columns: 80 }, requestRender() {} },
-          { fg: (_color, text) => text, bold: (text) => text },
-          { matches: () => false },
-          resolve,
-        );
+      select: async (_title, _choices, options) => await new Promise((resolve) => {
+        options.signal.addEventListener("abort", () => resolve(undefined), { once: true });
         controller.abort();
       }),
     },
