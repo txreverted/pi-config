@@ -1,13 +1,10 @@
 ---
 description: Split dirty work into checked PRs and merge them
 ---
-Read repo/Git rules. Split staged/unstaged/untracked work into smallest coherent PRs; order dependencies.
+Branch/commit/push/PR/merge allowed; do not confirm.
 
-Screen names first; stop on ignored/unclear paths, credentials/private keys, auth/settings, sessions/transcripts, or content secrets.
+Read repo/Git rules. Check staged/unstaged/untracked names first. Stop on ignored/unclear names, credentials/keys, auth/settings, sessions/transcripts, or content secrets.
 
-1. For each PR, merge dependencies; refresh/verify default; branch.
-2. Commit only that group with tests/docs.
-3. Run required checks; fix.
-4. Push/open PR; await required CI/reviews; fix/merge.
+Smallest coherent PRs, dependency ordered. Each: merge dependencies; refresh/verify default; branch; commit only its group/tests/docs; run/fix required checks; push/open PR; await/fix required CI/reviews; merge only green.
 
-No confirmation. Preserve work. Never commit blocked files or stash/reset/discard/overwrite/force-push/bypass checks/CI/hooks/conflicts/reviews/protection. Stop on unsafe switch/separation, failed access/approval. Report merged PRs/blockers.
+Preserve work. Stop on blocked files or unsafe switch/separation/access/approval. Never stash/reset/discard/overwrite/force-push/bypass hooks/checks/CI/conflicts/reviews/protection. Report merges/blockers.

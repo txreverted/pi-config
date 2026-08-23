@@ -2,32 +2,21 @@
 description: Audit core behavior and implementation size
 argument-hint: "[scope]"
 ---
-Audit implementation.
+Audit core code. Do not edit unless explicitly asked.
 
 Scope: ${ARGUMENTS:-entire repository}.
 
-Decide if main features meet explicit requirements with the least code. Prefer "no change needed." Do not modify files unless explicitly asked.
-
-- Read and obey applicable `AGENTS.md` files.
-- Derive supported behavior from code, config, tests, and repository rules; assumptions are not requirements.
-- Trace each main path: caller, input, state change, output, and important failure.
-- Check ownership; prefer one root-cause fix or deletion over local patches.
+Read applicable `AGENTS.md`. Derive explicit requirements/supported behavior from code/config/tests/repo rules, not assumptions. Trace caller/input/state/output/failure paths. Find owner and smallest root fix/deletion. Prefer no change if correct/minimal.
 
 Report only:
 
-- bugs breaking a main feature or explicit requirement;
-- reachable data loss or security flaws at a real trust boundary;
-- existing complexity removable now without changing required behavior;
-- missing focused tests for non-trivial core behavior or a reported regression.
+- main-feature/requirement bugs;
+- reachable trust-boundary data loss/security flaws;
+- complexity removable without behavior change;
+- missing focused nontrivial-core/regression tests.
 
-Exclude theoretical hardening, unmeasured performance work, speculative scale, future flexibility, optional abstractions, rewrites, style, and malformed inputs outside supported or trust-boundary contracts. Performance requires user-visible harm; security requires a reachable path and concrete impact.
+Exclude theoretical hardening, unmeasured performance, speculative scale/flexibility, optional abstraction/rewrites, style, unsupported malformed inputs. Performance needs user-visible harm; security a reachable trust-boundary path with concrete impact.
 
-Put actionable findings first. Each gives:
+Findings first. Each: exact file/symbol or line; behavior/evidence; feature/requirement impact; smallest fix, preferably deletion/reuse; focused check.
 
-- exact file and symbol or line;
-- observed behavior and evidence;
-- impact on a main feature or requirement;
-- smallest fix, preferably deletion or reuse;
-- one focused check.
-
-Keep cleanup separate from bugs; include it only when it reduces code or maintenance now. No category scores or invented findings. If no small fix is justified, say no change is needed.
+Separate cleanup; include only code/maintenance reduction now. No scores or invented findings. If no small fix is justified, report no change needed.

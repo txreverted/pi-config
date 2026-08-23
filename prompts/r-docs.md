@@ -2,23 +2,12 @@
 description: Rebuild and replace documentation, including dirty files
 argument-hint: "[scope]"
 ---
-Rebuild repo documentation from scratch now.
+Rebuild docs. Scope: ${ARGUMENTS:-entire repository}. Invocation permits dirty in-scope replacement without confirmation.
 
-Scope: ${ARGUMENTS:-entire repository}.
+Read applicable `AGENTS.md`. Classify tracked/untracked/dirty Markdown owner/status. Protect instructions, runtime prompts/policies, generated/frozen files, licenses/notices, ignored/vendor content, unrelated changes. Old docs are leads, not evidence, for owners/markers/voice/examples; verify from code/config/tests/contracts/safe output.
 
-1. Obey applicable `AGENTS.md` files.
-2. Inventory tracked, untracked and dirty `.md` paths. Read old human docs only for ownership and required generation markers; their claims, wording, structure, links, and examples are not evidence.
-3. Protect instructions, runtime prompts/policies, generated/frozen files, licenses/notices, ignored or vendored content, and unrelated changes.
-4. Inspect code/config/tests, dependency contracts, and safe command output. Derive every claim from this evidence.
-5. Keep the smallest useful set and root `README.md`. Add a human doc only for a separate task that would burden README. Do not keep a path merely because it existed.
-6. Draft every replacement before writing/deleting. Show dirty in-scope human docs to replace. Invocation authorizes replacement; do not ask for confirmation. Write drafts, then delete only obsolete human docs.
+Prepare all replacements before writes/deletes; name dirty docs replaced. Keep root `README.md` plus docs for separate tasks that would burden it. Write all drafts, then delete only obsolete in-scope human docs. Edit Markdown only.
 
-Start README with a title and one to three exact sentences. Link required instructions near top. Give shortest safe setup/run/canonical-check commands. Include only facts needed to use, change, verify, or troubleshoot safely. Add a code map only when useful. Put limits and side effects beside behavior. Prefer bullets and under 80 lines; use tables only for comparisons. Exceed 80 only for required safety, order, or rules.
+README: title; 1-3 exact opening sentences; required-instruction links near top; shortest safe setup/run/canonical-check commands. Only use/change/verify/troubleshoot facts. Put limits/side effects with behavior. Prefer bullets under 80 lines; tables only to compare. Use exact paths/verified commands and source/test links. Omit placeholders, inventories, version/CI tables, history/roadmap, implementation narration.
 
-Omit inventories; dependency/version tables; test counts; CI detail; implementation narration; exhaustive behavior; history; roadmap; generic advice; repeated facts. Mention security, private data, licensing, or release behavior only when it changes user action.
-
-Use exact paths and verified commands. Link source/tests instead of copying detail. No placeholders.
-
-Change no non-Markdown files. Run only repository-required checks or a documented Markdown check. Never run paid calls, deploys, migrations, pushes, publishes, or live operations.
-
-Verify every claim, command, path, and link against non-doc evidence. Report deleted, created, and updated docs plus unresolved doc/code mismatches. Omit unchanged files.
+Only required/documented Markdown checks. No paid calls/deploys/migrations/pushes/publishes/live operations. Verify claims/commands/paths/links/examples. Report created/updated/deleted docs, doc/code mismatches; omit unchanged.

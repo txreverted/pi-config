@@ -6,7 +6,6 @@ const policy = readFileSync(new URL("../policies/unslop.md", import.meta.url), "
   .trim();
 
 export const UNSLOP_INSTRUCTIONS = `UNSLOP
-Repo style wins files.
 ${policy}`;
 
 export default function unslopExtension(pi: ExtensionAPI): void {
