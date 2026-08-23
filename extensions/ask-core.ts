@@ -38,7 +38,6 @@ export const CUSTOM_CHOICE = "Other";
 
 export class AskState {
   page = 0;
-  cursor = 0;
   readonly questions: readonly AskQuestion[];
   private readonly selected = new Map<number, Set<number>>();
   private readonly custom = new Map<number, string>();
@@ -53,10 +52,6 @@ export class AskState {
   goTo(page: number): void {
     if (!Number.isInteger(page) || page < 0 || page > this.questions.length) return;
     this.page = page;
-    const question = this.question;
-    this.cursor = question
-      ? this.custom.has(page) ? question.options.length : (this.selectedIndexes[0] ?? 0)
-      : 0;
   }
 
   movePage(delta: number): void {

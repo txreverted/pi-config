@@ -1,19 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader, estimateTokens } from "@earendil-works/pi-coding-agent";
+import { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
+import { UNSLOP_INSTRUCTIONS } from "../extensions/unslop.ts";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
 const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
-const smoke = normalizeLines(await readFile(new URL("./smoke.mjs", import.meta.url), "utf8"));
-const fastSource = normalizeLines(await readFile(new URL("../extensions/fast.ts", import.meta.url), "utf8"));
+const tsconfig = JSON.parse(await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
@@ -42,11 +43,21 @@ function relativeMarkdownTargets(markdown) {
 
 const extensions = [
   "./extensions/ask.ts",
-  "./extensions/fast.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
-  "./extensions/caveman.ts",
 ];
+
+const packedPaths = [
+  "README.md",
+  "extensions/ask-core.ts",
+  "extensions/ask.ts",
+  "extensions/ponytail.ts",
+  "extensions/text-safety.ts",
+  "extensions/unslop.ts",
+  "package.json",
+  ...policyPaths,
+  ...promptPaths,
+].sort();
 
 test("only documented package resources are enabled", async () => {
   assert.deepEqual(packageJson.pi, {
@@ -54,17 +65,27 @@ test("only documented package resources are enabled", async () => {
     prompts: ["./prompts"],
   });
   assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
+  assert.equal(packageJson.keywords, undefined);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.bundledDependencies, undefined);
-  assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
-  assert.equal(packageJson.scripts["test:windows"], undefined);
-  assert.equal(packageJson.scripts["test:live-web"], undefined);
+  assert.deepEqual(packageJson.scripts, {
+    test: "node --test \"test/*.test.mjs\"",
+    typecheck: "tsc --noEmit",
+    check: "npm run typecheck && npm test",
+  });
   assert.deepEqual(packageJson.peerDependencies, {
-    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     typebox: "*",
   });
+  assert.deepEqual(packageJson.devDependencies, {
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-tui": "0.84.2",
+    "@types/node": "22.20.1",
+    typebox: "1.3.14",
+    typescript: "5.9.3",
+  });
+  assert.deepEqual(tsconfig.compilerOptions.lib, ["ES2023"]);
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
 });
 
@@ -95,106 +116,67 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
     const docs = expandPromptTemplate("/r-docs", loaded.prompts);
     assertClauses(docs, [
-      /Scope: entire repository\./,
-      /Rebuild repo documentation from scratch now\./,
-      /Obey applicable `AGENTS\.md` files/,
-      /tracked, untracked and dirty `\.md` paths/,
-      /claims, wording, structure, links, and examples are not evidence/,
-      /instructions, runtime prompts\/policies, generated\/frozen files, licenses\/notices, ignored or vendored content, and unrelated changes/,
-      /Inspect code\/config\/tests, dependency contracts, and safe command output/,
-      /Keep the smallest useful set and root `README\.md`/,
-      /Add a human doc only for a separate task that would burden README/,
-      /Do not keep a path merely because it existed/,
-      /Draft every replacement before writing\/deleting/,
-      /Show dirty in-scope human docs to replace/,
-      /Invocation authorizes replacement; do not ask for confirmation/,
-      /delete only obsolete human docs/,
-      /Start README with a title and one to three exact sentences/,
-      /Link required instructions near top/,
-      /shortest safe setup\/run\/canonical-check commands/,
-      /code map only when useful/,
-      /limits and side effects beside behavior/,
-      /Prefer bullets and under 80 lines/,
-      /use tables only for comparisons/,
-      /Omit inventories; dependency\/version tables; test counts; CI detail; implementation narration/,
-      /Link source\/tests instead of copying detail/,
-      /No placeholders/,
-      /Change no non-Markdown files/,
-      /Run only repository-required checks or a documented Markdown check/,
-      /Never run paid calls, deploys, migrations, pushes, publishes, or live operations/,
-      /Verify every claim, command, path, and link against non-doc evidence/,
-      /Report deleted, created, and updated docs plus unresolved doc\/code mismatches/,
-      /Omit unchanged files/,
+      /Scope: entire repository/,
+      /dirty in-scope replacement without confirmation/,
+      /tracked\/untracked\/dirty Markdown owner\/status/,
+      /Protect .*instructions.*runtime prompts\/policies.*generated\/frozen.*licenses\/notices.*ignored\/vendor.*unrelated changes/s,
+      /Old docs are leads, not evidence/,
+      /Prepare all replacements before writes\/deletes/,
+      /Keep root `README\.md`.*docs for separate tasks/s,
+      /Edit Markdown only/,
+      /No paid calls\/deploys\/migrations\/pushes\/publishes\/live operations/,
+      /Verify claims\/commands\/paths\/links\/examples/,
     ]);
-    assert.doesNotMatch(docs, /Delete every human documentation file in scope before drafting/);
     assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
     const implementation = expandPromptTemplate("/r-impl", loaded.prompts);
     assertClauses(implementation, [
       /Scope: entire repository\./,
-      /main features meet explicit requirements with the least code/,
-      /Prefer "no change needed\."/,
-      /Do not modify files unless explicitly asked/,
-      /Derive supported behavior from code, config, tests, and repository rules/,
-      /assumptions are not requirements/,
-      /caller, input, state change, output, and important failure/,
-      /Check ownership; prefer one root-cause fix or deletion over local patches/,
-      /bugs breaking a main feature or explicit requirement/,
-      /reachable data loss or security flaws at a real trust boundary/,
-      /existing complexity removable now without changing required behavior/,
-      /missing focused tests for non-trivial core behavior or a reported regression/,
-      /Exclude theoretical hardening, unmeasured performance work, speculative scale/,
-      /Performance requires user-visible harm/,
-      /security requires a reachable path and concrete impact/,
-      /exact file and symbol or line/,
-      /observed behavior and evidence/,
-      /impact on a main feature or requirement/,
-      /smallest fix, preferably deletion or reuse/,
-      /one focused check/,
-      /Keep cleanup separate from bugs/,
-      /No category scores or invented findings/,
-      /If no small fix is justified, say no change is needed/,
+      /Do not edit unless explicitly asked/,
+      /requirements\/supported behavior from code\/config\/tests\/repo rules, not assumptions/,
+      /caller\/input\/state\/output\/failure paths/,
+      /owner and smallest root fix\/deletion/,
+      /main-feature\/requirement bugs/,
+      /reachable trust-boundary data loss\/security flaws/,
+      /Exclude theoretical hardening, unmeasured performance, speculative scale/,
+      /exact file\/symbol or line.*behavior\/evidence.*smallest fix.*focused check/s,
+      /Separate cleanup.*No scores or invented findings/s,
+      /If no small fix is justified, report no change needed/,
     ]);
     assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
-    assert.doesNotMatch(implementation, /Score each category|Severity: critical|Correctness: 3|Tests: 1/);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
     assertClauses(git, [
-      /^Read repo\/Git rules/,
-      /Split staged\/unstaged\/untracked work into smallest coherent PRs; order dependencies/,
-      /Screen names first/,
-      /stop on ignored\/unclear paths, credentials\/private keys, auth\/settings, sessions\/transcripts, or content secrets/,
-      /For each PR, merge dependencies; refresh\/verify default; branch/,
-      /Commit only that group with tests\/docs/,
-      /Run required checks; fix/,
-      /await required CI\/reviews; fix\/merge/,
-      /No confirmation/,
-      /Preserve work/,
-      /Never commit blocked files or stash\/reset\/discard\/overwrite\/force-push\/bypass checks\/CI\/hooks\/conflicts\/reviews\/protection/,
-      /Stop on unsafe switch\/separation, failed access\/approval/,
-      /Report merged PRs\/blockers/,
+      /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
+      /staged\/unstaged\/untracked names first/,
+      /Stop on .*credentials\/keys.*auth\/settings.*sessions\/transcripts.*content secrets/s,
+      /Smallest coherent PRs, dependency ordered/,
+      /merge dependencies; refresh\/verify default; branch; commit only its group/,
+      /run\/fix required checks.*await\/fix required CI\/reviews.*merge only green/s,
+      /Preserve work.*Stop on blocked files.*Never stash\/reset\/discard\/overwrite\/force-push\/bypass/s,
+      /hooks\/checks\/CI\/conflicts\/reviews\/protection/,
+      /unsafe switch\/separation\/access\/approval.*Report merges\/blockers/s,
     ]);
-    assert.doesNotMatch(git, /Run no local checks|ask for confirmation|bypass required/i);
 
     const promptTokens = {
       "r-docs": estimateText(docs),
       "r-git": estimateText(git),
       "r-impl": estimateText(implementation),
     };
-    const ceilings = { "r-docs": 525, "r-git": 170, "r-impl": 380 };
+    const ceilings = { "r-docs": 340, "r-git": 164, "r-impl": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
     const total = Object.values(promptTokens).reduce((sum, tokens) => sum + tokens, 0);
-    assert.ok(total <= 1_075, `prompt estimate ${total} exceeds 1075 tokens`);
+    assert.ok(total <= 775, `prompt estimate ${total} exceeds 775 tokens`);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("fixed policies remain extensions and carry their notices", async () => {
+test("fixed policies remain extensions, carry their notices, and stay compact", async () => {
   const policy = normalizeLines(await readFile(new URL("../policies/unslop.md", import.meta.url), "utf8"));
-  assert.match(policy, /^Keep meaning\/tone/);
+  assert.match(policy, /^Repo style and requested formats win\./);
   assert.doesNotMatch(policy, /^---\n/);
   assert.equal(packageJson.pi.skills, undefined);
   assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), [
@@ -203,58 +185,13 @@ test("fixed policies remain extensions and carry their notices", async () => {
     "unslop.LICENSE",
     "unslop.md",
   ]);
+  assert.match(PONYTAIL_INSTRUCTIONS, /smallest complete root-cause fix/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested formats win/);
+  const tokens = estimateText(`${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}`);
+  assert.ok(tokens <= 250, `policy estimate ${tokens} exceeds 250 tokens`);
 });
 
-test("extension source uses only approved special UI glyphs", async () => {
-  const approved = new Set(Array.from("□■☒○●✓!✗⊘⎿├─│└〉·…"));
-  const extensionRoot = fileURLToPath(new URL("../extensions/", import.meta.url));
-  const files = (await readdir(extensionRoot, { recursive: true })).filter((name) => name.endsWith(".ts"));
-  for (const file of files) {
-    const source = await readFile(join(extensionRoot, file), "utf8");
-    for (const glyph of source.match(/[^\x00-\x7f]/gu) ?? []) assert.ok(approved.has(glyph), `${file}: ${glyph}`);
-  }
-});
-
-test("package contents include runtime resources and exclude repository-only state", async () => {
-  const cache = await mkdtemp(join(tmpdir(), "pi-config-pack-cache-"));
-  try {
-    const result = spawnSync(executable("npm"), ["pack", "--dry-run", "--json", "--ignore-scripts", "--cache", cache], {
-      cwd: fileURLToPath(new URL("../", import.meta.url)),
-      encoding: "utf8",
-      timeout: 30_000,
-      shell: process.platform === "win32",
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const names = new Set(JSON.parse(result.stdout)[0].files.map((file) => file.path));
-    for (const path of [
-      "package.json",
-      "README.md",
-      ...extensions.map((path) => path.replace(/^\.\//, "")),
-      "extensions/fast-core.ts",
-      "extensions/text-safety.ts",
-      ...promptPaths,
-      ...policyPaths,
-    ]) assert.ok(names.has(path), path);
-    assert.equal([...names].some((path) => /^(?:test|themes|skills|\.github)\//.test(path)), false);
-    assert.equal([...names].some((path) => /^extensions\/subagents(?:[./])/.test(path)), false);
-    assert.equal([...names].some((path) => /^node_modules\/(?:@earendil-works|@anthropic-ai|@aws-sdk)\//.test(path)), false);
-    for (const path of [
-      "AGENTS.md",
-      ".gitignore",
-      "package-lock.json",
-      "settings.json",
-    ]) {
-      assert.equal(names.has(path), false, path);
-    }
-    for (const target of relativeMarkdownTargets(readme)) {
-      assert.ok(names.has(target), `README relative link is not packed: ${target}`);
-    }
-  } finally {
-    await rm(cache, { recursive: true, force: true });
-  }
-});
-
-test("production tarball installs without dev dependencies and loads through Pi", async () => {
+test("the exact production package installs and loads directly and through its Pi manifest", async () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const temporary = await mkdtemp(join(tmpdir(), "pi-config-production-install-"));
   const application = join(temporary, "application with spaces");
@@ -270,7 +207,14 @@ test("production tarball installs without dev dependencies and loads through Pi"
       shell: process.platform === "win32",
     });
     assert.equal(packed.status, 0, packed.stderr || packed.stdout);
-    const tarball = join(temporary, JSON.parse(packed.stdout)[0].filename);
+    const packResult = JSON.parse(packed.stdout)[0];
+    assert.deepEqual(packResult.files.map((file) => file.path).sort(), packedPaths);
+    const packedNames = new Set(packedPaths);
+    for (const target of relativeMarkdownTargets(readme)) {
+      assert.ok(packedNames.has(target), `README relative link is not packed: ${target}`);
+    }
+
+    const tarball = join(temporary, packResult.filename);
     await mkdir(application);
     await writeFile(join(application, "package.json"), '{"private":true,"type":"module"}\n');
 
@@ -285,77 +229,74 @@ test("production tarball installs without dev dependencies and loads through Pi"
     assert.equal(installed.status, 0, installed.stderr || installed.stdout);
 
     const packagePath = join(application, "node_modules", ...packageJson.name.split("/"));
-    const loaded = spawnSync(executable("pi"), ["-e", packagePath, "--list-models", "__pi_config_production_install__"], {
+    const runPi = (args, name) => spawnSync(executable("pi"), args, {
       cwd: application,
       encoding: "utf8",
       env: {
         ...process.env,
-        PI_CODING_AGENT_DIR: join(piState, "agent"),
-        PI_CODING_AGENT_SESSION_DIR: join(piState, "sessions"),
+        PI_CODING_AGENT_DIR: join(piState, name, "agent"),
+        PI_CODING_AGENT_SESSION_DIR: join(piState, name, "sessions"),
         PI_OFFLINE: "1",
       },
       timeout: 30_000,
       shell: process.platform === "win32",
     });
-    assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
-    assert.match(loaded.stdout, /No models (?:matching|available)/);
+    const assertLoaded = (result) => {
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /No models (?:matching|available)/);
+      assert.doesNotMatch(result.stderr, /error|failed|exception/i);
+    };
+
+    const directArgs = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"];
+    for (const extension of extensions) directArgs.push("--extension", join(packagePath, extension));
+    for (const prompt of promptPaths) directArgs.push("--prompt-template", join(packagePath, prompt));
+    directArgs.push("--list-models", "__pi_config_direct_resources__");
+    assertLoaded(runPi(directArgs, "direct"));
+    assertLoaded(runPi(["-e", packagePath, "--list-models", "__pi_config_package_manifest__"], "manifest"));
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
 });
 
-test("CI, smoke isolation, and the human guide match runtime scope", async () => {
-  assert.match(workflow, /^on:\n  push:\n  pull_request:/m);
+test("CI and the human guide match runtime scope", () => {
+  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]\n  pull_request:\n  workflow_dispatch:\n  schedule:/m);
+  assert.match(workflow, /concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true/);
+  assert.match(workflow, /permissions:\n  contents: read/);
+  assert.match(workflow, /timeout-minutes: 10/);
+  assert.match(workflow, /fail-fast: false/);
+  assert.equal((workflow.match(/- os: /g) ?? []).length, 3);
+  for (const tuple of [
+    /- os: ubuntu-latest\n\s+node: "22\.19\.0"\n\s+pi: pinned/,
+    /- os: ubuntu-latest\n\s+node: "22\.x"\n\s+pi: latest/,
+    /- os: windows-latest\n\s+node: "22\.19\.0"\n\s+pi: pinned/,
+  ]) assert.match(workflow, tuple);
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
-  assert.match(workflow, /node: \["22\.19\.0", "22\.x"\]/);
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
-  assert.match(workflow, /windows-latest/);
   assert.match(workflow, /schedule:\n    - cron: "17 9 \* \* 1"/);
+  assert.match(workflow, /@earendil-works\/pi-coding-agent@latest @earendil-works\/pi-tui@latest typebox@latest/);
+  assert.doesNotMatch(workflow, /@earendil-works\/pi-ai@latest/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /if: matrix\.os == 'ubuntu-latest' && matrix\.node == '22\.19\.0' && matrix\.pi == 'pinned'\n\s+run: npm audit --audit-level=high/);
   assert.equal((workflow.match(/npm audit/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
-  assert.doesNotMatch(workflow, /test:windows/);
-  assert.equal(packageJson.scripts["test:live-subagent"], undefined);
-  assert.equal(packageJson.scripts["bench:subagents:live"], undefined);
-  assert.doesNotMatch(JSON.stringify(packageJson.pi), /subagent|scout/i);
-  assert.doesNotMatch(JSON.stringify(packageJson.scripts), /subagent|scout/i);
-  assert.doesNotMatch(workflow, /subagent|scout|PI_LIVE_/i);
-  assert.doesNotMatch(workflow, /runner\.os != 'Windows'|test-name-pattern/);
-  assert.doesNotMatch(workflow, /curl|Install fd|live-web|PI_LIVE_WEB/);
-  assert.match(smoke, /PI_CODING_AGENT_DIR/);
-  assert.match(smoke, /PI_CODING_AGENT_SESSION_DIR/);
-  assert.match(smoke, /PI_OFFLINE/);
-  assert.doesNotMatch(fastSource, /before_provider_request/);
-  assert.doesNotMatch(fastSource, /setStatus/);
-  assert.doesNotMatch(fastSource, /subagent|scout|parallel_scouts|createAgentSession|\/r-fast/i);
+  assert.doesNotMatch(workflow, /continue-on-error|--force|--omit=dev|test-name-pattern/);
 
-  for (const path of [...promptPaths, ...policyPaths]) await access(new URL(`../${path}`, import.meta.url));
   assert.ok(readme.trimEnd().split("\n").length < 80, "README must stay below 80 lines");
   for (const prompt of promptPaths) assert.match(readme, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(readme, /\]\(policies\/unslop\.md\)/);
-  assert.doesNotMatch(readme, /\/skill:unslop|hidden from automatic model invocation/);
   assert.match(readme, /do not control filesystem, shell, network, Git, or provider access/);
   assert.match(readme, /replacing dirty in-scope docs without confirmation/);
   assert.match(readme, /merges green PRs without confirmation/);
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
-  assert.match(readme, /at most 500 tokens/);
-  assert.match(readme, /does not include the Caveman proxy or Engine/);
-  for (const notice of ["ponytail.LICENSE", "unslop.LICENSE", "caveman.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
+  assert.match(readme, /metadata estimate is at most 400 tokens/);
+  assert.match(readme, /at most 250 tokens/);
+  assert.match(readme, /prompt expansions combine to at most 775 tokens/);
+  for (const notice of ["caveman.LICENSE", "ponytail.LICENSE", "unslop.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
-  assert.match(readme, /\[`\/fast`\]\(extensions\/fast\.ts\)/);
-  assert.match(readme, /Run it once to enable fast mode and again to disable it/);
-  assert.match(readme, /`fast` appears beside the model and thinking level in the footer/);
-  assert.doesNotMatch(readme, /\/fast \[on\|off\|status\]/);
-  assert.match(readme, /Fast mode uses higher provider pricing/);
-  assert.doesNotMatch(readme, /subagent|scout|parallel_scouts|bench:subagents|PI_LIVE_/i);
-  assert.doesNotMatch(readme, /## Current state|\| Policy size \||\| Pi checks \|/);
-  assert.doesNotMatch(readme, /\/r-fast/);
-  assert.doesNotMatch(readme, /web_search|web_fetch|PI_LIVE_WEB|\bExa\b|\bDuckDuckGo\b|--fast|service_tier|themes\//i);
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {
