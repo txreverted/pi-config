@@ -22,6 +22,7 @@ const theme = {
 
 const defaultKeys = {
   "tui.select.confirm": ["enter"],
+  "tui.input.submit": ["enter"],
   "tui.select.cancel": ["escape"],
   "tui.select.up": ["up"],
   "tui.select.down": ["down"],
@@ -71,6 +72,29 @@ test("blank revisions clear single-choice custom answer state", () => {
   assert.equal(state.isAnswered(0), false);
 });
 
+test("revisiting a question restores custom, selected, or default focus", () => {
+  const state = new AskState(questions(true));
+  state.cursor = 2;
+  state.goTo(1);
+  state.goTo(0);
+  assert.equal(state.cursor, 0);
+
+  state.choose(1);
+  state.goTo(1);
+  state.goTo(0);
+  assert.equal(state.cursor, 1);
+
+  state.write("Also mobile");
+  state.goTo(1);
+  state.goTo(0);
+  assert.equal(state.cursor, 2);
+
+  state.write("   ");
+  state.goTo(1);
+  state.goTo(0);
+  assert.equal(state.cursor, 1);
+});
+
 test("single-choice flow reviews and submits with approved glyphs", () => {
   const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
   let result;
@@ -80,8 +104,8 @@ test("single-choice flow reviews and submits with approved glyphs", () => {
 
   const rendered = component.render(80).join("\n");
   assert.match(rendered, /< □ Targets >/);
-  assert.match(rendered, /> 1\. Web\n {4}Browser application/);
-  assert.match(rendered, /3\. Other/);
+  assert.match(rendered, /> □ 1\. Web\n {6}Browser application/);
+  assert.match(rendered, /□ 3\. Other/);
   const special = rendered.match(/[^\x00-\x7f]/gu) ?? [];
   assert.ok(special.every((glyph) => "□■☒⎿├─│└〉".includes(glyph)), special.join(""));
 
@@ -100,12 +124,18 @@ test("number keys select single choices and toggle multiple choices", () => {
   let singleResult;
   const single = createAskComponent(tui, theme, keybindings, questions(), (value) => { singleResult = value; });
   single.handleInput("2");
+  single.handleInput("\x1b[D");
+  assert.match(single.render(80).join("\n"), /> ■ 2\. CLI/);
+  single.handleInput("\x1b[C");
   single.handleInput("\r");
   assert.equal(singleResult.answers[0].answer, "CLI");
 
   const multiple = createAskComponent(tui, theme, keybindings, questions(true), () => {});
   multiple.handleInput("\x1b[49u");
   multiple.handleInput("\x1b[50u");
+  const rendered = multiple.render(80).join("\n");
+  assert.match(rendered, /> ■ 1\. Web/);
+  assert.match(rendered, / {2}■ 2\. CLI/);
   assert.equal(multiple.snapshot(false).answers[0].answer, "Web, CLI");
 });
 
@@ -132,9 +162,15 @@ test("custom editor submits or cancels without leaking drafts", () => {
   component.handleInput("\x1b[B");
   component.handleInput("\x1b[B");
   component.handleInput("\r");
+  const editing = component.render(80).join("\n");
+  assert.match(editing, /Limit: 400 lines or 2,000 UTF-8 bytes/);
+  assert.match(editing, /enter to save/);
   component.handleInput("custom answer");
   component.handleInput("\r");
   assert.match(component.render(80).join("\n"), /custom answer/);
+  component.handleInput("\x1b[D");
+  assert.match(component.render(80).join("\n"), /> ■ 3\. Other/);
+  component.handleInput("\x1b[C");
   component.handleInput("\r");
   assert.equal(submitted.cancelled, false);
   assert.equal(submitted.answers[0].answer, "custom answer");
@@ -199,6 +235,7 @@ test("active tabs and help stay explicit without color or default keybindings", 
     getKeys(action) {
       return {
         "tui.select.confirm": ["ctrl+g"],
+        "tui.input.submit": ["ctrl+s"],
         "tui.select.cancel": ["ctrl+x"],
         "tui.select.up": ["k"],
         "tui.select.down": ["j"],
@@ -206,12 +243,52 @@ test("active tabs and help stay explicit without color or default keybindings", 
       }[action] ?? [];
     },
   };
-  const rendered = createAskComponent(tui, theme, rebound, questions(), () => {}).render(80).join("\n");
+  const rendered = createAskComponent(tui, theme, rebound, questions(), () => {}).render(160).join("\n");
   assert.match(rendered, /< □ Targets >/);
-  assert.match(rendered, /> 1\. Web/);
+  assert.match(rendered, /> □ 1\. Web/);
   assert.match(rendered, /ctrl\+g to select/);
-  assert.match(rendered, /ctrl\+n\/k\/j to navigate/);
+  assert.match(rendered, /k\/j to move/);
+  assert.match(rendered, /ctrl\+n\/shift\+tab\/left\/right to navigate questions/);
   assert.match(rendered, /ctrl\+x to cancel/);
+
+  const multiple = createAskComponent(tui, theme, rebound, questions(true), () => {}).render(160).join("\n");
+  assert.match(multiple, /ctrl\+g to confirm/);
+
+  const editing = createAskComponent(tui, theme, rebound, questions(), () => {});
+  editing.handleInput("3");
+  const editorRendered = editing.render(160).join("\n");
+  assert.match(editorRendered, /ctrl\+s to save/);
+  assert.doesNotMatch(editorRendered, /ctrl\+g to save/);
+  assert.doesNotMatch(editorRendered, /to select|to move|to confirm|to submit|navigate questions/);
+
+  const review = createAskComponent(tui, theme, rebound, questions(), () => {});
+  review.handleInput("1");
+  const reviewRendered = review.render(160).join("\n");
+  assert.match(reviewRendered, /ctrl\+g to submit/);
+  assert.match(reviewRendered, /ctrl\+n\/shift\+tab\/left\/right to navigate questions/);
+  assert.doesNotMatch(reviewRendered, /k\/j to move/);
+});
+
+test("empty configured key lists omit disabled action hints", () => {
+  const tui = { terminal: { rows: 30, columns: 80 }, requestRender() {} };
+  const unbound = {
+    matches: () => false,
+    getKeys: () => [],
+  };
+  const component = createAskComponent(tui, theme, unbound, questions(), () => {});
+  const rendered = component.render(160).join("\n");
+  assert.match(rendered, /shift\+tab\/left\/right to navigate questions/);
+  assert.doesNotMatch(rendered, /to select|to move|to cancel|unbound/);
+
+  const editing = createAskComponent(tui, theme, unbound, questions(), () => {});
+  editing.handleInput("3");
+  const editorRendered = editing.render(160).join("\n");
+  assert.doesNotMatch(editorRendered, /to save|to go back|to select|to move|to confirm|to submit|navigate questions|unbound/);
+
+  component.handleInput("1");
+  const review = component.render(160).join("\n");
+  assert.match(review, /No submit key configured/);
+  assert.doesNotMatch(review, /(?:enter|ctrl\+g) to submit|unbound/);
 });
 
 test("enhanced keyboard sequences navigate and toggle choices", () => {
@@ -220,7 +297,11 @@ test("enhanced keyboard sequences navigate and toggle choices", () => {
   const component = createAskComponent(tui, theme, keybindings, questions(true), (value) => { result = value; });
 
   component.handleInput("\x1b[1;1C");
-  assert.match(component.render(80).join("\n"), /Ready to submit/);
+  const unansweredReview = component.render(80).join("\n");
+  assert.match(unansweredReview, /Ready to submit/);
+  assert.match(unansweredReview, /Answer every question before submitting/);
+  assert.match(unansweredReview, /tab\/shift\+tab\/left\/right to navigate questions/);
+  assert.doesNotMatch(unansweredReview, /enter to submit|up\/down to move/);
   component.handleInput("\x1b[1;1D");
   component.handleInput("\x1b[32u");
   component.handleInput("\x1b");
@@ -238,7 +319,7 @@ test("questionnaire rendering stays within narrow and short terminals", () => {
     const lines = component.render(32);
     assert.ok(lines.length <= Math.max(1, rows - 2), `height ${rows}: ${lines.length}`);
     assert.ok(lines.every((line) => visibleWidth(line) <= 32), `width overflow at ${rows}`);
-    if (rows === 8) assert.match(lines.join("\n"), /> 1\./);
+    if (rows === 8) assert.match(lines.join("\n"), /> □ 1\./);
   }
 
   const tui = { terminal: { rows: 10, columns: 32 }, requestRender() {} };
