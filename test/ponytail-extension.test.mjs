@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import ponytailExtension, { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
 
-test("Ponytail always injects the full policy without registering controls", () => {
+test("Ponytail always injects its compressed policy without registering controls", () => {
   const events = new Map();
   const commands = [];
   ponytailExtension({
@@ -12,15 +13,19 @@ test("Ponytail always injects the full policy without registering controls", () 
 
   const result = events.get("before_agent_start")({ systemPrompt: "BASE" });
   assert.equal(result.systemPrompt, `BASE\n\n${PONYTAIL_INSTRUCTIONS}`);
-  assert.match(result.systemPrompt, /PONYTAIL MODE ACTIVE - fixed full/);
-  assert.match(result.systemPrompt, /smallest safe implementation that satisfies every explicit requirement/);
-  assert.match(result.systemPrompt, /tiny diff in the wrong owner is not minimal/);
-  assert.match(result.systemPrompt, /build it without repeating the simplification argument/);
-  assert.match(result.systemPrompt, /Follow repository verification rules/);
-  assert.match(result.systemPrompt, /run one canonical check that covers the change/);
-  assert.match(result.systemPrompt, /Do not repeat a passing check/);
-  assert.match(result.systemPrompt, /Rerun only after a relevant fix or later edit/);
-  assert.match(result.systemPrompt, /explicit behavior and scope/);
-  assert.match(result.systemPrompt, /Never weaken/);
+  assert.match(result.systemPrompt, /Smallest safe code meeting explicit requirements/);
+  assert.match(result.systemPrompt, /Before edits trace callers\/owner\/failures/);
+  assert.match(result.systemPrompt, /working\/no change, project reuse, platform\/stdlib, deletion/);
+  assert.match(result.systemPrompt, /No dependency for a small local need/);
+  assert.match(result.systemPrompt, /Cut code, not investigation/);
+  assert.match(result.systemPrompt, /fix shared root at its owner/);
+  assert.match(result.systemPrompt, /Reject speculative behavior\/APIs\/abstractions\/dependencies\/factories\/wrappers\/config\/extensions\/scaffolds/);
+  assert.match(result.systemPrompt, /Build confirmed scope, including requested larger work/);
+  assert.match(result.systemPrompt, /ponytail: <ceiling>; upgrade when <trigger>/);
+  assert.match(result.systemPrompt, /one required canonical repo check; rerun only after relevant change/);
+  assert.match(result.systemPrompt, /Reuse tests; cover nontrivial behavior or money\/security/);
+  assert.match(result.systemPrompt, /Never weaken correctness\/understanding, boundary security\/validation/);
+  assert.match(result.systemPrompt, /data integrity\/loss, accessibility, or stated scope\/detail/);
+  assert.ok(estimateTokens({ role: "user", content: [{ type: "text", text: PONYTAIL_INSTRUCTIONS }], timestamp: 0 }) <= 210);
   assert.deepEqual(commands, []);
 });

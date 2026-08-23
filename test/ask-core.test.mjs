@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import {
   ASK_LIMITS,
+  CUSTOM_ANSWER_LIMIT_TEXT,
   boundCustomAnswer,
   formatAnswers,
   normalizeQuestions,
@@ -51,13 +53,27 @@ test("Claude-like question boundaries are enforced", () => {
   assert.doesNotThrow(() => normalizeQuestions([question({ header: "e\u0301".repeat(ASK_LIMITS.header) })]));
 });
 
-test("custom answers are sanitized and byte bounded", () => {
+test("custom answers are sanitized and bounded by lines and UTF-8 bytes", () => {
   assert.equal(boundCustomAnswer(" answer\u001b]52;c;payload\u0007\r\nnext "), "answer\nnext");
   assert.equal(boundCustomAnswer("\u001b]0;gone\u0007"), undefined);
   assert.equal(boundCustomAnswer({ answer: "not a string" }), undefined);
-  const bounded = boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes));
-  assert.ok(Buffer.byteLength(bounded, "utf8") <= ASK_LIMITS.customAnswerBytes);
-  assert.match(bounded, /Answer truncated/);
+
+  const exactBytes = "x".repeat(ASK_LIMITS.customAnswerBytes);
+  const exactUnicodeBytes = "😀".repeat(ASK_LIMITS.customAnswerBytes / 4);
+  const exactLines = Array.from({ length: ASK_LIMITS.customAnswerLines }, () => "x").join("\n");
+  assert.equal(boundCustomAnswer(exactBytes), exactBytes);
+  assert.equal(boundCustomAnswer(exactUnicodeBytes), exactUnicodeBytes);
+  assert.equal(boundCustomAnswer(exactLines), exactLines);
+
+  const notice = `[Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
+  for (const bounded of [
+    boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes)),
+    boundCustomAnswer(Array.from({ length: ASK_LIMITS.customAnswerLines + 1 }, () => "x").join("\n")),
+  ]) {
+    assert.ok(Buffer.byteLength(bounded, "utf8") <= ASK_LIMITS.customAnswerBytes);
+    assert.ok(bounded.split("\n").length <= ASK_LIMITS.customAnswerLines);
+    assert.equal(bounded.endsWith(notice), true);
+  }
 });
 
 test("answers are formatted clearly with multiline indentation", () => {
@@ -70,4 +86,17 @@ test("answers are formatted clearly with multiline indentation", () => {
     "- Anything else?\n" +
     "  Answer: Keep it small.\n" +
     "    Add tests.");
+});
+
+test("aggregate answer formatting stays within Pi output limits", () => {
+  const output = formatAnswers([{
+    question: "Large answer?",
+    answer: Array.from({ length: DEFAULT_MAX_LINES + 100 }, () => "x".repeat(40)).join("\n"),
+    optionIndexes: [],
+    custom: true,
+  }]);
+
+  assert.match(output, /\[Clarification answers truncated to stay within Pi's tool output limits\.\]/);
+  assert.ok(Buffer.byteLength(output, "utf8") <= DEFAULT_MAX_BYTES);
+  assert.ok(output.split("\n").length <= DEFAULT_MAX_LINES);
 });

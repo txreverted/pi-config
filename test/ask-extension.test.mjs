@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
+import { ASK_LIMITS, CUSTOM_ANSWER_LIMIT_TEXT } from "../extensions/ask-core.ts";
 import askExtension from "../extensions/ask.ts";
 
 const input = (overrides = {}) => ({
@@ -33,6 +35,7 @@ function setup() {
 test("ask tool exposes the bounded Claude-like schema", () => {
   const { tool } = setup();
   assert.equal(tool.executionMode, "sequential");
+  assert.match(tool.description, /Other answer capped at 400 lines or 2,000 UTF-8 bytes/);
   assert.equal(Value.Check(tool.parameters, input()), true);
   assert.equal(Value.Check(tool.parameters, input({ multiSelect: undefined })), false);
   assert.equal(Value.Check(tool.parameters, input({ options: [{ label: "One", description: "Only" }] })), false);
@@ -66,6 +69,7 @@ test("TUI single choice pauses for review and returns the selected label", async
 test("RPC supports multi-select and an automatic custom answer", async () => {
   const { tool } = setup();
   let selection = 0;
+  let placeholder;
   const result = await tool.execute("call", input({ multiSelect: true }), undefined, undefined, {
     mode: "rpc",
     hasUI: true,
@@ -76,13 +80,57 @@ test("RPC supports multi-select and an automatic custom answer", async () => {
         if (selection === 2) return choices.at(-2);
         return choices.at(-1);
       },
-      input: async () => "Also mobile",
+      input: async (_prompt, shownPlaceholder) => {
+        placeholder = shownPlaceholder;
+        return "Also mobile";
+      },
     },
   });
 
   assert.equal(result.details.answers[0].answer, "Small, Also mobile");
   assert.deepEqual(result.details.answers[0].optionIndexes, [1]);
   assert.equal(result.details.answers[0].custom, true);
+  assert.equal(placeholder, `Up to ${CUSTOM_ANSWER_LIMIT_TEXT}`);
+});
+
+test("four maximum-size valid custom answers remain visible in runtime output", async () => {
+  const { tool } = setup();
+  const questions = Array.from({ length: ASK_LIMITS.questions.max }, (_unused, index) => ({
+    header: `Scope ${index + 1}`,
+    question: `Which scope ${index + 1}?`,
+    options: [
+      { label: "Small", description: "Smallest useful change" },
+      { label: "Complete", description: "All requested behavior" },
+    ],
+    multiSelect: false,
+  }));
+  const maximumAnswers = questions.map((_question, index) => {
+    const marker = `answer-${index + 1}-`;
+    const firstLine = marker + "x".repeat(1_202 - marker.length);
+    return `${firstLine}\n${Array.from({ length: ASK_LIMITS.customAnswerLines - 1 }, () => "x").join("\n")}`;
+  });
+  let answerIndex = 0;
+  const result = await tool.execute("call", { questions }, undefined, undefined, {
+    mode: "rpc",
+    hasUI: true,
+    ui: {
+      select: async (_title, choices) => choices.at(-1),
+      input: async () => maximumAnswers[answerIndex++],
+    },
+  });
+
+  const output = result.content[0].text;
+  assert.equal(result.details.answers.length, ASK_LIMITS.questions.max);
+  for (let index = 1; index <= ASK_LIMITS.questions.max; index++) {
+    assert.match(output, new RegExp(`- Which scope ${index}\\?`));
+    assert.match(output, new RegExp(`answer-${index}-`));
+    assert.equal(Buffer.byteLength(result.details.answers[index - 1].answer, "utf8"), ASK_LIMITS.customAnswerBytes);
+    assert.equal(result.details.answers[index - 1].answer.split("\n").length, ASK_LIMITS.customAnswerLines);
+  }
+  assert.doesNotMatch(output, /\[Answer truncated to the ask tool limit:/);
+  assert.doesNotMatch(output, /\[Clarification answers truncated/);
+  assert.ok(Buffer.byteLength(output, "utf8") <= DEFAULT_MAX_BYTES);
+  assert.ok(output.split("\n").length <= DEFAULT_MAX_LINES);
 });
 
 test("RPC review can revise an earlier answer", async () => {

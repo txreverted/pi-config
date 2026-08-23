@@ -1,33 +1,24 @@
 ---
-description: Rebuild minimal documentation from current code
+description: Rebuild and replace documentation, including dirty files
 argument-hint: "[scope]"
 ---
-Rebuild repository documentation from scratch. Edit it now.
+Rebuild repo documentation from scratch now.
 
 Scope: ${ARGUMENTS:-entire repository}.
 
-1. Read applicable `AGENTS.md` files first and obey them.
-2. Inventory tracked project `.md` files. Read old human docs only far enough to classify ownership and preserve required generation markers. Do not use their claims, wording, structure, links, or examples as evidence.
-3. Delete every human documentation file in scope before drafting replacements. This command authorizes replacing dirty in-scope human docs. Preserve instruction files such as `AGENTS.md`, runtime prompts and policies, generated or frozen files, licenses and notices, ignored files, and vendored content. Preserve unrelated changes.
-4. Inspect current code, config, tests, dependency contracts, and safe observed command output. Derive every new claim from that evidence.
-5. Choose the smallest useful documentation set. Create a root `README.md`. Add another human doc only when it serves a separate concrete task that would make the README harder to use. Do not recreate an old path merely because it existed.
-6. Write the new docs from zero.
+1. Obey applicable `AGENTS.md` files.
+2. Inventory tracked, untracked and dirty `.md` paths. Read old human docs only for ownership and required generation markers; their claims, wording, structure, links, and examples are not evidence.
+3. Protect instructions, runtime prompts/policies, generated/frozen files, licenses/notices, ignored or vendored content, and unrelated changes.
+4. Inspect code/config/tests, dependency contracts, and safe command output. Derive every claim from this evidence.
+5. Keep the smallest useful set and root `README.md`. Add a human doc only for a separate task that would burden README. Do not keep a path merely because it existed.
+6. Draft every replacement before writing/deleting. Show dirty in-scope human docs to replace. Invocation authorizes replacement; do not ask for confirmation. Write drafts, then delete only obsolete human docs.
 
-Keep the root README practical and short:
+Start README with a title and one to three exact sentences. Link required instructions near top. Give shortest safe setup/run/canonical-check commands. Include only facts needed to use, change, verify, or troubleshoot safely. Add a code map only when useful. Put limits and side effects beside behavior. Prefer bullets and under 80 lines; use tables only for comparisons. Exceed 80 only for required safety, order, or rules.
 
-- Start with the title and one to three exact sentences saying what the project does.
-- Link required repository instructions near the top.
-- Give the shortest safe setup, run, and canonical check commands that exist.
-- Include only what a reader needs to use, change, verify, or troubleshoot the project safely.
-- Add a compact code map only when it saves meaningful searching.
-- Put limits and side effects beside the command or behavior they constrain.
-- Prefer bullets. Use tables only for real column comparisons.
-- Prefer fewer than 80 lines. Exceed that only when required safety, ordering, or repository rules cannot remain clear.
+Omit inventories; dependency/version tables; test counts; CI detail; implementation narration; exhaustive behavior; history; roadmap; generic advice; repeated facts. Mention security, private data, licensing, or release behavior only when it changes user action.
 
-Omit file inventories, dependency and version tables, test counts, CI matrix details, implementation narration, exhaustive runtime behavior, history, roadmap, generic advice, and repeated facts. Mention security, private data, licensing, or release behavior only when it changes what the reader must do.
+Use exact paths and verified commands. Link source/tests instead of copying detail. No placeholders.
 
-Use short sentences, exact paths, and verified commands. Link to source or tests instead of copying implementation detail. Do not add placeholders or speculative sections.
+Change no non-Markdown files. Run only repository-required checks or a documented Markdown check. Never run paid calls, deploys, migrations, pushes, publishes, or live operations.
 
-Do not change non-Markdown files. Run only checks required by repository rules or a documented Markdown-specific check. Never run paid calls, deploys, migrations, pushes, publishes, or live operations.
-
-Verify every retained claim, command, path, and link against non-documentation evidence. Report deleted, created, and updated docs, plus unresolved doc/code mismatches. Omit unchanged-file lists.
+Verify every claim, command, path, and link against non-doc evidence. Report deleted, created, and updated docs plus unresolved doc/code mismatches. Omit unchanged files.
