@@ -149,7 +149,7 @@ export function registerFastExtension(pi: ExtensionAPI): void {
   };
 
   pi.registerCommand("fast", {
-    description: "Toggle OpenAI priority service tier for the main agent and /r-fast scouts",
+    description: "Toggle OpenAI priority service tier for the selected model",
     handler: async (args, ctx) => {
       if (args.trim()) {
         ctx.ui.notify("Usage: /fast", "warning");
@@ -172,7 +172,7 @@ export function registerFastExtension(pi: ExtensionAPI): void {
       updateFooter(ctx);
       ctx.ui.notify(
         enabled
-          ? "Provider fast mode enabled: priority tier applies to the main agent and /r-fast scouts; pricing is higher."
+          ? "Provider fast mode enabled for the selected model; pricing is higher."
           : "Provider fast mode disabled.",
         "info",
       );
