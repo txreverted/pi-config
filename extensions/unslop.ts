@@ -5,12 +5,8 @@ const policy = readFileSync(new URL("../policies/unslop.md", import.meta.url), "
   .replace(/\r\n?/g, "\n")
   .trim();
 
-export const UNSLOP_INSTRUCTIONS = `UNSLOP MODE ACTIVE
-
-Apply the full checklist to generated chat and persisted prose.
-
-Preserve meaning, tone, exact code, commands, paths, quotes, citations, data, error text, and required formats. Repository style controls persisted text. Caveman controls chat length. Never invent facts or opinions, and do not add words merely to perform a voice.
-
+export const UNSLOP_INSTRUCTIONS = `UNSLOP
+Repo style wins files.
 ${policy}`;
 
 export default function unslopExtension(pi: ExtensionAPI): void {

@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import {
   ASK_LIMITS,
   AskState,
+  CUSTOM_ANSWER_LIMIT_TEXT,
   CUSTOM_CHOICE,
   boundCustomAnswer,
   formatAnswers,
@@ -55,7 +56,7 @@ function cancelledResult(questions: AskQuestion[]) {
 }
 
 async function customAnswer(ctx: ExtensionContext, prompt: string, signal: AbortSignal | undefined): Promise<string | undefined | null> {
-  const written = await ctx.ui.input(prompt, "Type your answer", signal ? { signal } : undefined);
+  const written = await ctx.ui.input(prompt, `Up to ${CUSTOM_ANSWER_LIMIT_TEXT}`, signal ? { signal } : undefined);
   if (written === undefined || signal?.aborted) return null;
   if (typeof written !== "string") throw new Error("Ask UI returned an invalid custom answer");
   return boundCustomAnswer(written);
@@ -138,7 +139,7 @@ export default function askExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: TOOL_NAME,
     label: "ask user",
-    description: "Ask the user 1-4 Claude Code-like clarification questions. Each question has 2-4 explained choices, supports one or multiple selections, and includes an automatic Other answer. Requires interactive TUI or RPC UI.",
+    description: `Ask the user 1-4 Claude Code-like clarification questions. Each question has 2-4 explained choices, supports one or multiple selections, and includes an automatic Other answer capped at ${CUSTOM_ANSWER_LIMIT_TEXT}. Requires interactive TUI or RPC UI.`,
     promptSnippet: "Ask the user structured clarification questions before making consequential assumptions",
     promptGuidelines: [
       "Use ask_user_question before implementation when missing product intent, scope, constraints, priorities, UX, or acceptance criteria would materially change the work.",

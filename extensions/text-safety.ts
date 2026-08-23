@@ -1,7 +1,6 @@
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 
 const UNSAFE_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
-const UNSAFE_DISPLAY_CHARACTER = /[\\\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
 const TERMINAL_STRING = /(?:\u001b[\]PX^_]|[\u0090\u0098\u009d\u009e\u009f])[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g;
 const TERMINAL_CSI = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g;
 const TERMINAL_ESCAPE = /\u001b[ -/]*[0-~]/g;
@@ -14,17 +13,6 @@ export function safeDisplayText(value: unknown): string {
     .replace(TERMINAL_ESCAPE, ""))
     .replace(/\r/g, "")
     .replace(UNSAFE_TEXT, "");
-}
-
-export function escapeUnsafeDisplayText(value: unknown): string {
-  const text = typeof value === "string" ? value : String(value ?? "");
-  return text.replace(UNSAFE_DISPLAY_CHARACTER, (character) => {
-    if (character === "\\") return "\\\\";
-    const code = character.codePointAt(0)!;
-    return code <= 0xff
-      ? `\\x${code.toString(16).padStart(2, "0")}`
-      : `\\u${code.toString(16).padStart(4, "0")}`;
-  });
 }
 
 export function normalizeDisplayText(value: unknown): string {
