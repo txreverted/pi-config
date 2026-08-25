@@ -21,8 +21,9 @@ user's permissions. Submitted prompts may make paid provider calls. Policies do 
 ## Change
 
 - [`extensions/chrome.ts`](extensions/chrome.ts) replaces the TUI editor and
-  footer. The border, parenthetical status labels, and Markdown headings use the
-  current thinking-level color. The status shows the model, thinking level,
+  footer. The border, parenthetical status labels, Markdown headings, and loaded
+  resource labels use the current thinking-level color. The labels update when
+  the thinking level changes. The status shows the model, thinking level,
   working directory, Git branch, context usage, recorded session cost, and
   subscription marker. Multiline input has side corners and no bottom border.
 - [`extensions/ask.ts`](extensions/ask.ts) provides `ask_user_question` in TUI
