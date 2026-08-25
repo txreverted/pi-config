@@ -5,6 +5,8 @@ commands, and fixed Ponytail and Unslop policies. Pi owns models,
 authentication, settings, sessions, and transcripts. Contributors must follow
 [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
+![Pi config TUI preview](assets/preview.png)
+
 ## Use
 
 Requires Node 22.19.0 or newer.
