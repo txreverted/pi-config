@@ -1,11 +1,11 @@
 # pi-config
 
-This private Pi package adds a custom TUI, structured questions, repository
-commands, and fixed Ponytail and Unslop policies. Pi owns models,
-authentication, settings, sessions, and transcripts. Contributors must follow
+This private Pi package adds a custom TUI, web tools, structured questions,
+repository commands, and fixed policies. Pi owns models, authentication,
+settings, sessions, and transcripts. Contributors must follow
 [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
-![Pi config TUI preview](assets/preview.png)
+![Pi config TUI preview](assets/pi-config.png)
 
 ## Use
 
@@ -17,58 +17,51 @@ npm run check
 npx --no-install pi -e "$PWD"
 ```
 
-`npm ci` may contact the registry. Pi loads this package with the user's
-permissions. Submitted prompts may make paid provider calls. Policies
-do not control filesystem, shell, network, Git, or provider access.
+`npm ci` may contact the registry. The web tools read `FIRECRAWL_API_KEY` from the environment.
+Set it before launch for reliable web access; keyless access may be denied.
+Pi loads this package with the user's permissions. Prompts can make paid provider
+calls. Web tools send queries and URLs to Firecrawl and can consume its credits.
+Policies do not control filesystem, shell, network, Git, or provider access.
 
 ## Change
 
-- [`extensions/ui.ts`](extensions/ui.ts) customizes the TUI editor and footer.
-  The current thinking-level color applies to the editor border, status labels,
-  Markdown headings, loaded resource labels, and streaming spinner.
-  Thinking-level changes do not add rows or change expansion state. The status
-  shows the model, thinking level, working directory, Git branch, context usage,
-  recorded session cost, and subscription marker. Multiline input has side
-  corners and no bottom border. Consecutive empty lines collapse to one while
-  terminal image rows retain their reserved height.
+- [`extensions/ui.ts`](extensions/ui.ts) sets the TUI editor, footer, thinking
+  colors, and compact rendering. See [`test/ui-extension.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
 - [`extensions/ask.ts`](extensions/ask.ts) provides `ask_user_question` in TUI
-  and RPC sessions. It accepts one to four single- or multi-select questions,
-  two to four choices per question, and an automatic `Other` choice. Custom
-  answers are sanitized and limited to 2,000 UTF-8 bytes and 400 lines.
-  Truncation is reported. The metadata estimate is at most 400 tokens.
+  and RPC sessions. It accepts 1-4 questions with 2-4 choices. Custom answers
+  are limited to 2,000 UTF-8 bytes and 400 lines. Its metadata estimate is at most 400 tokens.
+  See [`test/ask-extension.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/ask-extension.test.mjs).
+- [`extensions/web.ts`](extensions/web.ts) provides Firecrawl-backed `web_search`
+  and `web_fetch`. Search accepts up to 500 characters and a 1-10 result limit.
+  Tool output stops at 2,000 lines or 50KB; fetch responses stop at 10MB.
+  Truncated page output is saved to a temporary file. See
+  [`test/web-core.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/web-core.test.mjs).
 - [`extensions/ponytail.ts`](extensions/ponytail.ts) and
-  [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies to each
-  turn's system prompt in that order. Their combined Pi estimate is at most 2,000 tokens.
-  [`policies/unslop.md`](policies/unslop.md) is runtime policy code.
-- [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from
-  verified repository facts. It permits replacing dirty in-scope docs without confirmation
-  and prepares replacements before any write or deletion.
-- [`/r-git`](prompts/r-git.md) separates dirty work into checked pull requests,
-  pushes them, waits for required gates, and merges green PRs without confirmation.
-  It changes remote repositories.
-- [`/r-impl [scope]`](prompts/r-impl.md) audits behavior and implementation size
-  without editing unless asked. The three default prompt expansions combine to at most 775 tokens.
+  [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies in that
+  order. Their combined estimate is at most 2,000 tokens. Runtime policy text is
+  [`policies/unslop.md`](policies/unslop.md). See [`test/policies.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/policies.test.mjs).
+- [`/r-docs [scope]`](prompts/r-docs.md) rebuilds docs, including replacing dirty in-scope docs without confirmation.
+  [`/r-git`](prompts/r-git.md) pushes checked work and merges green PRs without confirmation.
+  [`/r-impl [scope]`](prompts/r-impl.md) audits without editing unless asked.
+  The three default prompt expansions combine to at most 775 tokens.
+  See [`test/config.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/config.test.mjs).
 
 Policy text adapts pinned MIT sources: [Ponytail](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/skills/ponytail/SKILL.md),
 [Unslop](https://github.com/cursor/plugins/blob/99559f2f52047978602ef365589275831e76af07/pstack/skills/unslop/SKILL.md),
 and [Caveman](https://github.com/JuliusBrussee/caveman/blob/2f49f0e1a352aa810e70056b7930aeb0b3d219b4/src/rules/caveman-activate.md).
-Their notices are [`ponytail.LICENSE`](policies/ponytail.LICENSE),
-[`unslop.LICENSE`](policies/unslop.LICENSE), and
-[`caveman.LICENSE`](policies/caveman.LICENSE).
+Notices: [`ponytail.LICENSE`](policies/ponytail.LICENSE),
+[`unslop.LICENSE`](policies/unslop.LICENSE), and [`caveman.LICENSE`](policies/caveman.LICENSE).
 
 ## Verify
 
-`npm run check` is the canonical check. It type-checks, tests, packs the
-production files, installs the tarball without development dependencies, and
-loads its resources through isolated offline Pi state. It makes no model calls.
-See [`test/`](https://github.com/txreverted/pi-config/tree/main/test) and
+`npm run check` is canonical. It type-checks, tests, packs the production files,
+installs the package without development dependencies, and loads it through
+isolated offline Pi state. It makes no model or Firecrawl calls. See
 [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
 
 ## Troubleshoot
 
-- Restart Pi after source changes.
+- Restart Pi after source changes or after setting `FIRECRAWL_API_KEY`.
 - Stop Pi with `/quit` or Ctrl+C twice.
 - Check [`package.json`](package.json) for enabled extensions and prompt paths.
-- Run only `npm run check` after code or runtime prompt changes.
 - Never commit credentials, auth settings, Pi state, sessions, or transcripts.
-  See [`.gitignore`](https://github.com/txreverted/pi-config/blob/main/.gitignore).
