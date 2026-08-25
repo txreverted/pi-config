@@ -43,6 +43,7 @@ function relativeMarkdownTargets(markdown) {
 
 const extensions = [
   "./extensions/ask.ts",
+  "./extensions/web.ts",
   "./extensions/ui.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
@@ -50,13 +51,15 @@ const extensions = [
 
 const packedPaths = [
   "README.md",
-  "assets/preview.png",
+  "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/ui.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
+  "extensions/web-core.ts",
+  "extensions/web.ts",
   "package.json",
   ...policyPaths,
   ...promptPaths,
@@ -294,6 +297,9 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /merges green PRs without confirmation/);
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
+  assert.match(readme, /Firecrawl-backed `web_search`/);
+  assert.match(readme, /`FIRECRAWL_API_KEY` from the environment/);
+  assert.match(readme, /send queries and URLs to Firecrawl/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
   assert.match(readme, /at most 2,000 tokens/);
   assert.match(readme, /prompt expansions combine to at most 775 tokens/);
