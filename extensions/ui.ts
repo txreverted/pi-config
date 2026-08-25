@@ -196,10 +196,11 @@ class ChromeEditor extends CustomEditor {
       result.push(`${this.borderColor("╰─ ")}${content}${horizontal.repeat(Math.max(0, width - visibleWidth(content) - 6))}${this.borderColor(" ─╯")}`);
     } else {
       input.forEach((line, index) => {
-        const left = index === 0 ? this.borderColor("╰  ") : "   ";
-        const right = this.borderColor(index === input.length - 1 ? "╯" : "│");
+        const last = index === input.length - 1;
+        const left = this.borderColor(last ? "╰─ " : "│  ");
+        const right = this.borderColor(last ? " ─╯" : "│");
         const content = truncateToWidth(line, width - 6, "");
-        result.push(`${left}${content}${" ".repeat(Math.max(0, width - visibleWidth(left) - visibleWidth(content) - 1))}${right}`);
+        result.push(`${left}${content}${" ".repeat(Math.max(0, width - visibleWidth(left) - visibleWidth(content) - visibleWidth(right)))}${right}`);
       });
     }
 
