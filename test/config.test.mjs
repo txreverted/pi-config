@@ -50,6 +50,7 @@ const extensions = [
 
 const packedPaths = [
   "README.md",
+  "assets/preview.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/ui.ts",
@@ -66,7 +67,7 @@ test("only documented package resources are enabled", async () => {
     extensions,
     prompts: ["./prompts"],
   });
-  assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
+  assert.deepEqual(packageJson.files, ["assets", "extensions", "policies", "prompts", "README.md"]);
   assert.equal(packageJson.keywords, undefined);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.bundledDependencies, undefined);
