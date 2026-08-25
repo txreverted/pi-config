@@ -13,7 +13,17 @@ function baseTheme() {
 
 test("consecutive empty UI lines collapse to one", () => {
   const hiddenMarker = "\x1b]133;B\x07";
+  const combinedMarkers = "\x1b]133;B\x1b\\\x1b]133;C\x07";
   assert.deepEqual(compactEmptyLines(["first", "", hiddenMarker, "", "last"]), ["first", hiddenMarker, "last"]);
+  assert.deepEqual(compactEmptyLines(["", combinedMarkers, ""]), [combinedMarkers]);
+});
+
+test("large styled transcripts retain visible rows", () => {
+  const styled = Array.from(
+    { length: 1_024 },
+    (_, index) => `\x1b[38;5;${index % 256}mline ${index}\x1b[0m`,
+  );
+  assert.deepEqual(compactEmptyLines(["", ...styled, "", ""]), ["", ...styled, ""]);
 });
 
 test("terminal image rows are not collapsed", () => {
