@@ -20,6 +20,7 @@
   "pi": {
     "extensions": [
       "./extensions/ask.ts",
+      "./extensions/chrome.ts",
       "./extensions/ponytail.ts",
       "./extensions/unslop.ts"
     ],
