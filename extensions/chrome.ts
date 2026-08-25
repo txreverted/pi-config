@@ -43,7 +43,7 @@ class ChromeEditor extends CustomEditor {
     const bottom = lines.indexOf(horizontal.repeat(innerWidth), 1);
     if (bottom < 0) return lines;
 
-    const label = truncateToWidth(`─ 𝛑 ❯ ${this.status()} `, width - 2, "");
+    const label = truncateToWidth(`${this.borderColor("─")} 𝛑 ❯ ${this.status()} `, width - 2, "");
     const result = [
       `${this.borderColor("╭")}${label}${horizontal.repeat(Math.max(0, width - visibleWidth(label) - 2))}${this.borderColor("╮")}`,
     ];
