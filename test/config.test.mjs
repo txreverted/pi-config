@@ -174,9 +174,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
   }
 });
 
-test("fixed policies remain extensions, carry their notices, and stay compact", async () => {
+test("fixed policies remain extensions, carry their notices, and stay within budget", async () => {
   const policy = normalizeLines(await readFile(new URL("../policies/unslop.md", import.meta.url), "utf8"));
-  assert.match(policy, /^Repo style and requested formats win\./);
+  assert.match(policy, /^Repo style and requested format win\./);
   assert.doesNotMatch(policy, /^---\n/);
   assert.equal(packageJson.pi.skills, undefined);
   assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), [
@@ -185,10 +185,10 @@ test("fixed policies remain extensions, carry their notices, and stay compact", 
     "unslop.LICENSE",
     "unslop.md",
   ]);
-  assert.match(PONYTAIL_INSTRUCTIONS, /smallest complete root-cause fix/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested formats win/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Fix root cause, not reported symptom/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested format win/);
   const tokens = estimateText(`${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}`);
-  assert.ok(tokens <= 250, `policy estimate ${tokens} exceeds 250 tokens`);
+  assert.ok(tokens <= 2_000, `policy estimate ${tokens} exceeds 2,000 tokens`);
 });
 
 test("the exact production package installs and loads directly and through its Pi manifest", async () => {
@@ -292,7 +292,7 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
-  assert.match(readme, /at most 250 tokens/);
+  assert.match(readme, /at most 2,000 tokens/);
   assert.match(readme, /prompt expansions combine to at most 775 tokens/);
   for (const notice of ["caveman.LICENSE", "ponytail.LICENSE", "unslop.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));

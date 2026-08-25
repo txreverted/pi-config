@@ -17,7 +17,7 @@ The check type-checks, tests, packs the exact production files, installs the tar
 ## Runtime
 
 - [`ask_user_question`](extensions/ask.ts) asks one to four questions through Pi's TUI or RPC dialogs. Each has two to four choices, supports one or multiple selections, and adds `Other`. Custom answers are sanitized and capped at 2,000 UTF-8 bytes and 400 lines; truncation is reported. Its metadata estimate is at most 400 tokens.
-- [`Ponytail`](extensions/ponytail.ts) and [`Unslop`](extensions/unslop.ts) modify every per-turn system prompt in that order. Their combined Pi estimate is at most 250 tokens.
+- [`Ponytail`](extensions/ponytail.ts) and [`Unslop`](extensions/unslop.ts) modify every per-turn system prompt in that order. Caveman-style compression retains their operational rules. Their combined Pi estimate is at most 2,000 tokens.
 - [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from code. Invocation permits replacing dirty in-scope docs without confirmation. It prepares replacements before overwriting or deleting files.
 - [`/r-git`](prompts/r-git.md) splits all dirty work into checked pull requests, pushes them, waits for required gates, and merges green PRs without confirmation.
 - [`/r-impl [scope]`](prompts/r-impl.md) audits core behavior and implementation size without editing files unless asked. The three default prompt expansions combine to at most 775 tokens.
