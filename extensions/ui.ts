@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { relative, resolve, sep } from "node:path";
 import { CustomEditor, Theme, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const thinkingColors = {
   off: "thinkingOff",
@@ -27,6 +27,86 @@ const backgrounds = [
   "toolErrorBg",
 ] as const;
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const compactRenderPatch = Symbol.for("@txreverted/pi-config/compact-empty-lines");
+const expandableTextPatch = Symbol.for("@txreverted/pi-config/refresh-expandable-text");
+
+function terminalImageRows(lines: readonly string[]): Set<number> {
+  const rows = new Set<number>();
+  lines.forEach((line, index) => {
+    const kitty = /\x1b_G([^;]*);/.exec(line);
+    if (kitty) {
+      const declaredHeight = Number(/(?:^|,)r=(\d+)(?:,|$)/.exec(kitty[1]!)?.[1] ?? 1);
+      const height = Math.min(lines.length - index, declaredHeight || 1);
+      for (let offset = 0; offset < height; offset++) rows.add(index + offset);
+      return;
+    }
+
+    if (line.includes("\x1b]1337;File=")) {
+      const declaredHeight = Number(/\x1b\[(\d+)A/.exec(line)?.[1] ?? 0) + 1;
+      const height = Math.min(index + 1, declaredHeight);
+      for (let offset = 0; offset < height; offset++) rows.add(index - offset);
+    }
+  });
+  return rows;
+}
+
+export function compactEmptyLines(lines: readonly string[]): string[] {
+  const imageRows = terminalImageRows(lines);
+  const compacted: string[] = [];
+  let previousWasEmpty = false;
+
+  lines.forEach((line, index) => {
+    if (imageRows.has(index) || visibleWidth(line) > 0) {
+      compacted.push(line);
+      previousWasEmpty = false;
+    } else if (!previousWasEmpty) {
+      compacted.push(line);
+      previousWasEmpty = true;
+    } else {
+      compacted[compacted.length - 1] += line;
+    }
+  });
+  return compacted;
+}
+
+function installRenderingOptimizations(getExpanded: () => boolean): () => void {
+  const containerPrototype = Container.prototype;
+  const textPrototype = Text.prototype;
+  if (Reflect.has(containerPrototype, compactRenderPatch) || Reflect.has(textPrototype, expandableTextPatch)) return () => {};
+
+  const originalRender = containerPrototype.render;
+  const compactRender = function (this: Container, width: number): string[] {
+    return compactEmptyLines(originalRender.call(this, width));
+  };
+  Object.defineProperty(containerPrototype, compactRenderPatch, { configurable: true, value: compactRender });
+  containerPrototype.render = compactRender;
+
+  const originalInvalidate = textPrototype.invalidate;
+  const refreshExpandableText = function (this: Text): void {
+    const expandable = this as Text & {
+      getCollapsedText?: () => string;
+      getExpandedText?: () => string;
+      setExpanded?: (expanded: boolean) => void;
+    };
+    if (expandable.getCollapsedText && expandable.getExpandedText && expandable.setExpanded) {
+      expandable.setExpanded(getExpanded());
+    }
+    originalInvalidate.call(this);
+  };
+  Object.defineProperty(textPrototype, expandableTextPatch, { configurable: true, value: refreshExpandableText });
+  textPrototype.invalidate = refreshExpandableText;
+
+  return () => {
+    if (Reflect.get(containerPrototype, compactRenderPatch) === compactRender && containerPrototype.render === compactRender) {
+      containerPrototype.render = originalRender;
+      Reflect.deleteProperty(containerPrototype, compactRenderPatch);
+    }
+    if (Reflect.get(textPrototype, expandableTextPatch) === refreshExpandableText && textPrototype.invalidate === refreshExpandableText) {
+      textPrototype.invalidate = originalInvalidate;
+      Reflect.deleteProperty(textPrototype, expandableTextPatch);
+    }
+  };
+}
 
 function resolveAnsiColor(ansi: string): string | number {
   const rgb = ansi.match(/(?:38|48);2;(\d+);(\d+);(\d+)m$/);
@@ -47,13 +127,22 @@ function thinkingHeadingTheme(base: Theme, heading: ThemeColor): Theme {
   );
 }
 
-function applyThinkingAppearance(ctx: ExtensionContext, base: Theme, level: keyof typeof thinkingColors): void {
+function applyThinkingAppearance(
+  ctx: ExtensionContext,
+  base: Theme,
+  level: keyof typeof thinkingColors,
+  currentColor?: string,
+): string {
+  const color = base.getFgAnsi(thinkingColors[level]);
+  if (color === currentColor) return color;
+
   const activeTheme = thinkingHeadingTheme(base, thinkingColors[level]);
   ctx.ui.setTheme(activeTheme);
   ctx.ui.setWorkingIndicator({
     frames: spinnerFrames.map((frame) => activeTheme.fg(thinkingColors[level], frame)),
     intervalMs: 80,
   });
+  return color;
 }
 
 function formatTokens(count: number): string {
@@ -121,13 +210,19 @@ class ChromeEditor extends CustomEditor {
 
 export default function (pi: ExtensionAPI) {
   let baseTheme: Theme | undefined;
+  let activeAppearanceColor: string | undefined;
+  let restoreRenderingOptimizations: (() => void) | undefined;
 
   pi.on("session_start", (_event, ctx) => {
+    restoreRenderingOptimizations?.();
+    restoreRenderingOptimizations = undefined;
+    activeAppearanceColor = undefined;
     if (ctx.mode !== "tui") return;
 
+    restoreRenderingOptimizations = installRenderingOptimizations(() => ctx.ui.getToolsExpanded());
     let branch: string | null = null;
     baseTheme = thinkingHeadingTheme(ctx.ui.theme, "mdHeading");
-    applyThinkingAppearance(ctx, baseTheme, ctx.thinkingLevel ?? "off");
+    activeAppearanceColor = applyThinkingAppearance(ctx, baseTheme, ctx.thinkingLevel ?? "off");
 
     ctx.ui.setFooter((tui, _theme, footerData) => {
       branch = footerData.getGitBranch();
@@ -155,14 +250,13 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
+  pi.on("session_shutdown", () => {
+    restoreRenderingOptimizations?.();
+    restoreRenderingOptimizations = undefined;
+  });
+
   pi.on("thinking_level_select", (event, ctx) => {
     if (ctx.mode !== "tui" || !baseTheme) return;
-
-    applyThinkingAppearance(ctx, baseTheme, event.level);
-
-    // ponytail: this also rebuilds other expandable output; remove when theme invalidation rebuilds Pi's startup labels.
-    const expanded = ctx.ui.getToolsExpanded();
-    ctx.ui.setToolsExpanded(!expanded);
-    ctx.ui.setToolsExpanded(expanded);
+    activeAppearanceColor = applyThinkingAppearance(ctx, baseTheme, event.level, activeAppearanceColor);
   });
 }
