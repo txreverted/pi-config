@@ -29,6 +29,7 @@ const backgrounds = [
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const compactRenderPatch = Symbol.for("@txreverted/pi-config/compact-empty-lines");
 const expandableTextPatch = Symbol.for("@txreverted/pi-config/refresh-expandable-text");
+const semanticMarkerLine = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+$/;
 
 function terminalImageRows(lines: readonly string[]): Set<number> {
   const rows = new Set<number>();
@@ -56,7 +57,8 @@ export function compactEmptyLines(lines: readonly string[]): string[] {
   let previousWasEmpty = false;
 
   lines.forEach((line, index) => {
-    if (imageRows.has(index) || visibleWidth(line) > 0) {
+    const isEmpty = line === "" || semanticMarkerLine.test(line);
+    if (imageRows.has(index) || !isEmpty) {
       compacted.push(line);
       previousWasEmpty = false;
     } else if (!previousWasEmpty) {
