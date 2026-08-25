@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const policy = readFileSync(new URL("../policies/unslop.md", import.meta.url), "utf8")
+const policy = readFileSync(new URL("../policies/UNSLOP.md", import.meta.url), "utf8")
   .replace(/\r\n?/g, "\n")
   .trim();
 
