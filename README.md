@@ -16,8 +16,8 @@ npx --no-install pi -e "$PWD"
 ```
 
 `npm ci` and auditing may contact the registry. Pi loads this package with the
-user's permissions. Submitted prompts may make paid provider calls. Policies do
-not control filesystem, shell, network, Git, or provider access.
+user's permissions. Submitted prompts may make paid provider calls. Policies
+do not control filesystem, shell, network, Git, or provider access.
 
 ## Change
 
@@ -34,17 +34,16 @@ not control filesystem, shell, network, Git, or provider access.
   reported. The metadata estimate is at most 400 tokens.
 - [`extensions/ponytail.ts`](extensions/ponytail.ts) and
   [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies to each
-  turn's system prompt in that order. Their combined Pi estimate is at most
-  2,000 tokens. [`policies/unslop.md`](policies/unslop.md) is runtime policy code.
+  turn's system prompt in that order. Their combined Pi estimate is at most 2,000 tokens.
+  [`policies/unslop.md`](policies/unslop.md) is runtime policy code.
 - [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from
-  verified repository facts. It permits replacing dirty in-scope docs without
-  confirmation and prepares replacements before writes or deletions.
+  verified repository facts. It permits replacing dirty in-scope docs without confirmation
+  and prepares replacements before writes or deletions.
 - [`/r-git`](prompts/r-git.md) separates dirty work into checked pull requests,
-  pushes them, waits for required gates, and merges green PRs without
-  confirmation. It changes remote repositories.
+  pushes them, waits for required gates, and merges green PRs without confirmation.
+  It changes remote repositories.
 - [`/r-impl [scope]`](prompts/r-impl.md) audits behavior and implementation size
-  without editing unless asked. The three default prompt expansions combine to
-  at most 775 tokens.
+  without editing unless asked. The three default prompt expansions combine to at most 775 tokens.
 
 ## Verify
 
