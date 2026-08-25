@@ -26,6 +26,7 @@ const backgrounds = [
   "selectedBg", "scrollbarThumb", "searchMatchBg", "userMessageBg", "customMessageBg", "toolPendingBg", "toolSuccessBg",
   "toolErrorBg",
 ] as const;
+const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function resolveAnsiColor(ansi: string): string | number {
   const rgb = ansi.match(/(?:38|48);2;(\d+);(\d+);(\d+)m$/);
@@ -44,6 +45,15 @@ function thinkingHeadingTheme(base: Theme, heading: ThemeColor): Theme {
     bg as ConstructorParameters<typeof Theme>[1],
     base.getColorMode(),
   );
+}
+
+function applyThinkingAppearance(ctx: ExtensionContext, base: Theme, level: keyof typeof thinkingColors): void {
+  const activeTheme = thinkingHeadingTheme(base, thinkingColors[level]);
+  ctx.ui.setTheme(activeTheme);
+  ctx.ui.setWorkingIndicator({
+    frames: spinnerFrames.map((frame) => activeTheme.fg(thinkingColors[level], frame)),
+    intervalMs: 80,
+  });
 }
 
 function formatTokens(count: number): string {
@@ -117,7 +127,7 @@ export default function (pi: ExtensionAPI) {
 
     let branch: string | null = null;
     baseTheme = thinkingHeadingTheme(ctx.ui.theme, "mdHeading");
-    ctx.ui.setTheme(thinkingHeadingTheme(baseTheme, thinkingColors[ctx.thinkingLevel ?? "off"]));
+    applyThinkingAppearance(ctx, baseTheme, ctx.thinkingLevel ?? "off");
 
     ctx.ui.setFooter((tui, _theme, footerData) => {
       branch = footerData.getGitBranch();
@@ -148,7 +158,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("thinking_level_select", (event, ctx) => {
     if (ctx.mode !== "tui" || !baseTheme) return;
 
-    ctx.ui.setTheme(thinkingHeadingTheme(baseTheme, thinkingColors[event.level]));
+    applyThinkingAppearance(ctx, baseTheme, event.level);
 
     // ponytail: this also rebuilds other expandable output; remove when theme invalidation rebuilds Pi's startup labels.
     const expanded = ctx.ui.getToolsExpanded();
