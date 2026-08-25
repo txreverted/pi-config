@@ -1,6 +1,6 @@
 # pi-config
 
-This private Pi package adds structured questions, three repository workflows, and fixed Ponytail and Unslop policies. Pi still owns models, sessions, and built-in tools. Follow [AGENTS.md](https://github.com/txreverted/pi-config/blob/main/AGENTS.md) when changing the repository.
+This private Pi package adds a custom TUI input bar, structured questions, three repository workflows, and fixed Ponytail and Unslop policies. Pi still owns models, sessions, and built-in tools. Follow [AGENTS.md](https://github.com/txreverted/pi-config/blob/main/AGENTS.md) when changing the repository.
 
 ## Use
 
@@ -16,6 +16,7 @@ The check type-checks, tests, packs the exact production files, installs the tar
 
 ## Runtime
 
+- [`extensions/chrome.ts`](extensions/chrome.ts) replaces Pi's TUI editor and footer with a compact input bar. Its top border shows the model, thinking level, working directory, Git branch, context usage, recorded session cost, and `(sub)` for `kimi-coding` or OAuth models. Multiline input has side corners without a bottom border.
 - [`ask_user_question`](extensions/ask.ts) asks one to four questions through Pi's TUI or RPC dialogs. Each has two to four choices, supports one or multiple selections, and adds `Other`. Custom answers are sanitized and capped at 2,000 UTF-8 bytes and 400 lines; truncation is reported. Its metadata estimate is at most 400 tokens.
 - [`Ponytail`](extensions/ponytail.ts) and [`Unslop`](extensions/unslop.ts) modify every per-turn system prompt in that order. Caveman-style compression retains their operational rules. Their combined Pi estimate is at most 2,000 tokens.
 - [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from code. Invocation permits replacing dirty in-scope docs without confirmation. It prepares replacements before overwriting or deleting files.

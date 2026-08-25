@@ -43,6 +43,7 @@ function relativeMarkdownTargets(markdown) {
 
 const extensions = [
   "./extensions/ask.ts",
+  "./extensions/chrome.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
 ];
@@ -51,6 +52,7 @@ const packedPaths = [
   "README.md",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
+  "extensions/chrome.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
