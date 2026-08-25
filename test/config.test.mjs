@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
@@ -15,13 +15,13 @@ const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const tsconfig = JSON.parse(await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"));
-const promptNames = ["r-docs", "r-git", "r-impl"];
+const promptNames = ["R-DOCS", "R-GIT", "R-IMPL"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
   "policies/caveman.LICENSE",
   "policies/ponytail.LICENSE",
   "policies/unslop.LICENSE",
-  "policies/unslop.md",
+  "policies/UNSLOP.md",
 ];
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 const estimateText = (text) => estimateTokens({
@@ -39,6 +39,19 @@ function relativeMarkdownTargets(markdown) {
     .map((match) => match[1].trim().replace(/^<|>$/g, ""))
     .filter((target) => target && !target.startsWith("#") && !/^[a-z][a-z+.-]*:/i.test(target))
     .map((target) => decodeURIComponent(target.split("#", 1)[0]));
+}
+
+const ignoredDirectories = new Set([".agents", ".git", ".pi", "coverage", "dist", "node_modules"]);
+
+async function markdownFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (ignoredDirectories.has(entry.name)) continue;
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await markdownFiles(path));
+    else if (entry.name.endsWith(".md")) files.push(path);
+  }
+  return files;
 }
 
 const extensions = [
@@ -95,6 +108,14 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
 });
 
+test("Markdown basenames are uppercase", async () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  for (const path of await markdownFiles(root)) {
+    const name = basename(path);
+    assert.equal(name, `${name.slice(0, -3).toUpperCase()}.md`);
+  }
+});
+
 test("workflow prompts load and expand through Pi's built-in templates", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-config-prompts-"));
   try {
@@ -113,29 +134,31 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
-      { name: "r-docs", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
-      { name: "r-git", description: "Split dirty work into checked PRs and merge them", argumentHint: undefined },
-      { name: "r-impl", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
+      { name: "R-DOCS", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
+      { name: "R-GIT", description: "Split dirty work into checked PRs and merge them", argumentHint: undefined },
+      { name: "R-IMPL", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
     ]);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
-    const docs = expandPromptTemplate("/r-docs", loaded.prompts);
+    const docs = expandPromptTemplate("/R-DOCS", loaded.prompts);
     assertClauses(docs, [
       /Scope: entire repository/,
-      /dirty in-scope replacement without confirmation/,
+      /Dirty in-scope replacement needs no confirmation/,
       /tracked\/untracked\/dirty Markdown owner\/status/,
       /Protect .*instructions.*runtime prompts\/policies.*generated\/frozen.*licenses\/notices.*ignored\/vendor.*unrelated changes/s,
       /Old docs are leads, not evidence/,
+      /Uppercase Markdown basenames; lowercase `\.md`\. Rename files\/references/,
       /Prepare all replacements before writes\/deletes/,
-      /Keep root `README\.md`.*docs for separate tasks/s,
+      /Keep root `README\.md`; add task docs only if burdened/,
+      /Write drafts, then delete only obsolete in-scope human docs/,
       /Edit Markdown only/,
       /No paid calls\/deploys\/migrations\/pushes\/publishes\/live operations/,
       /Verify claims\/commands\/paths\/links\/examples/,
     ]);
-    assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
+    assert.match(expandPromptTemplate('/R-DOCS "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
-    const implementation = expandPromptTemplate("/r-impl", loaded.prompts);
+    const implementation = expandPromptTemplate("/R-IMPL", loaded.prompts);
     assertClauses(implementation, [
       /Scope: entire repository\./,
       /Do not edit unless explicitly asked/,
@@ -149,9 +172,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       /Separate cleanup.*No scores or invented findings/s,
       /If no small fix is justified, report no change needed/,
     ]);
-    assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
+    assert.match(expandPromptTemplate("/R-IMPL extensions tests", loaded.prompts), /Scope: extensions tests\./);
 
-    const git = expandPromptTemplate("/r-git", loaded.prompts);
+    const git = expandPromptTemplate("/R-GIT", loaded.prompts);
     assertClauses(git, [
       /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
       /staged\/unstaged\/untracked names first/,
@@ -165,11 +188,11 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     ]);
 
     const promptTokens = {
-      "r-docs": estimateText(docs),
-      "r-git": estimateText(git),
-      "r-impl": estimateText(implementation),
+      "R-DOCS": estimateText(docs),
+      "R-GIT": estimateText(git),
+      "R-IMPL": estimateText(implementation),
     };
-    const ceilings = { "r-docs": 340, "r-git": 164, "r-impl": 280 };
+    const ceilings = { "R-DOCS": 340, "R-GIT": 164, "R-IMPL": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
@@ -181,15 +204,15 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
 });
 
 test("fixed policies remain extensions, carry their notices, and stay within budget", async () => {
-  const policy = normalizeLines(await readFile(new URL("../policies/unslop.md", import.meta.url), "utf8"));
+  const policy = normalizeLines(await readFile(new URL("../policies/UNSLOP.md", import.meta.url), "utf8"));
   assert.match(policy, /^Repo style and requested format win\./);
   assert.doesNotMatch(policy, /^---\n/);
   assert.equal(packageJson.pi.skills, undefined);
   assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), [
+    "UNSLOP.md",
     "caveman.LICENSE",
     "ponytail.LICENSE",
     "unslop.LICENSE",
-    "unslop.md",
   ]);
   assert.match(PONYTAIL_INSTRUCTIONS, /Fix root cause, not reported symptom/);
   assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested format win/);
@@ -291,7 +314,7 @@ test("CI and the human guide match runtime scope", () => {
 
   assert.ok(readme.trimEnd().split("\n").length < 80, "README must stay below 80 lines");
   for (const prompt of promptPaths) assert.match(readme, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(readme, /\]\(policies\/unslop\.md\)/);
+  assert.match(readme, /\]\(policies\/UNSLOP\.md\)/);
   assert.match(readme, /do not control filesystem, shell, network, Git, or provider access/);
   assert.match(readme, /replacing dirty in-scope docs without confirmation/);
   assert.match(readme, /merges green PRs without confirmation/);

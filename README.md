@@ -45,11 +45,11 @@ Policies do not control filesystem, shell, network, Git, or provider access.
 - [`extensions/ponytail.ts`](extensions/ponytail.ts) and
   [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies in that
   order. Their combined estimate is at most 2,000 tokens. Runtime policy text is
-  [`policies/unslop.md`](policies/unslop.md). See
+  [`policies/UNSLOP.md`](policies/UNSLOP.md). See
   [`test/policies.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/policies.test.mjs).
-- [`/r-docs [scope]`](prompts/r-docs.md) rebuilds docs, including replacing dirty in-scope docs without confirmation.
-  [`/r-git`](prompts/r-git.md) pushes checked work and merges green PRs without confirmation.
-  [`/r-impl [scope]`](prompts/r-impl.md) audits without editing unless asked.
+- [`/R-DOCS [scope]`](prompts/R-DOCS.md) rebuilds docs, including replacing dirty in-scope docs without confirmation.
+  [`/R-GIT`](prompts/R-GIT.md) pushes checked work and merges green PRs without confirmation.
+  [`/R-IMPL [scope]`](prompts/R-IMPL.md) audits without editing unless asked.
   Their prompt expansions combine to at most 775 tokens. See
   [`test/config.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/config.test.mjs).
 
