@@ -1,6 +1,9 @@
 # pi-config
 
-This private Pi package adds a custom input bar, structured questions, repository workflows, and fixed Ponytail and Unslop policies to Pi. Pi still owns models, authentication, settings, sessions, and transcripts. Contributors must follow [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
+This private Pi package adds a custom TUI, structured questions, repository commands,
+and fixed Ponytail and Unslop policies to Pi. Pi owns models, authentication,
+settings, sessions, and transcripts. Contributors must follow
+[`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
 ## Use
 
@@ -12,20 +15,38 @@ npm run check
 npx --no-install pi -e "$PWD"
 ```
 
-`npm ci` and auditing may contact the registry. The Pi command loads this package with full user access and may make paid provider calls when you submit a prompt.
+`npm ci` and auditing may contact the registry. Pi loads this package with the
+user's permissions. Submitted prompts may make paid provider calls. Policies do not control filesystem, shell, network, Git, or provider access.
 
-## Features
+## Change
 
-- [`extensions/chrome.ts`](extensions/chrome.ts) replaces the TUI editor and footer. The input border uses the thinking-level color. Its status shows the model, thinking level, working directory, Git branch, context usage, recorded session cost, and `(sub)` for `kimi-coding` or OAuth models. Multiline input has side corners without a bottom border.
-- [`extensions/ask.ts`](extensions/ask.ts) provides `ask_user_question` in TUI and RPC sessions. It asks one to four questions with two to four choices, supports single or multiple selection, and adds `Other`. Custom answers are sanitized and limited to 2,000 UTF-8 bytes and 400 lines. Truncation is reported. The metadata estimate is at most 400 tokens.
-- [`extensions/ponytail.ts`](extensions/ponytail.ts) and [`extensions/unslop.ts`](extensions/unslop.ts) modify each turn's system prompt in that order. Their combined Pi estimate is at most 2,000 tokens. [`policies/unslop.md`](policies/unslop.md) contains the Unslop runtime policy.
-- [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from verified repository facts. It permits replacing dirty in-scope docs without confirmation and prepares replacements before overwriting or deleting files.
-- [`/r-git`](prompts/r-git.md) splits dirty work into checked pull requests, pushes them, waits for required gates, and merges green PRs without confirmation.
-- [`/r-impl [scope]`](prompts/r-impl.md) audits core behavior and implementation size. It does not edit files unless asked. The three default prompt expansions combine to at most 775 tokens.
+- [`extensions/chrome.ts`](extensions/chrome.ts) replaces the TUI editor and
+  footer. The border, parenthetical status labels, and Markdown headings use the
+  current thinking-level color. The status shows the model, thinking level,
+  working directory, Git branch, context usage, recorded session cost, and
+  subscription marker. Multiline input has side corners and no bottom border.
+- [`extensions/ask.ts`](extensions/ask.ts) provides `ask_user_question` in TUI
+  and RPC sessions. It asks one to four single- or multi-select questions with
+  two to four choices and an automatic `Other` choice. Custom answers are
+  sanitized and limited to 2,000 UTF-8 bytes and 400 lines. Truncation is
+  reported. The metadata estimate is at most 400 tokens.
+- [`extensions/ponytail.ts`](extensions/ponytail.ts) and
+  [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies to each
+  turn's system prompt in that order. Their combined Pi estimate is at most 2,000 tokens. [`policies/unslop.md`](policies/unslop.md) is runtime policy code.
+- [`/r-docs [scope]`](prompts/r-docs.md) rebuilds human documentation from
+  verified repository facts. It permits replacing dirty in-scope docs without confirmation and prepares replacements before writes or deletions.
+- [`/r-git`](prompts/r-git.md) separates dirty work into checked pull requests,
+  pushes them, waits for required gates, and merges green PRs without confirmation. It changes remote repositories.
+- [`/r-impl [scope]`](prompts/r-impl.md) audits behavior and implementation size
+  without editing unless asked. The three default prompt expansions combine to at most 775 tokens.
 
 ## Verify
 
-`npm run check` is the canonical check. It type-checks, tests, packs the production files, installs the tarball without development dependencies, and loads its resources through isolated offline Pi state. It makes no model calls. See [`test/`](https://github.com/txreverted/pi-config/tree/main/test) and [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
+`npm run check` is the canonical check. It type-checks, tests, packs the
+production files, installs the tarball without development dependencies, and
+loads its resources through isolated offline Pi state. It makes no model calls.
+See [`test/`](https://github.com/txreverted/pi-config/tree/main/test) and
+[CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
 
 ## Troubleshoot
 
@@ -33,13 +54,14 @@ npx --no-install pi -e "$PWD"
 - Stop Pi with `/quit` or Ctrl+C twice.
 - Check [`package.json`](package.json) for enabled extensions and prompt paths.
 - Run only `npm run check` after code or runtime prompt changes.
-
-## Safety
-
-Policies guide the model. They do not control filesystem, shell, network, Git, or provider access. `/r-git` changes remote repositories, and submitted prompts may incur provider charges.
-
-The repository ignores credentials, auth settings, Pi state, sessions, and transcripts. Do not commit them. See [`.gitignore`](https://github.com/txreverted/pi-config/blob/main/.gitignore).
+- Never commit credentials, auth settings, Pi state, sessions, or transcripts.
+  See [`.gitignore`](https://github.com/txreverted/pi-config/blob/main/.gitignore).
 
 ## Attribution
 
-Policy text adapts pinned MIT sources: [Ponytail](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/skills/ponytail/SKILL.md), [Unslop](https://github.com/cursor/plugins/blob/99559f2f52047978602ef365589275831e76af07/pstack/skills/unslop/SKILL.md), and [Caveman](https://github.com/JuliusBrussee/caveman/blob/2f49f0e1a352aa810e70056b7930aeb0b3d219b4/src/rules/caveman-activate.md). Their notices are [`ponytail.LICENSE`](policies/ponytail.LICENSE), [`unslop.LICENSE`](policies/unslop.LICENSE), and [`caveman.LICENSE`](policies/caveman.LICENSE).
+Policy text adapts pinned MIT sources: [Ponytail](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/skills/ponytail/SKILL.md),
+[Unslop](https://github.com/cursor/plugins/blob/99559f2f52047978602ef365589275831e76af07/pstack/skills/unslop/SKILL.md),
+and [Caveman](https://github.com/JuliusBrussee/caveman/blob/2f49f0e1a352aa810e70056b7930aeb0b3d219b4/src/rules/caveman-activate.md).
+Their notices are [`ponytail.LICENSE`](policies/ponytail.LICENSE),
+[`unslop.LICENSE`](policies/unslop.LICENSE), and
+[`caveman.LICENSE`](policies/caveman.LICENSE).
