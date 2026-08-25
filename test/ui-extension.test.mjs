@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import chrome from "../extensions/chrome.ts";
+import ui from "../extensions/ui.ts";
 
 function baseTheme() {
   return {
@@ -10,12 +10,13 @@ function baseTheme() {
   };
 }
 
-test("thinking changes recolor and refresh loaded resource labels", () => {
+test("thinking changes recolor the UI and refresh loaded resource labels", () => {
   const handlers = new Map();
-  chrome({ on: (event, handler) => handlers.set(event, handler) });
+  ui({ on: (event, handler) => handlers.set(event, handler) });
 
   let expanded = false;
   const expansionChanges = [];
+  const indicators = [];
   const themes = [];
   const theme = baseTheme();
   const ctx = {
@@ -24,6 +25,7 @@ test("thinking changes recolor and refresh loaded resource labels", () => {
     ui: {
       theme,
       setTheme: (next) => themes.push(next),
+      setWorkingIndicator: (next) => indicators.push(next),
       setFooter() {},
       setEditorComponent() {},
       getToolsExpanded: () => expanded,
@@ -40,6 +42,10 @@ test("thinking changes recolor and refresh loaded resource labels", () => {
 
   assert.equal(themes.length, 2);
   assert.equal(themes[1].getFgAnsi("mdHeading"), theme.getFgAnsi("thinkingHigh"));
+  assert.equal(indicators.length, 2);
+  assert.equal(indicators[1].intervalMs, 80);
+  assert.equal(indicators[1].frames.length, 10);
+  assert.equal(indicators[1].frames[0], themes[1].fg("thinkingHigh", "⠋"));
   assert.deepEqual(expansionChanges, [true, false]);
   assert.equal(expanded, false);
 });
