@@ -34,31 +34,68 @@ test("fixed policies inject once in Ponytail then Unslop order", () => {
   assert.equal(systemPrompt.split("UNSLOP").length - 1, 1);
 });
 
-test("Ponytail preserves minimal implementation and verification semantics", () => {
-  assert.match(PONYTAIL_INSTRUCTIONS, /repo rules and nearby style/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /preserve unrelated changes/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /requirements, callers, owner, state, failures, and supported cases/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /no change, deletion, or project\/platform reuse/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /smallest complete root-cause fix at its owner/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /Deliver full scope/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /correctness, security, accessibility, validation, data integrity, or detail/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /canonical check and focused tests for changed behavior/);
-  assert.ok(estimateText(PONYTAIL_INSTRUCTIONS) <= 150);
+test("Ponytail retains the upstream implementation ladder and safety boundaries", () => {
+  assert.match(PONYTAIL_INSTRUCTIONS, /Lazy senior developer\. Efficient, not careless/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Repo rules, user scope, and nearby style win/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Full mode default/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /User may request lite/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Ultra: challenge speculative scope/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /"Stop ponytail" or "normal mode" suspends it/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /requirements, callers, owner, inputs, state, outputs, failures, and supported cases/);
+  for (const rung of [
+    /Need exists\? Skip speculative work/,
+    /Codebase already has helper, type, or pattern\? Reuse it/,
+    /Standard library covers it\? Use it/,
+    /Native platform covers it/,
+    /Installed dependency covers it/,
+    /One clear line works/,
+    /minimum complete code/,
+  ]) assert.match(PONYTAIL_INSTRUCTIONS, rung);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Fix root cause, not reported symptom/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Inspect every caller and sibling path/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /No unrequested interface with one implementation, factory for one product/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Deletion over addition\. Boring over clever/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Never omit confirmed scope/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /ponytail: <ceiling>; upgrade when <measured trigger>/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /validation at trust boundaries/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /security, accessibility, correctness, data integrity/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /Real clocks drift and sensors vary/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /User chooses full implementation: build it without rearguing/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /unrequested explanation to skipped work and its upgrade trigger/);
+  assert.match(PONYTAIL_INSTRUCTIONS, /smallest focused check that fails for changed nontrivial logic/);
+  assert.ok(estimateText(PONYTAIL_INSTRUCTIONS) <= 750);
 });
 
-test("Unslop preserves exact content while producing concise natural prose", () => {
-  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested formats win/);
-  assert.match(UNSLOP_INSTRUCTIONS, /facts, literals, values, qualifiers, citations/);
-  assert.match(UNSLOP_INSTRUCTIONS, /fix grammar, invent nothing/);
+test("Unslop retains the upstream audit in compact operational form", () => {
+  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested format win/);
+  assert.match(UNSLOP_INSTRUCTIONS, /facts, literals, values, qualifiers, citations, data, code/);
+  assert.match(UNSLOP_INSTRUCTIONS, /invent no fact, opinion, source, quote, certainty, or personality/);
   assert.match(UNSLOP_INSTRUCTIONS, /Lead with result/);
-  assert.match(UNSLOP_INSTRUCTIONS, /concise active prose with natural nuance/);
-  assert.match(UNSLOP_INSTRUCTIONS, /filler, repetition, puffery, vague claims, generic conclusions/);
-  assert.match(UNSLOP_INSTRUCTIONS, /sycophancy, chatbot ornament, self-reference, and tool narration/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Audit AI patterns/);
-  assert.ok(estimateText(UNSLOP_INSTRUCTIONS) <= 90);
+  assert.match(UNSLOP_INSTRUCTIONS, /plain, concrete, active, specific language/);
+  assert.match(UNSLOP_INSTRUCTIONS, /What makes this obviously AI-generated/);
+  for (const pattern of [
+    /Puffery/,
+    /Name-dropping/,
+    /Superficial -ing tails/,
+    /Promotional copy/,
+    /Vague attribution/,
+    /Stock AI words/,
+    /Forced groups of three/,
+    /Synonym cycling/,
+    /False .* ranges/,
+    /Avoid em dashes/,
+    /inline-header bullets/,
+    /Chat artifacts/,
+    /stacked hedges/,
+    /ornamental abstraction/,
+    /Prefer active voice/,
+  ]) assert.match(UNSLOP_INSTRUCTIONS, pattern);
+  assert.match(UNSLOP_INSTRUCTIONS, /Technical substance stays; fluff dies/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Do not force fragments, personality, or terseness/);
+  assert.ok(estimateText(UNSLOP_INSTRUCTIONS) <= 1_200);
 });
 
 test("combined fixed policy estimate stays within budget", () => {
   const policy = composePolicies().slice("BASE\n\n".length);
-  assert.ok(estimateText(policy) <= 250);
+  assert.ok(estimateText(policy) <= 2_000);
 });
