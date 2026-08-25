@@ -146,6 +146,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("thinking_level_select", (event, ctx) => {
-    if (ctx.mode === "tui" && baseTheme) ctx.ui.setTheme(thinkingHeadingTheme(baseTheme, thinkingColors[event.level]));
+    if (ctx.mode !== "tui" || !baseTheme) return;
+
+    ctx.ui.setTheme(thinkingHeadingTheme(baseTheme, thinkingColors[event.level]));
+
+    // ponytail: this also rebuilds other expandable output; remove when theme invalidation rebuilds Pi's startup labels.
+    const expanded = ctx.ui.getToolsExpanded();
+    ctx.ui.setToolsExpanded(!expanded);
+    ctx.ui.setToolsExpanded(expanded);
   });
 }
