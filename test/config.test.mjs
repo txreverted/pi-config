@@ -57,6 +57,7 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/web.ts",
+  "./extensions/memory.ts",
   "./extensions/ui.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
@@ -67,6 +68,11 @@ const packedPaths = [
   "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
+  "extensions/memory-core.ts",
+  "extensions/memory-prompts.ts",
+  "extensions/memory-worker.ts",
+  "extensions/memory.ts",
+  "extensions/observational-memory.LICENSE",
   "extensions/ui.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
@@ -321,6 +327,14 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
   assert.match(readme, /Firecrawl-backed `web_search`/);
+  assert.match(readme, /default-on,\s+branch-local/);
+  assert.match(readme, /Session memory is on by default/);
+  assert.match(readme, /Use\s+`\/memory off`/);
+  assert.match(readme, /`\/memory \[on\|off\|status\|compact\|search\]`/);
+  assert.match(readme, /sends bounded transcript chunks to the\s+active model provider/);
+  assert.match(readme, /Memory state stays in the Pi session/);
+  assert.match(readme, /Observational Memory/);
+  assert.match(readme, /observational-memory\.LICENSE/);
   assert.match(readme, /`FIRECRAWL_API_KEY` from the environment/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
