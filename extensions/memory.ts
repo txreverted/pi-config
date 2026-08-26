@@ -49,6 +49,7 @@ import { checkpointInput, observerInput } from "./memory-prompts.ts";
 
 const MEMORY_TOOL_NAMES = ["memory_search", "memory_source"] as const;
 const WORKER_TIMEOUT_MS = 120_000;
+const COMPACTION_MEMORY_TIMEOUT_MS = 45_000;
 const RESUME_PROMPT =
   "[automatic continuity] Context was compacted while requested work remained. Continue from the active task checkpoint and current action. Do not repeat completed work. If the checkpoint is blocked or complete, stop instead.";
 
@@ -68,12 +69,12 @@ interface Runtime {
   generation: number;
   observerCounter: number;
   observers: Map<string, { controller: AbortController; coversUpToId: string }>;
-  observerTasks: Set<Promise<void>>;
   failedSlices: Map<string, FailedSlice>;
   compactionInFlight: boolean;
   midRunCompaction: boolean;
   terminalResumePending: boolean;
   continuationCount: number;
+  continuationGeneration: number;
   lastError?: string;
 }
 
@@ -83,12 +84,12 @@ function newRuntime(): Runtime {
     generation: 0,
     observerCounter: 0,
     observers: new Map(),
-    observerTasks: new Set(),
     failedSlices: new Map(),
     compactionInFlight: false,
     midRunCompaction: false,
     terminalResumePending: false,
     continuationCount: 0,
+    continuationGeneration: 0,
   };
 }
 
@@ -123,7 +124,6 @@ function pauseObservers(runtime: Runtime): void {
   runtime.generation++;
   for (const worker of runtime.observers.values()) worker.controller.abort();
   runtime.observers.clear();
-  runtime.observerTasks.clear();
 }
 
 function stopWorkers(runtime: Runtime): void {
@@ -248,6 +248,27 @@ function appendCost(pi: ExtensionAPI, result: WorkerResult, role: WorkerResult["
   }
 }
 
+function recentObservationContext(observations: readonly ReturnType<typeof foldObservations>[number][]) {
+  const selected: Array<{ id: string; kind: string; content: string; status?: string }> = [];
+  let characters = 0;
+  // ponytail: latest bounded records support supersession; expand only if measured stale retrieval remains common.
+  for (let index = observations.length - 1; index >= 0; index--) {
+    const observation = observations[index];
+    if (!observation) continue;
+    const record = {
+      id: observation.id,
+      kind: observation.kind,
+      content: observation.content,
+      ...(observation.status ? { status: observation.status } : {}),
+    };
+    const size = JSON.stringify(record).length;
+    if (characters + size > MEMORY_LIMITS.observerContextCharacters && selected.length > 0) break;
+    selected.unshift(record);
+    characters += size;
+  }
+  return selected;
+}
+
 async function observeSlice(
   pi: ExtensionAPI,
   runtime: Runtime,
@@ -258,13 +279,15 @@ async function observeSlice(
 ): Promise<void> {
   if (!slice.coversUpToId || slice.entries.length === 0) return;
   const raw = serializeSourceEntries(slice.entries);
-  const result = await runWorker("observer", observerInput(raw), ctx, signal);
+  const branchBeforeObservation = currentBranch(ctx);
+  const previousObservations = recentObservationContext(foldObservations(branchBeforeObservation));
+  const result = await runWorker("observer", observerInput(raw, previousObservations), ctx, signal);
   if (!runtime.enabled || generation !== runtime.generation || signal.aborted) throw new Error("Memory observer became stale");
   const branch = currentBranch(ctx);
   if (!branchContainsSlice(branch, slice)) throw new Error("Memory observer source branch changed");
   const allowed = new Set(slice.entries.map((entry) => entry.id));
   const payload = result.payload as { observations?: unknown };
-  const observations = normalizeObservations(payload.observations, allowed);
+  const observations = normalizeObservations(payload.observations, allowed, new Set(previousObservations.map(({ id }) => id)));
   pi.appendEntry(MEMORY_OBSERVATIONS_ENTRY, {
     version: 1,
     coversUpToId: slice.coversUpToId,
@@ -314,7 +337,7 @@ function evaluateObservers(pi: ExtensionAPI, runtime: Runtime, ctx: ExtensionCon
     const controller = new AbortController();
     runtime.observers.set(id, { controller, coversUpToId: slice.coversUpToId });
     setMemoryStatus(ctx, runtime);
-    const task = observeSlice(pi, runtime, ctx, slice, controller.signal, generation)
+    void observeSlice(pi, runtime, ctx, slice, controller.signal, generation)
       .then(() => true)
       .catch((error) => {
         if (!controller.signal.aborted && generation === runtime.generation) {
@@ -326,16 +349,10 @@ function evaluateObservers(pi: ExtensionAPI, runtime: Runtime, ctx: ExtensionCon
       })
       .then((success) => {
         runtime.observers.delete(id);
-        runtime.observerTasks.delete(task);
         setMemoryStatus(ctx, runtime);
         if (success && generation === runtime.generation) evaluateObservers(pi, runtime, ctx);
       });
-    runtime.observerTasks.add(task);
   }
-}
-
-async function waitForObservers(runtime: Runtime): Promise<void> {
-  while (runtime.observerTasks.size) await Promise.allSettled([...runtime.observerTasks]);
 }
 
 function sourceBefore(entries: readonly MemoryEntry[], entryId: string): string | undefined {
@@ -354,13 +371,19 @@ async function ensureObservedThrough(
   throughEntryId: string,
   signal: AbortSignal,
 ): Promise<void> {
-  await waitForObservers(runtime);
   const generation = runtime.generation;
   const targetIndex = entryIndexForId(currentBranch(ctx), throughEntryId);
+  let runs = 0;
+  const observe = async (slice: SourceSlice) => {
+    if (runs >= MEMORY_LIMITS.compactionCatchUpSlices) throw new Error("Memory compaction catch-up limit reached");
+    runs++;
+    await observeSlice(pi, runtime, ctx, slice, signal, generation);
+  };
+
   for (const failed of [...runtime.failedSlices.values()]) {
     const coverage = entryIndexForId(currentBranch(ctx), failed.slice.coversUpToId);
-    if (coverage < 0 || coverage > targetIndex) continue;
-    await observeSlice(pi, runtime, ctx, failed.slice, signal, generation);
+    if (coverage < 0 || coverage > targetIndex || failed.attempts >= MEMORY_LIMITS.observerAttempts) continue;
+    await observe(failed.slice);
   }
 
   while (!signal.aborted) {
@@ -369,9 +392,14 @@ async function ensureObservedThrough(
     if (entryIndexForId(branch, coverage) >= entryIndexForId(branch, throughEntryId)) return;
     const slice = selectSourceSlice(branch, coverage, MEMORY_LIMITS.chunkTokens, throughEntryId);
     if (!slice.coversUpToId || slice.entries.length === 0) return;
-    await observeSlice(pi, runtime, ctx, slice, signal, generation);
+    await observe(slice);
   }
   throw new Error("Memory observation aborted");
+}
+
+interface CheckpointResult {
+  checkpoint?: TaskCheckpoint;
+  coversUpToId?: string;
 }
 
 async function buildCheckpoint(
@@ -379,23 +407,42 @@ async function buildCheckpoint(
   runtime: Runtime,
   ctx: ExtensionContext,
   branch: readonly MemoryEntry[],
-  throughEntryId: string,
+  observationThroughEntryId: string,
+  checkpointThroughEntryId: string,
   signal: AbortSignal,
-): Promise<TaskCheckpoint | undefined> {
+  customInstructions?: string,
+): Promise<CheckpointResult> {
   const previous = latestMemoryDetails(branch);
-  const additions = observationsAfterCoverage(branch, previous?.observationCoversUpToId, throughEntryId);
-  if (!additions.length) return previous?.checkpoint;
+  const additions = observationsAfterCoverage(branch, previous?.observationCoversUpToId, observationThroughEntryId);
+  const observationIndex = entryIndexForId(branch, observationThroughEntryId);
+  const checkpointIndex = entryIndexForId(branch, checkpointThroughEntryId);
+  const recentEntries = branch.slice(observationIndex + 1, checkpointIndex + 1).filter(isSourceEntry);
+  if (!additions.length && !recentEntries.length) {
+    return { checkpoint: previous?.checkpoint, coversUpToId: previous?.checkpointCoversUpToId };
+  }
   try {
-    const result = await runWorker("checkpoint", checkpointInput(previous?.checkpoint, additions), ctx, signal);
-    if (signal.aborted || !runtime.enabled) return previous?.checkpoint;
+    const recentTranscript = serializeSourceEntries(recentEntries);
+    const input = checkpointInput(previous?.checkpoint, additions, recentTranscript, customInstructions);
+    const result = await runWorker("checkpoint", input, ctx, signal);
+    if (signal.aborted || !runtime.enabled) {
+      return { checkpoint: previous?.checkpoint, coversUpToId: previous?.checkpointCoversUpToId };
+    }
     const allowed = new Set(branch.map((entry) => entry.id));
     const checkpoint = normalizeCheckpoint(result.payload, allowed);
     appendCost(pi, result, "checkpoint");
-    return checkpoint;
+    return { checkpoint, coversUpToId: checkpointThroughEntryId };
   } catch (error) {
     runtime.lastError = error instanceof Error ? error.message : String(error);
-    return previous?.checkpoint;
+    return { checkpoint: previous?.checkpoint, coversUpToId: previous?.checkpointCoversUpToId };
   }
+}
+
+function latestSourceId(entries: readonly MemoryEntry[]): string | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry && isSourceEntry(entry)) return entry.id;
+  }
+  return undefined;
 }
 
 function queryFromMessages(messages: readonly { role: string; content?: unknown }[], checkpoint: TaskCheckpoint | undefined): string {
@@ -418,7 +465,7 @@ function queryFromMessages(messages: readonly { role: string; content?: unknown 
     checkpoint?.currentAction?.text,
     ...(checkpoint?.requirements.filter((item) => item.status === "open" || item.status === "blocked").map((item) => item.text) ?? []),
   ].filter((value): value is string => Boolean(value)).join(" ");
-  return `${latestUser} ${task}`.trim();
+  return `${latestUser} ${task}`.trim().slice(0, MEMORY_LIMITS.retrievalQueryCharacters);
 }
 
 function boundedToolOutput(text: string): string {
@@ -470,10 +517,16 @@ function currentContextEstimate(branch: readonly MemoryEntry[]): number {
   return rawTokensAfterIndex(branch, -1);
 }
 
+function checkpointIsCurrent(details: MemoryCompactionDetails | undefined, branch: readonly MemoryEntry[]): boolean {
+  return Boolean(details?.checkpointCoversUpToId && details.checkpointCoversUpToId === latestSourceId(branch));
+}
+
 function attemptTerminalResume(pi: ExtensionAPI, runtime: Runtime, ctx: ExtensionContext): void {
   runtime.terminalResumePending = false;
   if (!runtime.enabled) return;
-  const details = latestMemoryDetails(currentBranch(ctx));
+  const branch = currentBranch(ctx);
+  const details = latestMemoryDetails(branch);
+  if (!checkpointIsCurrent(details, branch)) return;
   if (!shouldContinueAfterCompaction(details?.checkpoint, {
     willRetry: false,
     continuationCount: runtime.continuationCount,
@@ -495,7 +548,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
     promptSnippet: "Search active-branch compacted memory when earlier requirements, decisions, errors, or results may matter",
     promptGuidelines: [
       "Use memory_search when compacted context may omit an earlier requirement, decision, path, identifier, error, or result.",
-      "Use memory_source with returned source ids when exact earlier wording or tool output matters.",
+      "Use memory_source with returned source ids when a verbatim excerpt of earlier wording or tool output matters.",
     ],
     parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 500 }) }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -515,7 +568,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "memory_source",
     label: "read memory source",
-    description: "Read up to 8 exact active-branch entries cited by compacted observations. Output is bounded to Pi's tool-output limits.",
+    description: "Read bounded verbatim excerpts from up to 8 active-branch entries cited by memory observations. Output is bounded to Pi's tool-output limits.",
     parameters: Type.Object({
       entryIds: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { minItems: 1, maxItems: MEMORY_LIMITS.sourceResults }),
     }, { additionalProperties: false }),
@@ -617,6 +670,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
     stopWorkers(runtime);
     runtime.enabled = readEnabled(currentBranch(ctx));
     runtime.continuationCount = 0;
+    runtime.continuationGeneration = 0;
     syncMemoryTools(pi, runtime.enabled);
     setMemoryStatus(ctx, runtime);
   });
@@ -631,7 +685,11 @@ export default function memoryExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("input", (event) => {
-    if (event.source !== "extension") runtime.continuationCount = 0;
+    if (event.source !== "extension") {
+      runtime.continuationCount = 0;
+      runtime.continuationGeneration++;
+      runtime.terminalResumePending = false;
+    }
     return { action: "continue" };
   });
 
@@ -649,7 +707,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
     const threshold = midRunCompactionThreshold(ctx.model.contextWindow);
     if (tokens < threshold) return;
 
-    const generation = runtime.generation;
+    const continuationGeneration = runtime.continuationGeneration;
     runtime.compactionInFlight = true;
     runtime.midRunCompaction = true;
     ctx.compact({
@@ -657,7 +715,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
         runtime.compactionInFlight = false;
         const resume = runtime.midRunCompaction;
         runtime.midRunCompaction = false;
-        if (!resume || !runtime.enabled || generation !== runtime.generation) return;
+        if (!resume || !runtime.enabled || continuationGeneration !== runtime.continuationGeneration) return;
         pi.sendMessage(
           { customType: MEMORY_RESUME_MESSAGE, content: RESUME_PROMPT, display: false },
           { triggerTurn: true },
@@ -673,23 +731,38 @@ export default function memoryExtension(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (event, ctx) => {
     if (!runtime.enabled) return;
+    pauseObservers(runtime);
+    setMemoryStatus(ctx, runtime);
+    const signal = AbortSignal.any([event.signal, AbortSignal.timeout(COMPACTION_MEMORY_TIMEOUT_MS)]);
     try {
       const initial = branchEntries(event.branchEntries);
       const through = sourceBefore(initial, event.preparation.firstKeptEntryId);
       if (!through) return;
-      await ensureObservedThrough(pi, runtime, ctx, through, event.signal);
+      await ensureObservedThrough(pi, runtime, ctx, through, signal);
       const settled = currentBranch(ctx);
       const snapped = snapCompactionCutoff(settled, event.preparation.firstKeptEntryId);
       const observationBoundary = sourceBefore(settled, snapped.firstKeptEntryId);
-      if (!observationBoundary) return;
+      const checkpointBoundary = latestSourceId(settled);
+      if (!observationBoundary || !checkpointBoundary) return;
       const observations = foldObservations(settled, observationBoundary);
       if (!observations.length && !latestMemoryDetails(settled)?.checkpoint) return;
-      const checkpoint = await buildCheckpoint(pi, runtime, ctx, settled, observationBoundary, event.signal);
-      const rendered = renderCompactionMemory(checkpoint, observations);
+      const checkpoint = await buildCheckpoint(
+        pi,
+        runtime,
+        ctx,
+        settled,
+        observationBoundary,
+        checkpointBoundary,
+        signal,
+        event.customInstructions,
+      );
+      signal.throwIfAborted();
+      const rendered = renderCompactionMemory(checkpoint.checkpoint, observations);
       const details: MemoryCompactionDetails = {
         type: MEMORY_DETAILS_TYPE,
         version: 1,
-        ...(checkpoint ? { checkpoint } : {}),
+        ...(checkpoint.checkpoint ? { checkpoint: checkpoint.checkpoint } : {}),
+        ...(checkpoint.coversUpToId ? { checkpointCoversUpToId: checkpoint.coversUpToId } : {}),
         includedObservationIds: rendered.includedObservationIds,
         observationCoversUpToId: observationBoundary,
       };
@@ -707,26 +780,20 @@ export default function memoryExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_compact", (event) => {
+  pi.on("session_compact", (event, ctx) => {
     if (!runtime.enabled || runtime.midRunCompaction || event.willRetry || !isMemoryCompactionDetails(event.compactionEntry.details)) return;
-    runtime.terminalResumePending = shouldContinueAfterCompaction(event.compactionEntry.details.checkpoint, {
-      willRetry: event.willRetry,
-      continuationCount: runtime.continuationCount,
-    });
+    const branch = currentBranch(ctx);
+    runtime.terminalResumePending = checkpointIsCurrent(event.compactionEntry.details, branch)
+      && shouldContinueAfterCompaction(event.compactionEntry.details.checkpoint, {
+        willRetry: event.willRetry,
+        continuationCount: runtime.continuationCount,
+      });
     if (event.reason === "manual" && runtime.terminalResumePending && !runtime.compactionInFlight) {
       const generation = runtime.generation;
       setTimeout(() => {
         if (generation !== runtime.generation || !runtime.terminalResumePending) return;
-        runtime.terminalResumePending = false;
         // Manual compaction has no agent_settled event.
-        const context = runtime.enabled ? event.compactionEntry : undefined;
-        if (context) {
-          runtime.continuationCount++;
-          pi.sendMessage(
-            { customType: MEMORY_RESUME_MESSAGE, content: RESUME_PROMPT, display: false },
-            { triggerTurn: true },
-          );
-        }
+        attemptTerminalResume(pi, runtime, ctx);
       }, 0).unref?.();
     }
   });

@@ -19,8 +19,11 @@ export const MEMORY_LIMITS = {
   // ponytail: serial observers; raise only if measured idle backlog delays compaction.
   observerConcurrency: 1,
   observerAttempts: 3,
+  compactionCatchUpSlices: 2,
   continuationLimit: 2,
   recordCharacters: 4_000,
+  observerContextCharacters: 8_000,
+  retrievalQueryCharacters: 8_000,
 } as const;
 
 export const OBSERVATION_KINDS = [
@@ -93,6 +96,7 @@ export interface MemoryCompactionDetails {
   type: typeof MEMORY_DETAILS_TYPE;
   version: 1;
   checkpoint?: TaskCheckpoint;
+  checkpointCoversUpToId?: string;
   includedObservationIds: string[];
   observationCoversUpToId: string;
 }
@@ -272,7 +276,11 @@ export function selectSourceSlice(
   return { entries: selected, coversUpToId, tokens };
 }
 
-export function normalizeObservations(value: unknown, allowedSourceEntryIds: ReadonlySet<string>): MemoryObservation[] {
+export function normalizeObservations(
+  value: unknown,
+  allowedSourceEntryIds: ReadonlySet<string>,
+  allowedSupersessionIds: ReadonlySet<string> = new Set(),
+): MemoryObservation[] {
   if (!Array.isArray(value)) throw new Error("Observer result must contain an observations array");
   const observations: MemoryObservation[] = [];
   const ids = new Set<string>();
@@ -294,6 +302,9 @@ export function normalizeObservations(value: unknown, allowedSourceEntryIds: Rea
     }
     const supersedes = candidate.supersedes;
     if (supersedes !== undefined && !stringArray(supersedes)) throw new Error("Observer returned invalid supersession ids");
+    if (supersedes?.some((id) => !allowedSupersessionIds.has(id))) {
+      throw new Error("Observer superseded an observation outside its supplied context");
+    }
 
     const content = boundedLine(candidate.content);
     const kind = candidate.kind as ObservationKind;
@@ -359,6 +370,7 @@ export function foldObservations(entries: readonly MemoryEntry[], throughEntryId
     const coverage = indexes.get(batch.coversUpToId) ?? -1;
     if (coverage < 0 || coverage > through) continue;
     for (const observation of batch.observations) {
+      for (const supersededId of observation.supersedes ?? []) observations.delete(supersededId);
       if (!observations.has(observation.id)) observations.set(observation.id, observation);
     }
   }
@@ -534,6 +546,7 @@ export function isMemoryCompactionDetails(value: unknown): value is MemoryCompac
     && value.version === 1
     && stringArray(value.includedObservationIds)
     && nonEmptyString(value.observationCoversUpToId)
+    && (value.checkpointCoversUpToId === undefined || nonEmptyString(value.checkpointCoversUpToId))
     && (value.checkpoint === undefined || isTaskCheckpoint(value.checkpoint));
 }
 
@@ -613,7 +626,7 @@ export function renderCompactionMemory(
       return `- ${observation.id} [${observation.kind}${status}] ${observation.content} [sources: ${observation.sourceEntryIds.join(", ")}]`;
     }).join("\n"));
   }
-  parts.push("Use memory_search for related observations and memory_source when exact earlier wording or tool output is needed.");
+  parts.push("Use memory_search for related observations and memory_source when a verbatim excerpt of earlier wording or tool output is needed.");
   return { summary: parts.join("\n\n"), includedObservationIds: selected.map((observation) => observation.id) };
 }
 
@@ -661,7 +674,13 @@ export function formatSearchResults(results: readonly SearchResult[]): string {
 
 export function formatSourceEntries(entries: readonly MemoryEntry[]): string {
   if (!entries.length) return "No matching active-branch source entries.";
-  return entries.map((entry) => `[Source entry ${entry.id}]\n${boundedLine(entryText(entry)) || `[${entry.type} has no text content]`}`).join("\n\n");
+  return entries.map((entry) => {
+    const text = entryText(entry).replace(/\0/g, "");
+    const excerpt = text.length <= MEMORY_LIMITS.recordCharacters
+      ? text
+      : `${text.slice(0, MEMORY_LIMITS.recordCharacters)}\n[entry excerpt truncated]`;
+    return `[Source entry ${entry.id}]\n${excerpt || `[${entry.type} has no text content]`}`;
+  }).join("\n\n");
 }
 
 export function shouldContinueAfterCompaction(
