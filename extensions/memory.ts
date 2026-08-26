@@ -503,7 +503,7 @@ function observationsInRawContext(
   if (firstKeptIndex < 0) return new Set(observations.map((observation) => observation.id));
   const indexes = entryIndexById(branch);
   return new Set(observations
-    .filter((observation) => observation.sourceEntryIds.some((id) => (indexes.get(id) ?? -1) >= firstKeptIndex))
+    .filter((observation) => observation.sourceEntryIds.every((id) => (indexes.get(id) ?? -1) >= firstKeptIndex))
     .map((observation) => observation.id));
 }
 
