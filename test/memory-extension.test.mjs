@@ -205,6 +205,34 @@ test("context hook does not duplicate observations whose exact sources remain in
   assert.equal(result, undefined);
 });
 
+test("context hook retrieves observations when only part of their source remains verbatim", async () => {
+  const checkpoint = activeCheckpoint({
+    objective: { id: "goal", text: "Fix authentication", sourceEntryIds: ["u1"] },
+  });
+  const state = setup([
+    { type: "message", id: "u1", message: { role: "user", content: "Original authentication failure" } },
+    { type: "message", id: "u2", message: { role: "user", content: "Recent authentication continuation" } },
+    {
+      type: "custom", id: "m1", customType: MEMORY_OBSERVATIONS_ENTRY,
+      data: {
+        version: 1,
+        coversUpToId: "u2",
+        observations: [{
+          id: "o1", kind: "blocker", content: "Authentication failure spans the original and recent reports", sourceEntryIds: ["u1", "u2"], tokenCount: 12,
+        }],
+      },
+    },
+    { type: "compaction", id: "c1", details: details(checkpoint), firstKeptEntryId: "u2" },
+    { type: "custom", id: "enabled", customType: MEMORY_ENABLED_ENTRY, data: { enabled: true } },
+  ]);
+  await start(state);
+  const result = await state.events.get("context")({
+    type: "context",
+    messages: [{ role: "user", content: "Fix the authentication failure", timestamp: 1 }],
+  }, state.ctx);
+  assert.match(result.messages[0].content, /o1/);
+});
+
 test("native overflow retries are not duplicated and active terminal compactions continue once settled", async () => {
   const compaction = { type: "compaction", id: "c1", details: details(), firstKeptEntryId: "u1" };
   const state = setup([
