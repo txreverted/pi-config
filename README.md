@@ -30,7 +30,7 @@ npm run check
   colors, and compact rendering. The status shows the current or latest
   response duration after one second. `/fast [on|off]` toggles the premium
   priority tier for official OpenAI GPT-5.6 APIs. The current session stores
-  the setting, resumed sessions restore it, and `⚡︎` prefixes the thinking
+  the setting, resumed sessions restore it, and `✧` prefixes the thinking
   level while active. Empty transcript rows collapse without hiding styled or
   terminal-image rows. Wrapped input keeps both side borders. See
   [`test/ui-extension.test.mjs`](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
