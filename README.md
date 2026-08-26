@@ -46,10 +46,10 @@ npm run check
   input, and thinking-colored startup logo, resource headings, and working
   indicator. Response duration appears beside `𝛑`. The editor border omits the
   memory status and shows other extension statuses. See the [UI tests](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
-- [`extensions/ponytail.ts`](extensions/ponytail.ts) and
-  [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies in that
-  order. Their combined estimate is at most 2,000 tokens. Runtime text is
-  [`policies/UNSLOP.md`](policies/UNSLOP.md). See the [policy tests](https://github.com/txreverted/pi-config/blob/main/test/policies.test.mjs).
+- [`extensions/ponytail.ts`](extensions/ponytail.ts) and [`extensions/unslop.ts`](extensions/unslop.ts)
+  append always-on fixed policies with no modes, commands, or state. Ponytail controls code. Unslop applies
+  Caveman-style safe compression to every human-readable artifact. Their combined estimate is at most 2,000 tokens.
+  Runtime prose policy: [`policies/UNSLOP.md`](policies/UNSLOP.md). See the [policy tests](https://github.com/txreverted/pi-config/blob/main/test/policies.test.mjs).
 - [`/R-DOCS [scope]`](prompts/R-DOCS.md) rebuilds docs, including
   replacing dirty in-scope docs without confirmation. [`/R-GIT`](prompts/R-GIT.md) pushes
   checked work and merges green PRs without confirmation.
