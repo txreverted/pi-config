@@ -151,7 +151,7 @@ class ChromeEditor extends CustomEditor {
     const hiddenAbove = scrollCount(lines[0], "↑");
     const elapsed = this.elapsed();
     const label = truncateToWidth(
-      `${this.borderColor("─")} 𝛑${elapsed ? ` ${this.borderColor(`(${elapsed})`)}` : ""}${hiddenAbove ? ` ↑${hiddenAbove}` : ""} ❯ ${this.status()} `,
+      `${this.borderColor("─")} 𝛑${elapsed ? ` ${elapsed}` : ""}${hiddenAbove ? ` ↑${hiddenAbove}` : ""} ❯ ${this.status()} `,
       width - 2,
       "",
     );
@@ -292,9 +292,11 @@ export default function (pi: ExtensionAPI) {
       let snapshotModel: string | undefined;
       let snapshotUsage: ReturnType<ExtensionContext["getContextUsage"]>;
       let snapshotCost = 0;
-      editor.elapsed = () => responseStartedAt === undefined
-        ? ""
-        : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
+      editor.elapsed = () => {
+        if (responseStartedAt === undefined) return "";
+        const elapsed = formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
+        return elapsed ? theme.borderColor(`(${elapsed})`) : "";
+      };
       editor.status = () => {
         const parenthetical = (text: string) => theme.borderColor(`(${text})`);
         const model = ctx.model?.id ?? "no-model";
