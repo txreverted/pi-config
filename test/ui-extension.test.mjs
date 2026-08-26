@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Container, Text } from "@earendil-works/pi-tui";
-import ui, { formatElapsed, supportsFastMode } from "../extensions/ui.ts";
+import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
+import ui, { formatElapsed, formatExtensionStatuses } from "../extensions/ui.ts";
 
 function baseTheme() {
-  const getFgAnsi = (color) => `\x1b[38;5;${color === "thinkingHigh" ? 2 : 1}m`;
+  const indexes = { mdHeading: 4, thinkingHigh: 2, thinkingLow: 3 };
+  const getFgAnsi = (color) => `\x1b[38;5;${indexes[color] ?? 1}m`;
   return {
     getFgAnsi,
-    fg: (color, text) => `${getFgAnsi(color)}${text}`,
+    fg: (color, text) => `${getFgAnsi(color)}${text}\x1b[39m`,
   };
 }
 
@@ -18,82 +19,158 @@ test("response durations hide zero and use compact units", () => {
   assert.equal(formatElapsed(3_661_000), "1h 1m 1s");
 });
 
-test("fast mode is limited to official OpenAI GPT-5.6 APIs", () => {
-  assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-5.6-sol", api: "openai-codex-responses" }), true);
-  assert.equal(supportsFastMode({ provider: "openai", id: "gpt-5.6-terra", api: "openai-responses" }), true);
-  assert.equal(supportsFastMode({ provider: "openai", id: "gpt-5.5", api: "openai-responses" }), false);
-  assert.equal(supportsFastMode({ provider: "openrouter", id: "gpt-5.6-sol", api: "openai-responses" }), false);
+test("extension statuses omit memory and stay safe for the single-line editor border", () => {
+  assert.equal(formatExtensionStatuses(new Map([
+    ["web", "web\tready"],
+    ["memory", "mem:1\nworking"],
+    ["empty", "  "],
+  ])), "web ready");
 });
 
-test("fast mode restores per session and adds the priority service tier", async () => {
+test("the custom editor keeps status and scrolling inside its frame", (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
   const handlers = new Map();
-  const commands = new Map();
-  const entries = [];
+  let footerFactory;
+  let editorFactory;
   ui({
-    appendEntry: (customType, data) => entries.push({ customType, data }),
     on: (event, handler) => handlers.set(event, handler),
-    registerCommand: (name, command) => commands.set(name, command),
   });
 
-  const model = { provider: "openai-codex", id: "gpt-5.6-sol", api: "openai-codex-responses" };
-  handlers.get("session_start")({}, {
-    mode: "print",
+  const theme = { ...baseTheme(), borderColor: (text) => text };
+  const ctx = {
+    mode: "tui",
+    cwd: "/project",
+    thinkingLevel: "off",
     sessionManager: {
-      getBranch: () => [{ type: "custom", customType: "ui-fast-mode", data: { enabled: true } }],
+      getEntries: () => [{ type: "message", message: { role: "assistant", usage: { cost: { total: 0.1 } } } }],
+      getLeafId: () => null,
     },
+    getContextUsage: () => ({ contextWindow: 128_000, percent: 10 }),
+    ui: {
+      theme,
+      setWorkingIndicator() {},
+      setFooter: (factory) => { footerFactory = factory; },
+      setEditorComponent: (factory) => { editorFactory = factory; },
+    },
+  };
+  handlers.get("session_start")({}, ctx);
+  const tui = { requestRender() {}, terminal: { rows: 20 } };
+  footerFactory(tui, theme, {
+    getGitBranch: () => "main",
+    getExtensionStatuses: () => new Map([["memory", "mem:1"]]),
+    onBranchChange: () => () => {},
   });
+  const editor = editorFactory(tui, theme, {});
+  handlers.get("before_agent_start")({}, ctx);
+  now = 61_000;
+  handlers.get("agent_settled")({}, ctx);
+  assert.match(editor.status(), /^no-model ❯ \/project \(main\).*\$0\.100$/);
 
-  const payload = { model: model.id, input: [] };
-  assert.deepEqual(handlers.get("before_provider_request")({ payload }, { model }), {
-    ...payload,
-    service_tier: "priority",
-  });
-  assert.equal("service_tier" in payload, false);
-
-  const notifications = [];
-  await commands.get("fast").handler("off", {
-    model,
-    ui: { notify: (message, level) => notifications.push({ message, level }) },
-  });
-  assert.deepEqual(entries, [{ customType: "ui-fast-mode", data: { enabled: false } }]);
-  assert.deepEqual(notifications, [{ message: "Fast mode disabled.", level: "info" }]);
-  assert.equal(handlers.get("before_provider_request")({ payload }, { model }), undefined);
+  editor.setText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
+  editor.state.cursorLine = 0;
+  editor.state.cursorCol = 0;
+  const lines = editor.render(80);
+  assert.match(lines[0], /^╭─ 𝛑 \(1m 1s\) ❯ no-model/);
+  assert.doesNotMatch(lines[0], /mem/);
+  assert.ok(lines.some((line) => line.includes("↓14 ─╯")));
+  assert.ok(lines.every((line) => visibleWidth(line) <= 80));
 });
 
-test("thinking changes update only the working indicator", () => {
+test("thinking changes recolor the startup logo and resource headings without rebuilding the transcript", async () => {
   const handlers = new Map();
+  let footerFactory;
   ui({
     on: (event, handler) => handlers.set(event, handler),
-    registerCommand() {},
   });
 
   const indicators = [];
   const theme = baseTheme();
   const containerRender = Container.prototype.render;
   const textInvalidate = Text.prototype.invalidate;
+  let expanded = false;
+  let headingUpdates = 0;
+  const logoText = () => `\x1b[1m${theme.fg("accent", "pi")}\x1b[22m${theme.fg("dim", " v0.84.3")}`;
+  const logo = {
+    text: logoText(),
+    getCollapsedText: logoText,
+    getExpandedText: logoText,
+    setText(text) {
+      this.text = text;
+    },
+  };
+  const heading = {
+    text: theme.fg("mdHeading", "[Context]") + "\n  AGENTS.md",
+    getCollapsedText: () => theme.fg("mdHeading", "[Context]") + "\n  AGENTS.md",
+    getExpandedText: () => theme.fg("mdHeading", "[Context]") + "\n  /project/AGENTS.md",
+    setText(text) {
+      headingUpdates++;
+      this.text = text;
+    },
+  };
+  const header = { children: [{}, logo, {}] };
+  const loadedResources = { children: [heading] };
+  let renders = 0;
+  const tui = {
+    children: [{ children: [header, loadedResources, {}] }],
+    requestRender: () => { renders++; },
+  };
   const ctx = {
     mode: "tui",
+    cwd: "/project",
     thinkingLevel: "low",
     sessionManager: { getBranch: () => [] },
     ui: {
       theme,
+      getToolsExpanded: () => expanded,
       setTheme() {
         assert.fail("thinking changes must not invalidate the transcript theme");
       },
       setWorkingIndicator: (next) => indicators.push(next),
-      setFooter() {},
+      setFooter: (factory) => { footerFactory = factory; },
       setEditorComponent() {},
     },
   };
 
   handlers.get("session_start")({}, ctx);
+  const footer = footerFactory(tui, theme, {
+    getGitBranch: () => null,
+    getExtensionStatuses: () => new Map(),
+    onBranchChange: () => () => {},
+  });
+  footer.render();
+  await Promise.resolve();
+  assert.ok(logo.text.includes(`${theme.getFgAnsi("thinkingLow")}pi`));
+  assert.ok(heading.text.startsWith(theme.getFgAnsi("thinkingLow") + "[Context]"));
+
   handlers.get("thinking_level_select")({ level: "high" }, ctx);
+  const updatesAfterHigh = headingUpdates;
   handlers.get("thinking_level_select")({ level: "high" }, ctx);
+  assert.ok(logo.text.includes(`${theme.getFgAnsi("thinkingHigh")}pi`));
+  assert.ok(heading.text.startsWith(theme.getFgAnsi("thinkingHigh") + "[Context]"));
+  assert.equal(headingUpdates, updatesAfterHigh);
+
+  expanded = true;
+  heading.setText(heading.getExpandedText());
+  footer.render();
+  await Promise.resolve();
+  assert.ok(heading.text.startsWith(theme.getFgAnsi("thinkingHigh") + "[Context]"));
+  assert.match(heading.text, /\/project\/AGENTS\.md/);
+
+  const switchedTheme = {
+    getFgAnsi: (color) => color === "thinkingHigh" ? "\x1b[38;5;6m" : theme.getFgAnsi(color),
+  };
+  ctx.ui.theme = switchedTheme;
+  footer.render();
+  await Promise.resolve();
+  assert.ok(logo.text.includes(`${switchedTheme.getFgAnsi("thinkingHigh")}pi`));
+  assert.ok(heading.text.startsWith(switchedTheme.getFgAnsi("thinkingHigh") + "[Context]"));
 
   assert.equal(Container.prototype.render, containerRender);
   assert.equal(Text.prototype.invalidate, textInvalidate);
+  assert.ok(renders >= 3);
   assert.equal(indicators.length, 2);
-  assert.equal(indicators[1].intervalMs, 80);
+  assert.equal(indicators[1].intervalMs, 120);
   assert.equal(indicators[1].frames.length, 10);
   assert.equal(indicators[1].frames[0], theme.fg("thinkingHigh", "⠋"));
 });

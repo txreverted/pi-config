@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { relative, resolve, sep } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -14,24 +15,58 @@ const thinkingColors = {
 } as const satisfies Record<string, ThemeColor>;
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const fastModeEntry = "ui-fast-mode";
+const foreground = /\x1b\[(?:39|38;(?:5;\d+|2;\d+;\d+;\d+))m/;
+const leadingForeground = new RegExp(`^${foreground.source}`);
+const piLogo = /^((?:\x1b\[[0-9;]*m)*)pi/;
+const noComponents: readonly ComponentTree[] = [];
 
-export function supportsFastMode(model: { api: string; id: string; provider: string } | undefined): boolean {
-  return model !== undefined
-    && (model.provider === "openai" || model.provider === "openai-codex")
-    && (model.api === "openai-completions" || model.api === "openai-responses" || model.api === "openai-codex-responses")
-    && /^gpt-5\.6(?:-|$)/.test(model.id);
+type ComponentTree = {
+  children?: ComponentTree[];
+};
+
+type ExpandableHeading = ComponentTree & {
+  getCollapsedText: () => string;
+  getExpandedText: () => string;
+  setText: (text: string) => void;
+};
+
+function startupComponents(tui: unknown): {
+  header: readonly ComponentTree[];
+  resources: readonly ComponentTree[];
+} {
+  const roots = (tui as ComponentTree).children;
+  const document = roots?.[0]?.children;
+  // Pi mounts the header and small loaded-resources container before chat.
+  return {
+    header: document?.[0]?.children ?? noComponents,
+    resources: document?.[1]?.children ?? noComponents,
+  };
 }
 
-function restoreFastMode(ctx: ExtensionContext): boolean {
-  const branch = ctx.sessionManager.getBranch();
-  for (let index = branch.length - 1; index >= 0; index--) {
-    const entry = branch[index];
-    if (entry?.type === "custom" && entry.customType === fastModeEntry) {
-      return typeof entry.data === "object" && entry.data !== null && "enabled" in entry.data && entry.data.enabled === true;
-    }
-  }
-  return false;
+function isExpandableHeading(component: ComponentTree): component is ExpandableHeading {
+  const candidate = component as Partial<ExpandableHeading>;
+  return typeof candidate.getCollapsedText === "function"
+    && typeof candidate.getExpandedText === "function"
+    && typeof candidate.setText === "function";
+}
+
+function colorLoadedHeading(text: string, color: string): string {
+  return leadingForeground.test(text) ? text.replace(leadingForeground, color) : text;
+}
+
+function colorPiLogo(text: string, color: string): string | undefined {
+  const match = piLogo.exec(text);
+  if (!match || !foreground.test(match[1]!)) return undefined;
+  return text.replace(piLogo, `${match[1]!.replace(foreground, color)}pi`);
+}
+
+export function formatExtensionStatuses(statuses: ReadonlyMap<string, string>): string {
+  return [...statuses.entries()]
+    .filter(([name]) => name !== "memory")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, text]) => text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 function applyThinkingIndicator(
@@ -44,7 +79,7 @@ function applyThinkingIndicator(
 
   ctx.ui.setWorkingIndicator({
     frames: spinnerFrames.map((frame) => ctx.ui.theme.fg(thinkingColors[level], frame)),
-    intervalMs: 80,
+    intervalMs: 120,
   });
   return color;
 }
@@ -90,19 +125,36 @@ function usageCost(ctx: ExtensionContext): number {
   return cost;
 }
 
+function scrollCount(line: string | undefined, direction: "↑" | "↓"): number | undefined {
+  const marker = direction === "↑" ? / ↑ (\d+) more / : / ↓ (\d+) more /;
+  const count = Number(marker.exec(stripVTControlCharacters(line ?? ""))?.[1]);
+  return Number.isFinite(count) && count > 0 ? count : undefined;
+}
+
 class ChromeEditor extends CustomEditor {
+  elapsed: () => string = () => "";
   status: () => string = () => "";
 
   override render(width: number): string[] {
-    if (width < 8) return super.render(width);
+    if (width < 24) return super.render(width);
 
     const innerWidth = width - 6;
     const lines = super.render(innerWidth);
     const horizontal = this.borderColor("─");
-    const bottom = lines.indexOf(horizontal.repeat(innerWidth), 1);
+    const bottom = lines.findIndex((line, index) => {
+      if (index === 0) return false;
+      const plain = stripVTControlCharacters(line);
+      return plain === "─".repeat(innerWidth) || /^─── ↓ \d+ more /.test(plain);
+    });
     if (bottom < 0) return lines;
 
-    const label = truncateToWidth(`${this.borderColor("─")} 𝛑 ❯ ${this.status()} `, width - 2, "");
+    const hiddenAbove = scrollCount(lines[0], "↑");
+    const elapsed = this.elapsed();
+    const label = truncateToWidth(
+      `${this.borderColor("─")} 𝛑${elapsed ? ` ${this.borderColor(`(${elapsed})`)}` : ""}${hiddenAbove ? ` ↑${hiddenAbove}` : ""} ❯ ${this.status()} `,
+      width - 2,
+      "",
+    );
     const result = [
       `${this.borderColor("╭")}${label}${horizontal.repeat(Math.max(0, width - visibleWidth(label) - 2))}${this.borderColor("╮")}`,
     ];
@@ -112,12 +164,14 @@ class ChromeEditor extends CustomEditor {
       const content = truncateToWidth(input[0]!, width - 6, "");
       result.push(`${this.borderColor("╰─ ")}${content}${horizontal.repeat(Math.max(0, width - visibleWidth(content) - 6))}${this.borderColor(" ─╯")}`);
     } else {
+      const hiddenBelow = scrollCount(lines[bottom], "↓");
       input.forEach((line, index) => {
         const last = index === input.length - 1;
         const left = this.borderColor(last ? "╰─ " : "│  ");
-        const right = this.borderColor(last ? " ─╯" : "│");
-        const content = truncateToWidth(line, width - 6, "");
-        result.push(`${left}${content}${" ".repeat(Math.max(0, width - visibleWidth(left) - visibleWidth(content) - visibleWidth(right)))}${right}`);
+        const right = this.borderColor(last && hiddenBelow ? ` ↓${hiddenBelow} ─╯` : last ? " ─╯" : "│");
+        const contentWidth = Math.max(0, width - visibleWidth(left) - visibleWidth(right));
+        const content = truncateToWidth(line, contentWidth, "");
+        result.push(`${left}${content}${" ".repeat(Math.max(0, contentWidth - visibleWidth(content)))}${right}`);
       });
     }
 
@@ -128,37 +182,11 @@ class ChromeEditor extends CustomEditor {
 
 export default function (pi: ExtensionAPI) {
   let activeIndicatorColor: string | undefined;
+  let activeThinkingLevel: keyof typeof thinkingColors = "off";
+  let refreshResourceHeadings: ((level: keyof typeof thinkingColors) => void) | undefined;
   let responseStartedAt: number | undefined;
   let responseFinishedAt: number | undefined;
   let requestRender: (() => void) | undefined;
-  let fastMode = false;
-
-  pi.registerCommand("fast", {
-    description: "Toggle OpenAI Fast mode for this session",
-    handler: async (args, ctx) => {
-      const value = args.trim().toLowerCase();
-      if (value !== "" && value !== "on" && value !== "off") {
-        ctx.ui.notify("Usage: /fast [on|off]", "warning");
-        return;
-      }
-
-      const enabled = value === "on" || (value === "" && !fastMode);
-      if (enabled && !supportsFastMode(ctx.model)) {
-        ctx.ui.notify("Fast mode is supported here only for OpenAI GPT-5.6 models.", "warning");
-        return;
-      }
-
-      fastMode = enabled;
-      pi.appendEntry(fastModeEntry, { enabled });
-      requestRender?.();
-      ctx.ui.notify(`Fast mode ${enabled ? "enabled; premium usage applies" : "disabled"}.`, "info");
-    },
-  });
-
-  pi.on("before_provider_request", (event, ctx) => {
-    if (!fastMode || !supportsFastMode(ctx.model) || typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) return;
-    return { ...event.payload, service_tier: "priority" };
-  });
 
   pi.on("before_agent_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -175,60 +203,130 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     activeIndicatorColor = undefined;
+    activeThinkingLevel = ctx.thinkingLevel ?? "off";
+    refreshResourceHeadings = undefined;
     responseStartedAt = undefined;
     responseFinishedAt = undefined;
     requestRender = undefined;
-    fastMode = restoreFastMode(ctx);
     if (ctx.mode !== "tui") return;
 
+    const cwd = formatCwd(ctx.cwd);
     let branch: string | null = null;
-    activeIndicatorColor = applyThinkingIndicator(ctx, ctx.thinkingLevel ?? "off");
+    let extensionStatuses: ReadonlyMap<string, string> = new Map();
+    activeIndicatorColor = applyThinkingIndicator(ctx, activeThinkingLevel);
 
     ctx.ui.setFooter((tui, _theme, footerData) => {
       branch = footerData.getGitBranch();
-      const dispose = footerData.onBranchChange(() => {
+      extensionStatuses = footerData.getExtensionStatuses();
+      const unsubscribe = footerData.onBranchChange(() => {
         branch = footerData.getGitBranch();
         tui.requestRender();
       });
-      return { dispose, invalidate() {}, render: () => [] };
+      let disposed = false;
+      let lastHeader: readonly ComponentTree[] | undefined;
+      let lastResources: readonly ComponentTree[] | undefined;
+      let lastExpanded: boolean | undefined;
+      let lastLevel: keyof typeof thinkingColors | undefined;
+      let lastTheme: unknown;
+      const refresh = (level: keyof typeof thinkingColors): boolean => {
+        const { header, resources } = startupComponents(tui);
+        const expanded = ctx.ui.getToolsExpanded();
+        const currentTheme = ctx.ui.theme;
+        const stateChanged = header !== lastHeader
+          || resources !== lastResources
+          || expanded !== lastExpanded
+          || level !== lastLevel
+          || currentTheme !== lastTheme;
+        if (!stateChanged) return false;
+
+        const color = currentTheme.getFgAnsi(thinkingColors[level]);
+        let changed = false;
+        for (const component of header) {
+          if (!isExpandableHeading(component)) continue;
+          const source = expanded ? component.getExpandedText() : component.getCollapsedText();
+          const text = colorPiLogo(source, color);
+          if (text !== undefined) {
+            component.setText(text);
+            changed = true;
+          }
+        }
+        for (const component of resources) {
+          if (!isExpandableHeading(component)) continue;
+          const source = expanded ? component.getExpandedText() : component.getCollapsedText();
+          component.setText(colorLoadedHeading(source, color));
+          changed = true;
+        }
+
+        lastHeader = header;
+        lastResources = resources;
+        lastExpanded = expanded;
+        lastLevel = level;
+        lastTheme = currentTheme;
+        return changed;
+      };
+      const refreshAndRender = (level: keyof typeof thinkingColors) => {
+        if (!disposed && refresh(level)) tui.requestRender();
+      };
+      refreshResourceHeadings = refreshAndRender;
+
+      return {
+        dispose() {
+          disposed = true;
+          unsubscribe();
+          if (refreshResourceHeadings === refreshAndRender) refreshResourceHeadings = undefined;
+        },
+        invalidate() {},
+        render() {
+          if (refresh(activeThinkingLevel)) queueMicrotask(() => {
+            if (!disposed) tui.requestRender();
+          });
+          return [];
+        },
+      };
     });
 
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       requestRender = () => tui.requestRender();
       const editor = new ChromeEditor(tui, theme, keybindings);
       let snapshotLeaf: string | null | undefined;
+      let snapshotModel: string | undefined;
       let snapshotUsage: ReturnType<ExtensionContext["getContextUsage"]>;
       let snapshotCost = 0;
+      editor.elapsed = () => responseStartedAt === undefined
+        ? ""
+        : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
       editor.status = () => {
         const parenthetical = (text: string) => theme.borderColor(`(${text})`);
         const model = ctx.model?.id ?? "no-model";
-        const fast = fastMode && supportsFastMode(ctx.model) ? "✧ " : "";
-        const thinking = ctx.model?.reasoning ? ` ${parenthetical(`${fast}${ctx.thinkingLevel ?? "off"}`)}` : "";
-        const elapsed = responseStartedAt === undefined
-          ? ""
-          : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
-        const path = `${formatCwd(ctx.cwd)}${branch ? ` ${parenthetical(branch)}` : ""}`;
+        const thinking = ctx.model?.reasoning ? ` ${parenthetical(ctx.thinkingLevel ?? "off")}` : "";
+        const statuses = formatExtensionStatuses(extensionStatuses);
+        const path = `${cwd}${branch ? ` ${parenthetical(branch)}` : ""}`;
         const leaf = ctx.sessionManager.getLeafId();
-        if (leaf !== snapshotLeaf) {
+        const selectedModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+        if (leaf !== snapshotLeaf || selectedModel !== snapshotModel) {
           snapshotLeaf = leaf;
+          snapshotModel = selectedModel;
           snapshotUsage = ctx.getContextUsage();
           snapshotCost = usageCost(ctx);
         }
         const percent = snapshotUsage?.percent === null ? "?" : (snapshotUsage?.percent ?? 0).toFixed(1);
         const window = formatTokens(snapshotUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
         const subscription = ctx.model && (ctx.model.provider === "kimi-coding" || ctx.modelRegistry.isUsingOAuth(ctx.model));
-        return `${model}${thinking}${elapsed ? ` ${parenthetical(elapsed)}` : ""} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${snapshotCost.toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}`;
+        return `${model}${thinking}${statuses ? ` ${parenthetical(statuses)}` : ""} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${snapshotCost.toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}`;
       };
       return editor;
     });
   });
 
   pi.on("session_shutdown", () => {
+    refreshResourceHeadings = undefined;
     requestRender = undefined;
   });
 
   pi.on("thinking_level_select", (event, ctx) => {
     if (ctx.mode !== "tui") return;
+    activeThinkingLevel = event.level;
     activeIndicatorColor = applyThinkingIndicator(ctx, event.level, activeIndicatorColor);
+    refreshResourceHeadings?.(event.level);
   });
 }
