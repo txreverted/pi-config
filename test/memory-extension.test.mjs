@@ -28,6 +28,7 @@ function details(checkpoint = activeCheckpoint(), includedObservationIds = []) {
     type: MEMORY_DETAILS_TYPE,
     version: 1,
     checkpoint,
+    checkpointCoversUpToId: "u1",
     includedObservationIds,
     observationCoversUpToId: "u1",
   };
@@ -230,6 +231,29 @@ test("native overflow retries are not duplicated and active terminal compactions
   assert.equal(state.sent.length, 1);
 });
 
+test("new user input and stale checkpoints cancel terminal continuation", async () => {
+  const compaction = { type: "compaction", id: "c1", details: details(), firstKeptEntryId: "u1" };
+  const state = setup([
+    { type: "message", id: "u1", message: { role: "user", content: "Keep going" } },
+    compaction,
+    { type: "custom", id: "enabled", customType: MEMORY_ENABLED_ENTRY, data: { enabled: true } },
+  ]);
+  await start(state);
+  await state.events.get("session_compact")({
+    type: "session_compact", compactionEntry: compaction, fromExtension: true, reason: "threshold", willRetry: false,
+  }, state.ctx);
+  await state.events.get("input")({ type: "input", source: "interactive", text: "Do something else" }, state.ctx);
+  await state.events.get("agent_settled")({ type: "agent_settled" }, state.ctx);
+  assert.equal(state.sent.length, 0);
+
+  const stale = { ...compaction, details: { ...details(), checkpointCoversUpToId: "older" } };
+  await state.events.get("session_compact")({
+    type: "session_compact", compactionEntry: stale, fromExtension: true, reason: "threshold", willRetry: false,
+  }, state.ctx);
+  await state.events.get("agent_settled")({ type: "agent_settled" }, state.ctx);
+  assert.equal(state.sent.length, 0);
+});
+
 test("blocked and complete checkpoints do not trigger terminal continuation", async () => {
   for (const checkpoint of [
     activeCheckpoint({ blockers: [{ id: "b", text: "Need user choice", sourceEntryIds: ["u1"], awaitingUser: true }] }),
@@ -250,6 +274,25 @@ test("blocked and complete checkpoints do not trigger terminal continuation", as
   }
 });
 
+test("memory worker failure falls back to Pi compaction", async () => {
+  const state = setup([
+    { type: "message", id: "u1", message: { role: "user", content: "old work" } },
+    { type: "message", id: "u2", message: { role: "user", content: "recent work" } },
+  ]);
+  state.ctx.model = undefined;
+  await start(state);
+  const result = await state.events.get("session_before_compact")({
+    type: "session_before_compact",
+    branchEntries: state.branch(),
+    customInstructions: "focus on tests",
+    reason: "manual",
+    willRetry: false,
+    signal: new AbortController().signal,
+    preparation: { firstKeptEntryId: "u2", tokensBefore: 20_000 },
+  }, state.ctx);
+  assert.equal(result, undefined);
+});
+
 test("mid-tool context pressure compacts and resumes through the completion callback", async () => {
   const state = setup([
     { type: "custom", id: "enabled", customType: MEMORY_ENABLED_ENTRY, data: { enabled: true } },
@@ -267,4 +310,21 @@ test("mid-tool context pressure compacts and resumes through the completion call
   assert.equal(state.sent.length, 1);
   assert.equal(state.sent[0].message.customType, MEMORY_RESUME_MESSAGE);
   assert.equal(state.sent[0].options.triggerTurn, true);
+});
+
+test("new user input cancels a pending mid-tool continuation", async () => {
+  const state = setup([
+    { type: "custom", id: "enabled", customType: MEMORY_ENABLED_ENTRY, data: { enabled: true } },
+  ]);
+  state.ctx.getContextUsage = () => ({ tokens: 100_000, contextWindow: 128_000, percent: 78 });
+  await start(state);
+  await state.events.get("turn_end")({
+    type: "turn_end",
+    turnIndex: 1,
+    message: { role: "assistant" },
+    toolResults: [{ role: "toolResult" }],
+  }, state.ctx);
+  await state.events.get("input")({ type: "input", source: "interactive", text: "new task" }, state.ctx);
+  state.compactOptions().onComplete({});
+  assert.equal(state.sent.length, 0);
 });

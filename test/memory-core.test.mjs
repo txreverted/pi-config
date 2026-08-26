@@ -18,6 +18,7 @@ import {
   shouldContinueAfterCompaction,
   snapCompactionCutoff,
 } from "../extensions/memory-core.ts";
+import { checkpointInput, observerInput } from "../extensions/memory-prompts.ts";
 
 const user = (id, text) => ({
   type: "message",
@@ -91,6 +92,9 @@ test("observer normalization validates sources, assigns deterministic ids, and d
   assert.equal(first[0].content, "Preserve exact source ids.");
   assert.throws(() => normalizeObservations([{ ...raw, sourceEntryIds: ["other"] }], new Set(["u1"])), /outside its assigned chunk/);
   assert.throws(() => normalizeObservations([{ ...raw, kind: "instruction" }], new Set(["u1"])), /invalid observation kind/);
+  assert.throws(() => normalizeObservations([{ ...raw, supersedes: ["unknown"] }], new Set(["u1"])), /outside its supplied context/);
+  const replacement = normalizeObservations([{ ...raw, supersedes: ["old"] }], new Set(["u1"]), new Set(["old"]));
+  assert.deepEqual(replacement[0].supersedes, ["old"]);
 });
 
 test("observation folding follows the supplied active branch and keeps empty coverage batches", () => {
@@ -99,8 +103,10 @@ test("observation folding follows the supplied active branch and keeps empty cov
   const right = observation("o3", "right branch", ["u3"]);
   const leftBranch = [user("u1", "root"), batch("b1", "u1", [shared]), user("u2", "left"), batch("b2", "u2", [left])];
   const rightBranch = [user("u1", "root"), batch("b1", "u1", [shared]), user("u3", "right"), batch("b3", "u3", [right]), batch("b4", "u3", [])];
+  const replacedBranch = [...leftBranch, user("u4", "replace"), batch("b5", "u4", [observation("o4", "replacement", ["u4"], { supersedes: ["o2"] })])];
   assert.deepEqual(foldObservations(leftBranch).map(({ id }) => id), ["o1", "o2"]);
   assert.deepEqual(foldObservations(rightBranch).map(({ id }) => id), ["o1", "o3"]);
+  assert.deepEqual(foldObservations(replacedBranch).map(({ id }) => id), ["o1", "o4"]);
 });
 
 test("compaction cutoff snaps to an observed boundary without double-representing the tail", () => {
@@ -163,9 +169,9 @@ test("memory search is bounded, supports exclusion, and exact source rendering s
   assert.deepEqual(searchObservations(observations, "auth", { excludeIds: new Set(["o1"]) }), []);
   const many = Array.from({ length: 10 }, (_, index) => observation(`m${index}`, `Authentication record ${index}`, ["u1"]));
   assert.equal(searchObservations(many, "authentication").length, 5);
-  const output = formatSourceEntries([user("u1", "Exact requirement")]);
+  const output = formatSourceEntries([user("u1", "Exact requirement\n  with spacing")]);
   assert.match(output, /Source entry u1/);
-  assert.match(output, /Exact requirement/);
+  assert.match(output, /Exact requirement\n  with spacing/);
 });
 
 test("automatic continuation is gated by retry, phase, blockers, open work, and a hard cap", () => {
@@ -191,6 +197,15 @@ test("mid-run threshold reserves substantial response and compaction headroom", 
   assert.equal(midRunCompactionThreshold(128_000), 95_232);
   assert.equal(midRunCompactionThreshold(272_000), 231_200);
   assert.equal(midRunCompactionThreshold(1_050_000), 984_464);
+});
+
+test("memory prompts expose bounded prior state, recent transcript, and manual compaction focus", () => {
+  const observer = observerInput("new transcript", [{ id: "old", content: "old state" }]);
+  assert.match(observer, /PREVIOUS OBSERVATIONS/);
+  assert.match(observer, /"id": "old"/);
+  const checkpoint = checkpointInput({ phase: "active" }, [], "recent completion", "focus on verification");
+  assert.match(checkpoint, /RECENT TRANSCRIPT DATA[\s\S]*recent completion/);
+  assert.match(checkpoint, /REQUESTED COMPACTION FOCUS[\s\S]*focus on verification/);
 });
 
 test("memory compaction details retain the expected stable discriminator", () => {
