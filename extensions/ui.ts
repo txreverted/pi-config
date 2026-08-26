@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -108,7 +108,7 @@ function formatCwd(cwd: string): string {
   const home = resolve(homedir());
   const path = resolve(cwd);
   const fromHome = relative(home, path);
-  return fromHome === "" ? "~" : fromHome !== ".." && !fromHome.startsWith(`..${sep}`) ? `~${sep}${fromHome}` : cwd;
+  return fromHome === "" ? "~" : !isAbsolute(fromHome) && fromHome !== ".." && !fromHome.startsWith(`..${sep}`) ? `~${sep}${fromHome}` : cwd;
 }
 
 function usageCost(ctx: ExtensionContext): number {
