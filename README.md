@@ -27,7 +27,7 @@ npm run check
 ## Change
 
 - [`extensions/ui.ts`](extensions/ui.ts) sets the editor, footer, thinking
-  colors, and compact rendering. The status shows the current or latest
+  colors, and compact rendering. The model status shows the current or latest
   response duration after one second. `/fast [on|off]` toggles the premium
   priority tier for official OpenAI GPT-5.6 APIs. The current session stores
   the setting, resumed sessions restore it, and `✧` prefixes the thinking
