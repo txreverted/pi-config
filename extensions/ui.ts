@@ -30,6 +30,25 @@ const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 const compactRenderPatch = Symbol.for("@txreverted/pi-config/compact-empty-lines");
 const expandableTextPatch = Symbol.for("@txreverted/pi-config/refresh-expandable-text");
 const semanticMarkerLine = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+$/;
+const fastModeEntry = "ui-fast-mode";
+
+export function supportsFastMode(model: { api: string; id: string; provider: string } | undefined): boolean {
+  return model !== undefined
+    && (model.provider === "openai" || model.provider === "openai-codex")
+    && (model.api === "openai-completions" || model.api === "openai-responses" || model.api === "openai-codex-responses")
+    && /^gpt-5\.6(?:-|$)/.test(model.id);
+}
+
+function restoreFastMode(ctx: ExtensionContext): boolean {
+  const branch = ctx.sessionManager.getBranch();
+  for (let index = branch.length - 1; index >= 0; index--) {
+    const entry = branch[index];
+    if (entry?.type === "custom" && entry.customType === fastModeEntry) {
+      return typeof entry.data === "object" && entry.data !== null && "enabled" in entry.data && entry.data.enabled === true;
+    }
+  }
+  return false;
+}
 
 function terminalImageRows(lines: readonly string[]): Set<number> {
   const rows = new Set<number>();
@@ -154,6 +173,19 @@ function formatTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(count < 10_000_000 ? 1 : 0)}M`;
 }
 
+export function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.floor(milliseconds / 1_000);
+  if (totalSeconds <= 0) return "";
+
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes === 0) return `${seconds}s`;
+
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return hours === 0 ? `${minutes}m ${seconds}s` : `${hours}h ${minutes}m ${seconds}s`;
+}
+
 function formatCwd(cwd: string): string {
   const home = resolve(homedir());
   const path = resolve(cwd);
@@ -215,11 +247,59 @@ export default function (pi: ExtensionAPI) {
   let baseTheme: Theme | undefined;
   let activeAppearanceColor: string | undefined;
   let restoreRenderingOptimizations: (() => void) | undefined;
+  let responseStartedAt: number | undefined;
+  let responseFinishedAt: number | undefined;
+  let requestRender: (() => void) | undefined;
+  let fastMode = false;
+
+  pi.registerCommand("fast", {
+    description: "Toggle OpenAI Fast mode for this session",
+    handler: async (args, ctx) => {
+      const value = args.trim().toLowerCase();
+      if (value !== "" && value !== "on" && value !== "off") {
+        ctx.ui.notify("Usage: /fast [on|off]", "warning");
+        return;
+      }
+
+      const enabled = value === "on" || (value === "" && !fastMode);
+      if (enabled && !supportsFastMode(ctx.model)) {
+        ctx.ui.notify("Fast mode is supported here only for OpenAI GPT-5.6 models.", "warning");
+        return;
+      }
+
+      fastMode = enabled;
+      pi.appendEntry(fastModeEntry, { enabled });
+      requestRender?.();
+      ctx.ui.notify(`Fast mode ${enabled ? "enabled; premium usage applies" : "disabled"}.`, "info");
+    },
+  });
+
+  pi.on("before_provider_request", (event, ctx) => {
+    if (!fastMode || !supportsFastMode(ctx.model) || typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) return;
+    return { ...event.payload, service_tier: "priority" };
+  });
+
+  pi.on("before_agent_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    responseStartedAt = performance.now();
+    responseFinishedAt = undefined;
+    requestRender?.();
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    if (ctx.mode !== "tui" || responseStartedAt === undefined) return;
+    responseFinishedAt = performance.now();
+    requestRender?.();
+  });
 
   pi.on("session_start", (_event, ctx) => {
     restoreRenderingOptimizations?.();
     restoreRenderingOptimizations = undefined;
     activeAppearanceColor = undefined;
+    responseStartedAt = undefined;
+    responseFinishedAt = undefined;
+    requestRender = undefined;
+    fastMode = restoreFastMode(ctx);
     if (ctx.mode !== "tui") return;
 
     restoreRenderingOptimizations = installRenderingOptimizations(() => ctx.ui.getToolsExpanded());
@@ -237,17 +317,22 @@ export default function (pi: ExtensionAPI) {
     });
 
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+      requestRender = () => tui.requestRender();
       const editor = new ChromeEditor(tui, theme, keybindings);
       editor.status = () => {
         const parenthetical = (text: string) => theme.borderColor(`(${text})`);
         const model = ctx.model?.id ?? "no-model";
-        const thinking = ctx.model?.reasoning ? ` ${parenthetical(ctx.thinkingLevel ?? "off")}` : "";
+        const fast = fastMode && supportsFastMode(ctx.model) ? "⚡︎" : "";
+        const thinking = ctx.model?.reasoning ? ` ${parenthetical(`${fast}${ctx.thinkingLevel ?? "off"}`)}` : "";
         const path = `${formatCwd(ctx.cwd)}${branch ? ` ${parenthetical(branch)}` : ""}`;
         const usage = ctx.getContextUsage();
         const percent = usage?.percent === null ? "?" : (usage?.percent ?? 0).toFixed(1);
         const window = formatTokens(usage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
         const subscription = ctx.model && (ctx.model.provider === "kimi-coding" || ctx.modelRegistry.isUsingOAuth(ctx.model));
-        return `${model}${thinking} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${usageCost(ctx).toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}`;
+        const elapsed = responseStartedAt === undefined
+          ? ""
+          : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
+        return `${model}${thinking} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${usageCost(ctx).toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}${elapsed ? ` ❯ ${elapsed}` : ""}`;
       };
       return editor;
     });
@@ -256,6 +341,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     restoreRenderingOptimizations?.();
     restoreRenderingOptimizations = undefined;
+    requestRender = undefined;
   });
 
   pi.on("thinking_level_select", (event, ctx) => {
