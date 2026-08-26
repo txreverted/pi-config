@@ -167,6 +167,9 @@ test("memory search is bounded, supports exclusion, and exact source rendering s
   ];
   assert.deepEqual(searchObservations(observations, "auth TS2322").map(({ observation }) => observation.id), ["o1"]);
   assert.deepEqual(searchObservations(observations, "auth", { excludeIds: new Set(["o1"]) }), []);
+  assert.deepEqual(searchObservations(observations, "the and to"), []);
+  const longQuery = `${Array.from({ length: 600 }, (_, index) => `unrelated${index}`).join(" ")} authentication`;
+  assert.deepEqual(searchObservations(observations, longQuery).map(({ observation }) => observation.id), ["o1"]);
   const many = Array.from({ length: 10 }, (_, index) => observation(`m${index}`, `Authentication record ${index}`, ["u1"]));
   assert.equal(searchObservations(many, "authentication").length, 5);
   const output = formatSourceEntries([user("u1", "Exact requirement\n  with spacing")]);
