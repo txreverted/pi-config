@@ -185,8 +185,7 @@ export function entryIndexById(entries: readonly MemoryEntry[]): Map<string, num
 }
 
 export function entryIndexForId(entries: readonly MemoryEntry[], id: string | undefined): number {
-  if (!id) return -1;
-  return entryIndexById(entries).get(id) ?? -1;
+  return id ? entries.findIndex((entry) => entry.id === id) : -1;
 }
 
 function textContent(value: unknown): string {
@@ -630,8 +629,13 @@ export function renderCompactionMemory(
   return { summary: parts.join("\n\n"), includedObservationIds: selected.map((observation) => observation.id) };
 }
 
+const searchStopWords = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in", "is", "it", "of", "on", "or",
+  "that", "the", "this", "to", "was", "were", "will", "with",
+]);
+
 function terms(value: string): Set<string> {
-  return new Set(value.toLowerCase().match(/[a-z0-9_./:@-]{2,}/g) ?? []);
+  return new Set((value.toLowerCase().match(/[a-z0-9_./:@-]{2,}/g) ?? []).filter((term) => !searchStopWords.has(term)));
 }
 
 export function searchObservations(
@@ -641,14 +645,18 @@ export function searchObservations(
 ): SearchResult[] {
   const queryTerms = terms(query);
   if (queryTerms.size === 0) return [];
+  const exactQuery = query.trim().toLowerCase();
   const results: SearchResult[] = [];
   observations.forEach((observation, index) => {
     if (options.excludeIds?.has(observation.id)) return;
     const contentTerms = terms(`${observation.kind} ${observation.status ?? ""} ${observation.content}`);
+    const [needles, haystack] = queryTerms.size < contentTerms.size
+      ? [queryTerms, contentTerms]
+      : [contentTerms, queryTerms];
     let matches = 0;
-    for (const term of queryTerms) if (contentTerms.has(term)) matches++;
+    for (const term of needles) if (haystack.has(term)) matches++;
     if (matches === 0) return;
-    const exact = observation.content.toLowerCase().includes(query.trim().toLowerCase()) ? 4 : 0;
+    const exact = observation.content.toLowerCase().includes(exactQuery) ? 4 : 0;
     const kindBoost = observation.kind === "requirement" || observation.kind === "blocker" || observation.kind === "decision" ? 2 : 0;
     results.push({ observation, score: matches * 3 + exact + kindBoost + index / Math.max(1, observations.length) });
   });
