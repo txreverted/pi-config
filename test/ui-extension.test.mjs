@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { stripVTControlCharacters } from "node:util";
 import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
 import ui, { formatElapsed, formatExtensionStatuses } from "../extensions/ui.ts";
 
@@ -37,7 +38,7 @@ test("the custom editor keeps status and scrolling inside its frame", (t) => {
     on: (event, handler) => handlers.set(event, handler),
   });
 
-  const theme = { ...baseTheme(), borderColor: (text) => text };
+  const theme = { ...baseTheme(), borderColor: (text) => `\x1b[38;5;8m${text}\x1b[39m` };
   const ctx = {
     mode: "tui",
     cwd: "/project",
@@ -62,16 +63,18 @@ test("the custom editor keeps status and scrolling inside its frame", (t) => {
     onBranchChange: () => () => {},
   });
   const editor = editorFactory(tui, theme, {});
+  editor.borderColor = (text) => `\x1b[38;5;2m${text}\x1b[39m`;
   handlers.get("before_agent_start")({}, ctx);
   now = 61_000;
   handlers.get("agent_settled")({}, ctx);
-  assert.match(editor.status(), /^no-model ❯ \/project \(main\).*\$0\.100$/);
+  assert.match(stripVTControlCharacters(editor.status()), /^no-model ❯ \/project \(main\).*\$0\.100$/);
 
   editor.setText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
   editor.state.cursorLine = 0;
   editor.state.cursorCol = 0;
   const lines = editor.render(80);
-  assert.match(lines[0], /^╭─ 𝛑 \(1m 1s\) ❯ no-model/);
+  assert.match(stripVTControlCharacters(lines[0]), /^╭─ 𝛑 \(1m 1s\) ❯ no-model/);
+  assert.match(lines[0], /\x1b\[38;5;8m\(1m 1s\)\x1b\[39m/);
   assert.doesNotMatch(lines[0], /mem/);
   assert.ok(lines.some((line) => line.includes("↓14 ─╯")));
   assert.ok(lines.every((line) => visibleWidth(line) <= 80));
