@@ -62,7 +62,6 @@ function colorPiLogo(text: string, color: string): string | undefined {
 
 export function formatExtensionStatuses(statuses: ReadonlyMap<string, string>): string {
   return [...statuses.entries()]
-    .filter(([name]) => name !== "memory")
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, text]) => text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim())
     .filter(Boolean)

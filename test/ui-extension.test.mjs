@@ -20,10 +20,9 @@ test("response durations hide zero and use compact units", () => {
   assert.equal(formatElapsed(3_661_000), "1h 1m 1s");
 });
 
-test("extension statuses omit memory and stay safe for the single-line editor border", () => {
+test("extension statuses stay safe for the single-line editor border", () => {
   assert.equal(formatExtensionStatuses(new Map([
     ["web", "web\tready"],
-    ["memory", "mem:1\nworking"],
     ["empty", "  "],
   ])), "web ready");
 });
@@ -59,7 +58,7 @@ test("the custom editor keeps status and scrolling inside its frame", (t) => {
   const tui = { requestRender() {}, terminal: { rows: 20 } };
   footerFactory(tui, theme, {
     getGitBranch: () => "main",
-    getExtensionStatuses: () => new Map([["memory", "mem:1"]]),
+    getExtensionStatuses: () => new Map(),
     onBranchChange: () => () => {},
   });
   const editor = editorFactory(tui, theme, {});
