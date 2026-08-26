@@ -322,17 +322,17 @@ export default function (pi: ExtensionAPI) {
       editor.status = () => {
         const parenthetical = (text: string) => theme.borderColor(`(${text})`);
         const model = ctx.model?.id ?? "no-model";
-        const fast = fastMode && supportsFastMode(ctx.model) ? "⚡︎" : "";
+        const fast = fastMode && supportsFastMode(ctx.model) ? "✧ " : "";
         const thinking = ctx.model?.reasoning ? ` ${parenthetical(`${fast}${ctx.thinkingLevel ?? "off"}`)}` : "";
+        const elapsed = responseStartedAt === undefined
+          ? ""
+          : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
         const path = `${formatCwd(ctx.cwd)}${branch ? ` ${parenthetical(branch)}` : ""}`;
         const usage = ctx.getContextUsage();
         const percent = usage?.percent === null ? "?" : (usage?.percent ?? 0).toFixed(1);
         const window = formatTokens(usage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
         const subscription = ctx.model && (ctx.model.provider === "kimi-coding" || ctx.modelRegistry.isUsingOAuth(ctx.model));
-        const elapsed = responseStartedAt === undefined
-          ? ""
-          : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
-        return `${model}${thinking} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${usageCost(ctx).toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}${elapsed ? ` ❯ ${elapsed}` : ""}`;
+        return `${model}${thinking}${elapsed ? ` ${parenthetical(elapsed)}` : ""} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${usageCost(ctx).toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}`;
       };
       return editor;
     });
