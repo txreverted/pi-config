@@ -1,8 +1,8 @@
 # pi-config
 
-This private Pi package adds interactive tools, a custom TUI, prompt templates,
-and fixed system-prompt policies. Pi writes full copies of truncated web output
-to temporary directories.
+This private Pi package adds interactive tools, prompt templates, and fixed
+system-prompt policies. Pi writes full copies of truncated web output to
+temporary directories.
 
 Repository instructions: [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
@@ -32,11 +32,6 @@ npm run check
   and `web_fetch`. Search accepts 500 characters, 1-10 results, and
   10 domains per filter. Tool output stops at 2,000 lines or 50KB. Firecrawl
   responses stop at 10MB. See the [web tests](https://github.com/txreverted/pi-config/blob/main/test/web-core.test.mjs).
-- [`extensions/ui.ts`](extensions/ui.ts) replaces the TUI footer while keeping
-  Pi's native editor. It shows the working directory, response time, context,
-  cost, model, and thinking level. It limits transcript spacing to one empty
-  line and colors startup resources and the working indicator by thinking level.
-  See the [UI tests](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
 - [`extensions/ponytail.ts`](extensions/ponytail.ts) and
   [`extensions/unslop.ts`](extensions/unslop.ts) append fixed policies on every
   agent run. Their combined estimate is at most 2,000 tokens. Runtime prose

@@ -57,7 +57,6 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/web.ts",
-  "./extensions/ui.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
 ];
@@ -67,7 +66,6 @@ const packedPaths = [
   "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
-  "extensions/ui.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
