@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import cavemanExtension, { CAVEMAN_INSTRUCTIONS } from "../extensions/caveman.ts";
 import ponytailExtension, { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
 import unslopExtension, { UNSLOP_INSTRUCTIONS } from "../extensions/unslop.ts";
 
@@ -19,6 +20,7 @@ const composePolicies = () => {
   };
   ponytailExtension(pi);
   unslopExtension(pi);
+  cavemanExtension(pi);
 
   return handlers.reduce(
     (systemPrompt, handler) => handler({ systemPrompt }).systemPrompt,
@@ -26,12 +28,13 @@ const composePolicies = () => {
   );
 };
 
-test("fixed policies inject once in Ponytail then Unslop order", () => {
+test("fixed policies inject once in Ponytail, Unslop, then Caveman order", () => {
   const systemPrompt = composePolicies();
-  assert.equal(systemPrompt, `BASE\n\n${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}`);
+  assert.equal(systemPrompt, `BASE\n\n${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}\n\n${CAVEMAN_INSTRUCTIONS}`);
   assert.equal(systemPrompt, composePolicies());
-  assert.equal(systemPrompt.split("PONYTAIL").length - 1, 1);
-  assert.equal(systemPrompt.split("UNSLOP").length - 1, 1);
+  for (const marker of ["PONYTAIL", "UNSLOP", "CAVEMAN"]) {
+    assert.equal(systemPrompt.split(marker).length - 1, 1);
+  }
 });
 
 test("Ponytail retains the upstream implementation ladder and safety boundaries", () => {
@@ -60,8 +63,8 @@ test("Ponytail retains the upstream implementation ladder and safety boundaries"
   assert.match(PONYTAIL_INSTRUCTIONS, /security, accessibility, correctness, data integrity/);
   assert.match(PONYTAIL_INSTRUCTIONS, /Real clocks drift and sensors vary/);
   assert.match(PONYTAIL_INSTRUCTIONS, /User chooses full implementation: build it without rearguing/);
-  assert.match(PONYTAIL_INSTRUCTIONS, /unrequested explanation to skipped work and its upgrade trigger/);
   assert.match(PONYTAIL_INSTRUCTIONS, /smallest focused check that fails for changed nontrivial logic/);
+  assert.doesNotMatch(PONYTAIL_INSTRUCTIONS, /chat response|fewest words|unrequested explanation/);
   assert.match(PONYTAIL_INSTRUCTIONS, /review the final diff and touched flow for root cause, correctness, duplication, scope, unrelated edits, missing safeguards, and unsupported claims/);
   assert.match(PONYTAIL_INSTRUCTIONS, /never claim an unrun check passed/);
   assert.ok(estimateText(PONYTAIL_INSTRUCTIONS) <= 750);
@@ -81,10 +84,12 @@ test("Unslop retains the upstream audit in compact operational form", () => {
     /commit, PR, and issue text/,
     /TODOs; user-facing copy/,
   ]) assert.match(UNSLOP_INSTRUCTIONS, artifact);
-  assert.match(UNSLOP_INSTRUCTIONS, /Maximum safe compression/);
   assert.match(UNSLOP_INSTRUCTIONS, /Invent no fact, opinion, source, quote, certainty, or personality/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Lead with result/);
   assert.match(UNSLOP_INSTRUCTIONS, /plain, concrete, active, specific language/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Keep human voice\. Vary rhythm naturally/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Acknowledge supported complexity\. Be specific/);
+  assert.match(UNSLOP_INSTRUCTIONS, /evidence-backed judgment instead of mechanical pros and cons/);
+  assert.doesNotMatch(UNSLOP_INSTRUCTIONS, /Maximum safe compression|fewest words that keep/);
   assert.match(UNSLOP_INSTRUCTIONS, /What makes this obviously AI-generated/);
   for (const pattern of [
     /Puffery/,
@@ -107,12 +112,31 @@ test("Unslop retains the upstream audit in compact operational form", () => {
   assert.match(UNSLOP_INSTRUCTIONS, /Do not narrate visible code/);
   assert.match(UNSLOP_INSTRUCTIONS, /Keep complete grammar for security warnings, destructive actions, migration order, legal or accessibility requirements, and ambiguous product copy/);
   assert.match(UNSLOP_INSTRUCTIONS, /Final pass every chat response and prose artifact, including comments and docs/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Technical substance stays; fluff dies/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Do not force fragments, personality, or terseness/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Technical substance stays/);
+  assert.match(UNSLOP_INSTRUCTIONS, /Do not force personality/);
   assert.ok(estimateText(UNSLOP_INSTRUCTIONS) <= 1_200);
+});
+
+test("Caveman limits all non-code output without changing required detail", () => {
+  assert.match(CAVEMAN_INSTRUCTIONS, /Apply to all human-readable non-code output/);
+  for (const artifact of [
+    /chat, docs, comments and docstrings/,
+    /commit and PR text, issues, TODOs, and user-facing copy/,
+  ]) assert.match(CAVEMAN_INSTRUCTIONS, artifact);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Respond terse like smart caveman/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /All technical substance stays\. Only fluff dies/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /requested format and detail win/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Drop articles, filler, pleasantries/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Fragments are OK\. Prefer short words\. Keep technical terms exact\. Code unchanged/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Lead with result\. State cause, effect, and action directly/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /\[thing\] \[action\] \[reason\]\. \[next step\]\./);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Preserve exact commands, paths, names, numbers, units, errors, negations, qualifiers, citations, and formats/);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Auto-clarity: use complete prose and normal detail for security warnings, irreversible actions, user confusion, clarification, and requested explanations/);
+  assert.doesNotMatch(CAVEMAN_INSTRUCTIONS, /implementation scope|AI-generated|Puffery/);
+  assert.ok(estimateText(CAVEMAN_INSTRUCTIONS) <= 240);
 });
 
 test("combined fixed policy estimate stays within budget", () => {
   const policy = composePolicies().slice("BASE\n\n".length);
-  assert.ok(estimateText(policy) <= 2_000);
+  assert.ok(estimateText(policy) <= 2_200);
 });

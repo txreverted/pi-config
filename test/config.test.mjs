@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader, estimateTokens } from "@earendil-works/pi-coding-agent";
+import { CAVEMAN_INSTRUCTIONS } from "../extensions/caveman.ts";
 import { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
 import { UNSLOP_INSTRUCTIONS } from "../extensions/unslop.ts";
 
@@ -59,6 +60,7 @@ const extensions = [
   "./extensions/web.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
+  "./extensions/caveman.ts",
 ];
 
 const packedPaths = [
@@ -66,6 +68,7 @@ const packedPaths = [
   "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
+  "extensions/caveman.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
@@ -91,11 +94,13 @@ test("only documented package resources are enabled", async () => {
     check: "npm run typecheck && npm test",
   });
   assert.deepEqual(packageJson.peerDependencies, {
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     typebox: "*",
   });
   assert.deepEqual(packageJson.devDependencies, {
+    "@earendil-works/pi-ai": "0.84.2",
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@earendil-works/pi-tui": "0.84.2",
     "@types/node": "22.20.1",
@@ -214,8 +219,9 @@ test("fixed policies remain extensions, carry their notices, and stay within bud
   ]);
   assert.match(PONYTAIL_INSTRUCTIONS, /Fix root cause, not reported symptom/);
   assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested format win/);
-  const tokens = estimateText(`${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}`);
-  assert.ok(tokens <= 2_000, `policy estimate ${tokens} exceeds 2,000 tokens`);
+  assert.match(CAVEMAN_INSTRUCTIONS, /Apply to all human-readable non-code output/);
+  const tokens = estimateText(`${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}\n\n${CAVEMAN_INSTRUCTIONS}`);
+  assert.ok(tokens <= 2_200, `policy estimate ${tokens} exceeds 2,200 tokens`);
 });
 
 test("the exact production package installs and loads directly and through its Pi manifest", async () => {
@@ -301,8 +307,7 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
   assert.match(workflow, /schedule:\n    - cron: "17 9 \* \* 1"/);
-  assert.match(workflow, /@earendil-works\/pi-coding-agent@latest @earendil-works\/pi-tui@latest typebox@latest/);
-  assert.doesNotMatch(workflow, /@earendil-works\/pi-ai@latest/);
+  assert.match(workflow, /@earendil-works\/pi-ai@latest @earendil-works\/pi-coding-agent@latest @earendil-works\/pi-tui@latest typebox@latest/);
   assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /if: matrix\.os == 'ubuntu-latest' && matrix\.node == '22\.19\.0' && matrix\.pi == 'pinned'\n\s+run: npm audit --audit-level=high/);
   assert.equal((workflow.match(/npm audit/g) ?? []).length, 1);
@@ -322,10 +327,14 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /`FIRECRAWL_API_KEY` from the environment/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
-  assert.match(readme, /at most 2,000 tokens/);
+  assert.match(readme, /at most 2,200 tokens/);
+  assert.match(readme, /Ponytail controls implementation scope, Unslop removes prose slop,\n  and Caveman limits words in chat, docs, and other non-code output/);
+  assert.match(readme, /\]\(extensions\/caveman\.ts\)/);
   assert.match(readme, /prompt expansions combine to at most 775 tokens/);
   for (const notice of ["caveman.LICENSE", "ponytail.LICENSE", "unslop.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
+  assert.match(readme, /Local adaptations keep Ponytail at fixed full strength/);
+  assert.match(readme, /extend Caveman from replies to all non-code output/);
   for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
 });
 

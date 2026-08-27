@@ -37,6 +37,9 @@ test("web extension registers only focused search and fetch tools", () => {
   assert.equal(Value.Check(search.parameters, { query: "test", recency: "decade" }), false);
   assert.equal(Value.Check(search.parameters, { query: "test", category: "images" }), false);
   assert.equal(Value.Check(search.parameters, { query: "test", extra: true }), false);
+  assert.deepEqual(search.parameters.properties.recency.enum, ["hour", "day", "week", "month", "year"]);
+  assert.deepEqual(search.parameters.properties.category.enum, ["github", "research", "pdf", "developer"]);
+  assert.equal(search.parameters.properties.recency.anyOf, undefined);
 
   const fetch = tools.get("web_fetch");
   assert.match(fetch.description, /2,000 lines or 50KB/);

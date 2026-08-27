@@ -1,3 +1,4 @@
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -6,10 +7,6 @@ import {
   WEB_LIMITS,
   WEB_RECENCIES,
 } from "./web-core.ts";
-
-function stringEnum<const T extends readonly string[]>(values: T, description: string) {
-  return Type.Unsafe<T[number]>({ type: "string", enum: values, description });
-}
 
 const DomainList = Type.Array(Type.String({
   minLength: 1,
@@ -42,11 +39,12 @@ export default function webExtension(pi: ExtensionAPI): void {
         maximum: WEB_LIMITS.results.max,
         description: `Maximum results (default: ${WEB_LIMITS.results.default})`,
       })),
-      recency: Type.Optional(stringEnum(
-        WEB_RECENCIES,
-        "Restrict results to the past hour, day, week, month, or year",
-      )),
-      category: Type.Optional(stringEnum(WEB_CATEGORIES, "Optional Firecrawl result category")),
+      recency: Type.Optional(StringEnum(WEB_RECENCIES, {
+        description: "Restrict results to the past hour, day, week, month, or year",
+      })),
+      category: Type.Optional(StringEnum(WEB_CATEGORIES, {
+        description: "Optional Firecrawl result category",
+      })),
       includeDomains: Type.Optional(DomainList),
       excludeDomains: Type.Optional(DomainList),
     }, { additionalProperties: false }),
