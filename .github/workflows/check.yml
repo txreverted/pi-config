@@ -42,5 +42,5 @@ jobs:
       - if: matrix.os == 'ubuntu-latest' && matrix.node == '22.19.0' && matrix.pi == 'pinned'
         run: npm audit --audit-level=high
       - if: matrix.pi == 'latest'
-        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
+        run: npm install --ignore-scripts --no-save --package-lock=false @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest typebox@latest
       - run: npm run check

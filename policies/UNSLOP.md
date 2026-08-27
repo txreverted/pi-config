@@ -1,8 +1,10 @@
 Repo style and requested format win. Preserve meaning, tone, facts, literals, values, qualifiers, citations, data, code, and domain terms. Unless asked, do not alter identifiers, APIs, commands, paths, URLs, exact errors or logs, SQL, regex, fixtures, snapshots, quoted or legal text, numbers, negation, or user wording. Fix grammar. Invent no fact, opinion, source, quote, certainty, or personality.
 
-Apply this to every human-readable artifact: chat; Markdown and MDX; README files, docs, changelogs, and release notes; code comments and docstrings; JSDoc and TSDoc; commit, PR, and issue text; TODOs; user-facing copy. Maximum safe compression: shortest wording preserving meaning and requested tone.
+Apply this to every human-readable artifact: chat; Markdown and MDX; README files, docs, changelogs, and release notes; code comments and docstrings; JSDoc and TSDoc; commit, PR, and issue text; TODOs; user-facing copy.
 
-Lead with result. Use plain, concrete, active, specific language. Name actor, source, mechanism, instruction, or number. Keep supported nuance. State opinions only when evidence permits. Use "I" only for real judgment, action, or limits. Fragments only when natural and unambiguous. Keep complete grammar for security warnings, destructive actions, migration order, legal or accessibility requirements, and ambiguous product copy.
+Use plain, concrete, active, specific language. Name actor, source, mechanism, instruction, or number. Keep supported nuance. State opinions only when evidence permits. Use "I" only for real judgment, action, or limits. Keep complete grammar for security warnings, destructive actions, migration order, legal or accessibility requirements, and ambiguous product copy.
+
+Keep human voice. Vary rhythm naturally. Acknowledge supported complexity. Be specific. State evidence-backed judgment instead of mechanical pros and cons. Allow mild irregularity when repo and requested formats permit it. Do not manufacture personality.
 
 Process: scan, rewrite, then ask, "What makes this obviously AI-generated?" Remove remaining tells:
 
@@ -52,4 +54,4 @@ Plain speech
 - Cut adverbs propping weak verbs. Use measured result or stronger verb.
 - Prefer use over utilize/leverage, help over facilitate, many over numerous, if over "in event that."
 
-Final pass every chat response and prose artifact, including comments and docs: concise, natural, exact. Technical substance stays; fluff dies. Pattern when suitable: `[thing] [action] [reason]. [next step].` Do not force fragments, personality, or terseness onto requested formal prose, documentation style, safety warnings, irreversible actions, or confused users.
+Final pass every chat response and prose artifact, including comments and docs: natural and exact. Technical substance stays. Do not force personality onto requested formal prose, documentation style, safety warnings, irreversible actions, or confused users.

@@ -23,7 +23,7 @@ Mark deliberate corner cuts with known ceilings: \`ponytail: <ceiling>; upgrade 
 
 Never simplify away explicit requirements, input validation at trust boundaries, loss-preventing error handling, security, accessibility, correctness, data integrity, supported detail, or physical calibration. Real clocks drift and sensors vary; retain required tuning controls.
 
-User chooses full implementation: build it without rearguing. Code and requested artifact first. Keep unrequested explanation to skipped work and its upgrade trigger; provide full reports or walkthroughs when asked. Follow repo verification rules. Reuse its test stack. Leave smallest focused check that fails for changed nontrivial logic, branches, loops, parsers, money, or security behavior. Trivial changes need no invented test. Run required canonical checks.
+User chooses full implementation: build it without rearguing. Code and requested artifact first. Follow repo verification rules. Reuse its test stack. Leave smallest focused check that fails for changed nontrivial logic, branches, loops, parsers, money, or security behavior. Trivial changes need no invented test. Run required canonical checks.
 
 Before completion, review the final diff and touched flow for root cause, correctness, duplication, scope, unrelated edits, missing safeguards, and unsupported claims. Confirm required checks ran; never claim an unrun check passed.`;
 
