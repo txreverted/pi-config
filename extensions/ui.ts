@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { CustomEditor, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const thinkingColors = {
@@ -22,6 +22,10 @@ const noComponents: readonly ComponentTree[] = [];
 
 type ComponentTree = {
   children?: ComponentTree[];
+};
+
+type RenderableComponent = ComponentTree & {
+  render: (width: number) => string[];
 };
 
 type ExpandableHeading = ComponentTree & {
@@ -48,6 +52,48 @@ function isExpandableHeading(component: ComponentTree): component is ExpandableH
   return typeof candidate.getCollapsedText === "function"
     && typeof candidate.getExpandedText === "function"
     && typeof candidate.setText === "function";
+}
+
+function isEmptyLine(line: string): boolean {
+  return stripVTControlCharacters(line).trim() === "";
+}
+
+function isImageLine(line: string): boolean {
+  return line.includes("\x1b_G") || line.includes("\x1b]1337;File=");
+}
+
+export function collapseEmptyLines(lines: readonly string[]): string[] {
+  // Inline image protocols reserve adjacent empty rows for the image height.
+  const imageRows = new Set<number>();
+  for (let index = 0; index < lines.length; index++) {
+    if (!isImageLine(lines[index]!)) continue;
+    imageRows.add(index);
+    for (let row = index - 1; row >= 0 && isEmptyLine(lines[row]!); row--) imageRows.add(row);
+    for (let row = index + 1; row < lines.length && isEmptyLine(lines[row]!); row++) imageRows.add(row);
+  }
+
+  let previousWasEmpty = false;
+  return lines.filter((line, index) => {
+    if (imageRows.has(index) || !isEmptyLine(line)) {
+      previousWasEmpty = false;
+      return true;
+    }
+    if (previousWasEmpty) return false;
+    previousWasEmpty = true;
+    return true;
+  });
+}
+
+function constrainTranscriptSpacing(tui: unknown): (() => void) | undefined {
+  const document = (tui as ComponentTree).children?.[0] as Partial<RenderableComponent> | undefined;
+  if (typeof document?.render !== "function") return undefined;
+
+  const originalRender = document.render;
+  const render = (width: number) => collapseEmptyLines(originalRender.call(document, width));
+  document.render = render;
+  return () => {
+    if (document.render === render) document.render = originalRender;
+  };
 }
 
 function colorLoadedHeading(text: string, color: string): string {
@@ -78,7 +124,6 @@ function applyThinkingIndicator(
 
   ctx.ui.setWorkingIndicator({
     frames: spinnerFrames.map((frame) => ctx.ui.theme.fg(thinkingColors[level], frame)),
-    intervalMs: 120,
   });
   return color;
 }
@@ -124,61 +169,6 @@ function usageCost(ctx: ExtensionContext): number {
   return cost;
 }
 
-function scrollCount(line: string | undefined, direction: "↑" | "↓"): number | undefined {
-  const marker = direction === "↑" ? / ↑ (\d+) more / : / ↓ (\d+) more /;
-  const count = Number(marker.exec(stripVTControlCharacters(line ?? ""))?.[1]);
-  return Number.isFinite(count) && count > 0 ? count : undefined;
-}
-
-class ChromeEditor extends CustomEditor {
-  elapsed: () => string = () => "";
-  status: () => string = () => "";
-
-  override render(width: number): string[] {
-    if (width < 24) return super.render(width);
-
-    const innerWidth = width - 6;
-    const lines = super.render(innerWidth);
-    const horizontal = this.borderColor("─");
-    const bottom = lines.findIndex((line, index) => {
-      if (index === 0) return false;
-      const plain = stripVTControlCharacters(line);
-      return plain === "─".repeat(innerWidth) || /^─── ↓ \d+ more /.test(plain);
-    });
-    if (bottom < 0) return lines;
-
-    const hiddenAbove = scrollCount(lines[0], "↑");
-    const elapsed = this.elapsed();
-    const label = truncateToWidth(
-      `${this.borderColor("─")} 𝛑${elapsed ? ` ${elapsed}` : ""}${hiddenAbove ? ` ↑${hiddenAbove}` : ""} ❯ ${this.status()} `,
-      width - 2,
-      "",
-    );
-    const result = [
-      `${this.borderColor("╭")}${label}${horizontal.repeat(Math.max(0, width - visibleWidth(label) - 2))}${this.borderColor("╮")}`,
-    ];
-    const input = lines.slice(1, bottom);
-
-    if (input.length === 1) {
-      const content = truncateToWidth(input[0]!, width - 6, "");
-      result.push(`${this.borderColor("╰─ ")}${content}${horizontal.repeat(Math.max(0, width - visibleWidth(content) - 6))}${this.borderColor(" ─╯")}`);
-    } else {
-      const hiddenBelow = scrollCount(lines[bottom], "↓");
-      input.forEach((line, index) => {
-        const last = index === input.length - 1;
-        const left = this.borderColor(last ? "╰─ " : "│  ");
-        const right = this.borderColor(last && hiddenBelow ? ` ↓${hiddenBelow} ─╯` : last ? " ─╯" : "│");
-        const contentWidth = Math.max(0, width - visibleWidth(left) - visibleWidth(right));
-        const content = truncateToWidth(line, contentWidth, "");
-        result.push(`${left}${content}${" ".repeat(Math.max(0, contentWidth - visibleWidth(content)))}${right}`);
-      });
-    }
-
-    result.push(...lines.slice(bottom + 1));
-    return result;
-  }
-}
-
 export default function (pi: ExtensionAPI) {
   let activeIndicatorColor: string | undefined;
   let activeThinkingLevel: keyof typeof thinkingColors = "off";
@@ -186,6 +176,7 @@ export default function (pi: ExtensionAPI) {
   let responseStartedAt: number | undefined;
   let responseFinishedAt: number | undefined;
   let requestRender: (() => void) | undefined;
+  let restoreTranscriptSpacing: (() => void) | undefined;
 
   pi.on("before_agent_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -207,14 +198,23 @@ export default function (pi: ExtensionAPI) {
     responseStartedAt = undefined;
     responseFinishedAt = undefined;
     requestRender = undefined;
+    restoreTranscriptSpacing?.();
+    restoreTranscriptSpacing = undefined;
     if (ctx.mode !== "tui") return;
 
     const cwd = formatCwd(ctx.cwd);
     let branch: string | null = null;
     let extensionStatuses: ReadonlyMap<string, string> = new Map();
+    let snapshotLeaf: string | null | undefined;
+    let snapshotModel: string | undefined;
+    let snapshotUsage: ReturnType<ExtensionContext["getContextUsage"]>;
+    let snapshotCost = 0;
     activeIndicatorColor = applyThinkingIndicator(ctx, activeThinkingLevel);
 
     ctx.ui.setFooter((tui, _theme, footerData) => {
+      requestRender = () => tui.requestRender();
+      restoreTranscriptSpacing?.();
+      restoreTranscriptSpacing = constrainTranscriptSpacing(tui);
       branch = footerData.getGitBranch();
       extensionStatuses = footerData.getExtensionStatuses();
       const unsubscribe = footerData.onBranchChange(() => {
@@ -275,53 +275,48 @@ export default function (pi: ExtensionAPI) {
           if (refreshResourceHeadings === refreshAndRender) refreshResourceHeadings = undefined;
         },
         invalidate() {},
-        render() {
+        render(width: number) {
           if (refresh(activeThinkingLevel)) queueMicrotask(() => {
             if (!disposed) tui.requestRender();
           });
-          return [];
+
+          const leaf = ctx.sessionManager.getLeafId();
+          const selectedModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+          if (leaf !== snapshotLeaf || selectedModel !== snapshotModel) {
+            snapshotLeaf = leaf;
+            snapshotModel = selectedModel;
+            snapshotUsage = ctx.getContextUsage();
+            snapshotCost = usageCost(ctx);
+          }
+
+          const elapsed = responseStartedAt === undefined
+            ? ""
+            : formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
+          const percent = snapshotUsage?.percent === null ? "?" : `${(snapshotUsage?.percent ?? 0).toFixed(1)}%`;
+          const window = formatTokens(snapshotUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
+          const subscription = ctx.model && (ctx.model.provider === "kimi-coding" || ctx.modelRegistry.isUsingOAuth(ctx.model));
+          const left = `${elapsed ? `(${elapsed}) ` : ""}${percent}/${window} (auto) $${snapshotCost.toFixed(3)}${subscription ? " (sub)" : ""}`;
+          const model = `${ctx.model?.id ?? "no-model"}${ctx.model?.reasoning ? ` (${activeThinkingLevel})` : ""}`;
+          const gap = width - visibleWidth(left) - visibleWidth(model);
+          const stats = gap >= 2 ? `${left}${" ".repeat(gap)}${model}` : `${left}  ${model}`;
+          const currentTheme = ctx.ui.theme;
+          const lines = [
+            currentTheme.fg("dim", truncateToWidth(`${cwd}${branch ? ` (${branch})` : ""}`, width, "")),
+            currentTheme.fg("dim", truncateToWidth(stats, width, "")),
+          ];
+          const statuses = formatExtensionStatuses(extensionStatuses);
+          if (statuses) lines.push(currentTheme.fg("dim", truncateToWidth(statuses, width, "")));
+          return lines;
         },
       };
-    });
-
-    ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-      requestRender = () => tui.requestRender();
-      const editor = new ChromeEditor(tui, theme, keybindings);
-      let snapshotLeaf: string | null | undefined;
-      let snapshotModel: string | undefined;
-      let snapshotUsage: ReturnType<ExtensionContext["getContextUsage"]>;
-      let snapshotCost = 0;
-      editor.elapsed = () => {
-        if (responseStartedAt === undefined) return "";
-        const elapsed = formatElapsed((responseFinishedAt ?? performance.now()) - responseStartedAt);
-        return elapsed ? theme.borderColor(`(${elapsed})`) : "";
-      };
-      editor.status = () => {
-        const parenthetical = (text: string) => theme.borderColor(`(${text})`);
-        const model = ctx.model?.id ?? "no-model";
-        const thinking = ctx.model?.reasoning ? ` ${parenthetical(ctx.thinkingLevel ?? "off")}` : "";
-        const statuses = formatExtensionStatuses(extensionStatuses);
-        const path = `${cwd}${branch ? ` ${parenthetical(branch)}` : ""}`;
-        const leaf = ctx.sessionManager.getLeafId();
-        const selectedModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-        if (leaf !== snapshotLeaf || selectedModel !== snapshotModel) {
-          snapshotLeaf = leaf;
-          snapshotModel = selectedModel;
-          snapshotUsage = ctx.getContextUsage();
-          snapshotCost = usageCost(ctx);
-        }
-        const percent = snapshotUsage?.percent === null ? "?" : (snapshotUsage?.percent ?? 0).toFixed(1);
-        const window = formatTokens(snapshotUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
-        const subscription = ctx.model && (ctx.model.provider === "kimi-coding" || ctx.modelRegistry.isUsingOAuth(ctx.model));
-        return `${model}${thinking}${statuses ? ` ${parenthetical(statuses)}` : ""} ❯ ${path} ❯ ${percent}%/${window} ${parenthetical("auto")} ❯ $${snapshotCost.toFixed(3)}${subscription ? ` ${parenthetical("sub")}` : ""}`;
-      };
-      return editor;
     });
   });
 
   pi.on("session_shutdown", () => {
     refreshResourceHeadings = undefined;
     requestRender = undefined;
+    restoreTranscriptSpacing?.();
+    restoreTranscriptSpacing = undefined;
   });
 
   pi.on("thinking_level_select", (event, ctx) => {

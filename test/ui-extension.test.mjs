@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
 import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
-import ui, { formatElapsed, formatExtensionStatuses } from "../extensions/ui.ts";
+import ui, { collapseEmptyLines, formatElapsed, formatExtensionStatuses } from "../extensions/ui.ts";
 
 function baseTheme() {
   const indexes = { mdHeading: 4, thinkingHigh: 2, thinkingLow: 3 };
@@ -20,28 +20,45 @@ test("response durations hide zero and use compact units", () => {
   assert.equal(formatElapsed(3_661_000), "1h 1m 1s");
 });
 
-test("extension statuses stay safe for the single-line editor border", () => {
+test("extension statuses stay safe for the single-line footer", () => {
   assert.equal(formatExtensionStatuses(new Map([
     ["web", "web\tready"],
     ["empty", "  "],
   ])), "web ready");
 });
 
-test("the custom editor keeps status and scrolling inside its frame", (t) => {
+test("transcript spacing collapses consecutive visual empty lines and preserves image rows", () => {
+  assert.deepEqual(collapseEmptyLines([
+    "first",
+    "",
+    "  ",
+    "\x1b[38;5;1m\x1b[39m",
+    "second",
+    "",
+    "",
+  ]), ["first", "", "second", ""]);
+
+  const image = "\x1b_Gr=3;data\x1b\\";
+  assert.deepEqual(collapseEmptyLines(["before", image, "", "", "after"]), ["before", image, "", "", "after"]);
+});
+
+test("the footer keeps the native editor layout and renders session status on two lines", (t) => {
   let now = 0;
   t.mock.method(performance, "now", () => now);
   const handlers = new Map();
   let footerFactory;
-  let editorFactory;
+  let renders = 0;
   ui({
     on: (event, handler) => handlers.set(event, handler),
   });
 
-  const theme = { ...baseTheme(), borderColor: (text) => `\x1b[38;5;8m${text}\x1b[39m` };
+  const theme = baseTheme();
   const ctx = {
     mode: "tui",
     cwd: "/project",
-    thinkingLevel: "off",
+    model: { id: "gpt-5.6-sol", provider: "openai-codex", reasoning: true, contextWindow: 128_000 },
+    thinkingLevel: "high",
+    modelRegistry: { isUsingOAuth: () => true },
     sessionManager: {
       getEntries: () => [{ type: "message", message: { role: "assistant", usage: { cost: { total: 0.1 } } } }],
       getLeafId: () => null,
@@ -49,34 +66,39 @@ test("the custom editor keeps status and scrolling inside its frame", (t) => {
     getContextUsage: () => ({ contextWindow: 128_000, percent: 10 }),
     ui: {
       theme,
+      getToolsExpanded: () => false,
       setWorkingIndicator() {},
       setFooter: (factory) => { footerFactory = factory; },
-      setEditorComponent: (factory) => { editorFactory = factory; },
+      setEditorComponent() { assert.fail("the extension must keep Pi's native editor"); },
     },
   };
   handlers.get("session_start")({}, ctx);
-  const tui = { requestRender() {}, terminal: { rows: 20 } };
-  footerFactory(tui, theme, {
+  const document = new Container();
+  document.addChild({
+    invalidate() {},
+    render: () => ["first", "", " ", "second"],
+  });
+  const documentRender = document.render;
+  const tui = { children: [document], requestRender: () => { renders++; } };
+  const footer = footerFactory(tui, theme, {
     getGitBranch: () => "main",
-    getExtensionStatuses: () => new Map(),
+    getExtensionStatuses: () => new Map([["web", "web\tready"]]),
     onBranchChange: () => () => {},
   });
-  const editor = editorFactory(tui, theme, {});
-  editor.borderColor = (text) => `\x1b[38;5;2m${text}\x1b[39m`;
   handlers.get("before_agent_start")({}, ctx);
   now = 61_000;
   handlers.get("agent_settled")({}, ctx);
-  assert.match(stripVTControlCharacters(editor.status()), /^no-model ❯ \/project \(main\).*\$0\.100$/);
 
-  editor.setText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
-  editor.state.cursorLine = 0;
-  editor.state.cursorCol = 0;
-  const lines = editor.render(80);
-  assert.match(stripVTControlCharacters(lines[0]), /^╭─ 𝛑 \(1m 1s\) ❯ no-model/);
-  assert.match(lines[0], /\x1b\[38;5;8m\(1m 1s\)\x1b\[39m/);
-  assert.doesNotMatch(lines[0], /mem/);
-  assert.ok(lines.some((line) => line.includes("↓14 ─╯")));
-  assert.ok(lines.every((line) => visibleWidth(line) <= 80));
+  const lines = footer.render(80).map(stripVTControlCharacters);
+  assert.equal(lines[0], "/project (main)");
+  assert.match(lines[1], /^\(1m 1s\) 10\.0%\/128k \(auto\) \$0\.100 \(sub\) +gpt-5\.6-sol \(high\)$/);
+  assert.equal(lines[2], "web ready");
+  assert.deepEqual(document.render(80), ["first", "", "second"]);
+  assert.ok(footer.render(24).every((line) => visibleWidth(line) <= 24));
+  assert.ok(renders >= 2);
+
+  handlers.get("session_shutdown")();
+  assert.equal(document.render, documentRender);
 });
 
 test("thinking changes recolor the startup logo and resource headings without rebuilding the transcript", async () => {
@@ -121,7 +143,12 @@ test("thinking changes recolor the startup logo and resource headings without re
     mode: "tui",
     cwd: "/project",
     thinkingLevel: "low",
-    sessionManager: { getBranch: () => [] },
+    sessionManager: {
+      getBranch: () => [],
+      getEntries: () => [],
+      getLeafId: () => null,
+    },
+    getContextUsage: () => ({ contextWindow: 128_000, percent: 0 }),
     ui: {
       theme,
       getToolsExpanded: () => expanded,
@@ -160,6 +187,7 @@ test("thinking changes recolor the startup logo and resource headings without re
   assert.match(heading.text, /\/project\/AGENTS\.md/);
 
   const switchedTheme = {
+    ...theme,
     getFgAnsi: (color) => color === "thinkingHigh" ? "\x1b[38;5;6m" : theme.getFgAnsi(color),
   };
   ctx.ui.theme = switchedTheme;
@@ -172,7 +200,7 @@ test("thinking changes recolor the startup logo and resource headings without re
   assert.equal(Text.prototype.invalidate, textInvalidate);
   assert.ok(renders >= 3);
   assert.equal(indicators.length, 2);
-  assert.equal(indicators[1].intervalMs, 120);
+  assert.equal(indicators[1].intervalMs, undefined);
   assert.equal(indicators[1].frames.length, 10);
   assert.equal(indicators[1].frames[0], theme.fg("thinkingHigh", "⠋"));
 });
