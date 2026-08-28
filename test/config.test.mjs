@@ -61,6 +61,7 @@ const extensions = [
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
   "./extensions/caveman.ts",
+  "./extensions/ui.ts",
 ];
 
 const packedPaths = [
@@ -72,6 +73,7 @@ const packedPaths = [
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
+  "extensions/ui.ts",
   "extensions/web-core.ts",
   "extensions/web.ts",
   "package.json",
