@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { sep } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import uiExtension, {
   formatCwd,
@@ -46,13 +47,13 @@ test("UI footer helpers stay compact", () => {
   assert.equal(formatTokens(999), "999");
   assert.equal(formatTokens(1_250), "1.3k");
   assert.equal(formatTokens(272_000), "272k");
-  assert.equal(formatCwd("/home/alice/project", "/home/alice"), "~/project");
+  assert.equal(formatCwd("/home/alice/project", "/home/alice"), `~${sep}project`);
   assert.equal(formatCwd("/srv/project", "/home/alice"), "/srv/project");
 });
 
 test("UI footer matches the requested idle layout and terminal width", () => {
   const lines = renderFooter(100, footerState(), theme);
-  assert.equal(lines[0], "~/project (main)");
+  assert.equal(lines[0], `~${sep}project (main)`);
   assert.match(lines[1], /^\(1m25s\) \$0\.000 \(sub\) 0\.0%\/272k \(auto\) +gpt-5\.6-sol \(low\)$/);
 
   const statuses = new Map([
