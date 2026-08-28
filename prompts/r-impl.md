@@ -2,21 +2,22 @@
 description: Audit core behavior and implementation size
 argument-hint: "[scope]"
 ---
-Audit core code. Do not edit unless explicitly asked.
+Audit implementation. No edits unless asked.
 
 Scope: ${ARGUMENTS:-entire repository}.
 
-Read applicable `AGENTS.md`. Derive explicit requirements/supported behavior from code/config/tests/repo rules, not assumptions. Trace caller/input/state/output/failure paths. Find owner and smallest root fix/deletion. Prefer no change if correct/minimal.
+First explore entire codebase and read all `AGENTS.md`. Before reporting, fully understand its architecture, config, dependencies, tests, and every scoped caller/input/state/output/failure path. Derive evidenced requirements, not assumptions. Find the owner and smallest root fix/deletion.
 
 Report only:
 
-- main-feature/requirement bugs;
-- reachable trust-boundary data loss/security flaws;
-- complexity removable without behavior change;
-- missing focused nontrivial-core/regression tests.
+- main-feature or requirement bugs;
+- reachable data loss;
+- reachable trust-boundary security flaws with concrete impact;
+- behavior-preserving complexity removable now;
+- missing focused tests for core behavior or regressions.
 
-Exclude theoretical hardening, unmeasured performance, speculative scale/flexibility, optional abstraction/rewrites, style, unsupported malformed inputs. Performance needs user-visible harm; security a reachable trust-boundary path with concrete impact.
+Exclude theoretical hardening, unmeasured performance, speculative scale/flexibility, optional abstractions/rewrites, style, and unsupported malformed inputs. Performance needs user-visible harm.
 
-Findings first. Each: exact file/symbol or line; behavior/evidence; feature/requirement impact; smallest fix, preferably deletion/reuse; focused check.
+Order findings by impact. Each: exact file plus symbol or line; evidence; requirement impact, risk, or maintenance/test gap; smallest deletion/reuse/fix; focused check.
 
-Separate cleanup; include only code/maintenance reduction now. No scores or invented findings. If no small fix is justified, report no change needed.
+Cleanup separate; only concrete reduction now. No scores or invention. With no justified finding, report no change needed.

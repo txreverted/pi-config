@@ -168,17 +168,20 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     const implementation = expandPromptTemplate("/r-impl", loaded.prompts);
     assertClauses(implementation, [
       /Scope: entire repository\./,
-      /Do not edit unless explicitly asked/,
-      /requirements\/supported behavior from code\/config\/tests\/repo rules, not assumptions/,
-      /caller\/input\/state\/output\/failure paths/,
+      /No edits unless asked/,
+      /First explore entire codebase and read all `AGENTS\.md`/,
+      /Before reporting, fully understand its architecture, config, dependencies, tests, and every scoped caller\/input\/state\/output\/failure path/,
+      /evidenced requirements, not assumptions/,
       /owner and smallest root fix\/deletion/,
-      /main-feature\/requirement bugs/,
-      /reachable trust-boundary data loss\/security flaws/,
+      /main-feature or requirement bugs/,
+      /reachable data loss/,
+      /reachable trust-boundary security flaws with concrete impact/,
       /Exclude theoretical hardening, unmeasured performance, speculative scale/,
-      /exact file\/symbol or line.*behavior\/evidence.*smallest fix.*focused check/s,
-      /Separate cleanup.*No scores or invented findings/s,
-      /If no small fix is justified, report no change needed/,
+      /Order findings by impact.*exact file plus symbol or line.*evidence.*requirement impact, risk, or maintenance\/test gap.*smallest deletion\/reuse\/fix.*focused check/s,
+      /Cleanup separate.*No scores or invention/s,
+      /With no justified finding, report no change needed/,
     ]);
+    assert.ok(implementation.indexOf("First explore") < implementation.indexOf("Report only:"));
     assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
