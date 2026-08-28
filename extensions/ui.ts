@@ -27,7 +27,6 @@ export interface FooterState {
   home?: string;
   branch: string | null;
   sessionName?: string;
-  durationMs?: number;
   usage: UsageSummary;
   contextUsage?: ContextUsage;
   model?: Model<any>;
@@ -112,7 +111,6 @@ export function renderFooter(width: number, state: FooterState, theme: Theme): s
   if (state.sessionName) pwd += ` • ${state.sessionName}`;
 
   const parts: string[] = [];
-  if (state.durationMs !== undefined) parts.push(`(${formatDuration(state.durationMs)})`);
   if (state.usage.input) parts.push(`↑${formatTokens(state.usage.input)}`);
   if (state.usage.output) parts.push(`↓${formatTokens(state.usage.output)}`);
   if (state.usage.cacheRead) parts.push(`R${formatTokens(state.usage.cacheRead)}`);
@@ -172,13 +170,13 @@ class SingleLineWorkingLoader implements Component {
   private readonly loader: Loader;
 
   constructor(tui: TUI, theme: Theme, getThinkingLevel: () => ThinkingLevel, message: string) {
-    const color = (text: string) => theme.getThinkingBorderColor(getThinkingLevel())(text);
+    const spinnerColor = (text: string) => theme.getThinkingBorderColor(getThinkingLevel())(text);
     this.loaderMessage = message;
-    this.loader = new Loader(tui, color, color, message);
+    this.loader = new Loader(tui, spinnerColor, (text) => theme.fg("muted", text), message);
   }
 
   render(width: number): string[] {
-    return this.loader.render(width).slice(1);
+    return [...this.loader.render(width).slice(1), ""];
   }
 
   invalidate(): void {
@@ -263,7 +261,6 @@ export default function uiExtension(pi: ExtensionAPI): void {
           home: process.env.HOME || process.env.USERPROFILE,
           branch: footerData.getGitBranch(),
           sessionName,
-          durationMs,
           usage,
           contextUsage,
           model,

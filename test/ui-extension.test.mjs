@@ -29,7 +29,6 @@ const footerState = (overrides = {}) => ({
   cwd: "/home/alice/project",
   home: "/home/alice",
   branch: "main",
-  durationMs: 85_900,
   usage: summarizeUsage([]),
   contextUsage: { tokens: 0, contextWindow: 272_000, percent: 0 },
   model: { id: "gpt-5.6-sol", reasoning: true, contextWindow: 272_000 },
@@ -54,7 +53,7 @@ test("UI footer helpers stay compact", () => {
 test("UI footer matches the requested idle layout and terminal width", () => {
   const lines = renderFooter(100, footerState(), theme);
   assert.equal(lines[0], `~${sep}project (main)`);
-  assert.match(lines[1], /^\(1m25s\) \$0\.000 \(sub\) 0\.0%\/272k \(auto\) +gpt-5\.6-sol \(low\)$/);
+  assert.match(lines[1], /^\$0\.000 \(sub\) 0\.0%\/272k \(auto\) +gpt-5\.6-sol \(low\)$/);
 
   const statuses = new Map([
     ["z", "last\nline"],
@@ -142,13 +141,14 @@ test("usage is scanned once, then updated from lifecycle events", async () => {
   assert.match(footer.render(100)[0], /project \(main\) • footer test$/);
 
   await events.get("agent_start")({}, ctx);
-  assert.equal(widget.render(100).length, 1, "working loader reserves one row");
+  assert.deepEqual(widget.render(100).slice(1), [""], "working loader leaves a row before the editor");
   await events.get("thinking_level_select")({ level: "high" }, ctx);
   assert.match(widget.render(100)[0], /<high>/);
+  assert.doesNotMatch(widget.render(100)[0], /<high>Working/);
   await events.get("agent_end")({}, ctx);
   assert.equal(widget, undefined);
   await events.get("agent_settled")({}, ctx);
-  assert.match(footer.render(100)[1], /^\(0s\)/);
+  assert.doesNotMatch(footer.render(100)[1], /\(0s\)/);
 
   await events.get("session_shutdown")({}, ctx);
   footer.dispose();
