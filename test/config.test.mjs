@@ -16,7 +16,7 @@ const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const tsconfig = JSON.parse(await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"));
-const promptNames = ["R-DOCS", "R-GIT", "R-IMPL"];
+const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
   "policies/caveman.LICENSE",
@@ -113,11 +113,13 @@ test("only documented package resources are enabled", async () => {
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
 });
 
-test("Markdown basenames are uppercase", async () => {
+test("Markdown basenames follow resource naming rules", async () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
+  const prompts = join(root, "prompts");
   for (const path of await markdownFiles(root)) {
     const name = basename(path);
-    assert.equal(name, `${name.slice(0, -3).toUpperCase()}.md`);
+    const expected = dirname(path) === prompts ? name.slice(0, -3).toLowerCase() : name.slice(0, -3).toUpperCase();
+    assert.equal(name, `${expected}.md`);
   }
 });
 
@@ -139,14 +141,14 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
-      { name: "R-DOCS", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
-      { name: "R-GIT", description: "Split dirty work into checked PRs and merge them", argumentHint: undefined },
-      { name: "R-IMPL", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
+      { name: "r-docs", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
+      { name: "r-git", description: "Split dirty work into checked PRs and merge them", argumentHint: undefined },
+      { name: "r-impl", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
     ]);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
-    const docs = expandPromptTemplate("/R-DOCS", loaded.prompts);
+    const docs = expandPromptTemplate("/r-docs", loaded.prompts);
     assertClauses(docs, [
       /Scope: entire repository/,
       /Dirty in-scope replacement needs no confirmation/,
@@ -161,9 +163,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       /No paid calls\/deploys\/migrations\/pushes\/publishes\/live operations/,
       /Verify claims\/commands\/paths\/links\/examples/,
     ]);
-    assert.match(expandPromptTemplate('/R-DOCS "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
+    assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
-    const implementation = expandPromptTemplate("/R-IMPL", loaded.prompts);
+    const implementation = expandPromptTemplate("/r-impl", loaded.prompts);
     assertClauses(implementation, [
       /Scope: entire repository\./,
       /Do not edit unless explicitly asked/,
@@ -177,9 +179,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       /Separate cleanup.*No scores or invented findings/s,
       /If no small fix is justified, report no change needed/,
     ]);
-    assert.match(expandPromptTemplate("/R-IMPL extensions tests", loaded.prompts), /Scope: extensions tests\./);
+    assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
 
-    const git = expandPromptTemplate("/R-GIT", loaded.prompts);
+    const git = expandPromptTemplate("/r-git", loaded.prompts);
     assertClauses(git, [
       /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
       /staged\/unstaged\/untracked names first/,
@@ -193,11 +195,11 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     ]);
 
     const promptTokens = {
-      "R-DOCS": estimateText(docs),
-      "R-GIT": estimateText(git),
-      "R-IMPL": estimateText(implementation),
+      "r-docs": estimateText(docs),
+      "r-git": estimateText(git),
+      "r-impl": estimateText(implementation),
     };
-    const ceilings = { "R-DOCS": 340, "R-GIT": 164, "R-IMPL": 280 };
+    const ceilings = { "r-docs": 340, "r-git": 164, "r-impl": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
