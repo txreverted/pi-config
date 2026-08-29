@@ -162,12 +162,36 @@ function commandFromCall(call: { name: string; arguments: Record<string, unknown
   return typeof command === "string" ? normalizeContinuityText(command, 2_000) : undefined;
 }
 
+function shellCommandStart(command: string): string {
+  return command.trimStart().replace(/^(?:env\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*/i, "");
+}
+
+function packageScript(command: string, names: string): boolean {
+  return new RegExp(`^(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?(?:${names})(?=$|[\\s:])`, "i").test(command);
+}
+
 export function checkCategory(command: string): CheckCategory {
-  const lower = command.toLowerCase();
-  if (/\b(?:typecheck|tsc\b|type-check)/.test(lower)) return "typecheck";
-  if (/\b(?:lint|eslint|biome check|ruff check)/.test(lower)) return "lint";
-  if (/\b(?:test|pytest|vitest|jest|cargo test|go test)/.test(lower)) return "test";
-  if (/\b(?:build|compile|cargo check)/.test(lower)) return "build";
+  const start = shellCommandStart(command);
+  const runner = String.raw`(?:(?:npx|bunx|pnpm(?:\s+exec)?|yarn(?:\s+exec)?)\s+)?`;
+  if (
+    packageScript(start, "type-?check|types") ||
+    new RegExp(`^${runner}tsc(?=$|\\s)`, "i").test(start)
+  ) return "typecheck";
+  if (
+    packageScript(start, "lint") ||
+    new RegExp(`^${runner}(?:eslint|biome\\s+check|ruff\\s+check)(?=$|\\s)`, "i").test(start)
+  ) return "lint";
+  if (
+    packageScript(start, "test|check") ||
+    /^node\s+--test(?=$|\s)/i.test(start) ||
+    new RegExp(`^${runner}(?:vitest|jest)(?=$|\\s)`, "i").test(start) ||
+    /^(?:(?:python(?:3)?\s+-m|uv\s+run)\s+)?pytest(?=$|\s)/i.test(start) ||
+    /^(?:cargo|go)\s+test(?=$|\s)/i.test(start)
+  ) return "test";
+  if (
+    packageScript(start, "build|compile") ||
+    /^(?:cargo\s+(?:build|check)|go\s+build|dotnet\s+build)(?=$|\s)/i.test(start)
+  ) return "build";
   return "other";
 }
 
@@ -192,13 +216,23 @@ function mergeCheck(checks: ContinuityCheck[], next: ContinuityCheck): void {
 }
 
 function finalize(checkpoint: ContinuityCheckpoint, origin: ContinuityCheckpoint["origin"]): ContinuityCheckpoint {
+  const ignoredCommands = new Set<string>();
+  checkpoint.checks = checkpoint.checks.flatMap((check) => {
+    const category = checkCategory(check.command);
+    if (category === "other") {
+      ignoredCommands.add(check.command);
+      return [];
+    }
+    return [{ ...check, category }];
+  });
   checkpoint.nextActions = unique(checkpoint.nextActions, 30);
   checkpoint.doneWhen = unique(checkpoint.doneWhen, 30);
   checkpoint.blockers = unique(checkpoint.blockers, 20);
   checkpoint.constraints = unique(checkpoint.constraints, 50);
   checkpoint.decisions = unique(checkpoint.decisions, 50);
   checkpoint.rejectedApproaches = unique(checkpoint.rejectedApproaches, 30);
-  checkpoint.completed = unique(checkpoint.completed, 50);
+  checkpoint.completed = unique(checkpoint.completed.filter((item) => !ignoredCommands.has(item)), 50);
+  if (checkpoint.currentAction && ignoredCommands.has(checkpoint.currentAction)) checkpoint.currentAction = undefined;
   checkpoint.preferences = unique(checkpoint.preferences, 30);
   checkpoint.environment = unique(checkpoint.environment, 30);
   checkpoint.sourceEntryIds = unique(checkpoint.sourceEntryIds, 200);
@@ -349,7 +383,7 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
           }
         }
         const command = commandFromCall(call);
-        if (command) checkpoint.currentAction = command;
+        if (command && checkCategory(command) !== "other") checkpoint.currentAction = command;
       }
       const text = normalizeContinuityText(messageText(message), 2_400);
       const nextActions = explicitNextActions(text);
@@ -369,23 +403,17 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
 
     if (message.role === "toolResult") {
       const call = calls.get(message.toolCallId);
-      const text = normalizeContinuityText(messageText(message), 2_000);
       if (call) {
         const command = commandFromCall(call);
-        if (command) {
+        const category = command ? checkCategory(command) : "other";
+        if (command && category !== "other") {
           mergeCheck(checkpoint.checks, {
             command,
-            category: checkCategory(command),
+            category,
             status: message.isError ? "failed" : "passed",
             sourceEntryIds: [call.entryId, entry.id],
           });
-          if (!message.isError) {
-            checkpoint.completed.push(command);
-            if (checkpoint.checks.every((check) => check.status !== "failed")) {
-              checkpoint.blockers = [];
-              if (checkpoint.status === "blocked") checkpoint.status = "working";
-            }
-          }
+          if (!message.isError) checkpoint.completed.push(command);
         }
         const action = actionForTool(call.name);
         if (action && !message.isError) {
@@ -394,10 +422,6 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
           }
         }
       }
-      if (message.isError) {
-        checkpoint.blockers.push(text || `${message.toolName} failed`);
-        checkpoint.status = "blocked";
-      } else if (checkpoint.status === "blocked" && checkpoint.blockers.length === 0) checkpoint.status = "working";
       checkpoint.sourceEntryIds.push(entry.id);
     }
   }

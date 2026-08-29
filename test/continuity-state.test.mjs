@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyAgentCheckpoint,
+  checkCategory,
   checkpointFromBranch,
   continuationAllowed,
   latestPersistedCheckpointRevision,
@@ -27,7 +28,20 @@ const result = (id, parentId, toolCallId, toolName, text, isError = false) => ({
   message: { role: "toolResult", toolCallId, toolName, content: [{ type: "text", text }], isError, timestamp: 3 },
 });
 
-test("deterministic state gives tool results execution authority", () => {
+test("verification classification requires a known command at the shell entry point", () => {
+  for (const [command, category] of [
+    ["npm test", "test"],
+    ["CI=1 npm run typecheck", "typecheck"],
+    ["pnpm lint", "lint"],
+    ["cargo check", "build"],
+    ["git status && npm test", "other"],
+    ["find test -type f", "other"],
+    ["rg test test", "other"],
+    ["wc -l test/*.mjs", "other"],
+  ]) assert.equal(checkCategory(command), category, command);
+});
+
+test("deterministic state records verification evidence without turning failures into blockers", () => {
   const entries = [
     user("u1", "Implement parser; done when tests and typecheck pass"),
     assistantCall("a1", "u1", "c1", "edit", { path: "src/parser.ts", edits: [] }),
@@ -35,7 +49,7 @@ test("deterministic state gives tool results execution authority", () => {
     assistantCall("a2", "t1", "c2", "bash", { command: "npm test" }),
     result("t2", "a2", "c2", "bash", "10 passed"),
     assistantCall("a3", "t2", "c3", "bash", { command: "npm run typecheck" }),
-    result("t3", "a3", "c3", "bash", "ok", true),
+    result("t3", "a3", "c3", "bash", "type error", true),
   ];
   const checkpoint = checkpointFromBranch(entries);
   assert.equal(checkpoint.goal, "Implement parser; done when tests and typecheck pass");
@@ -44,8 +58,55 @@ test("deterministic state gives tool results execution authority", () => {
     { category: "test", status: "passed" },
     { category: "typecheck", status: "failed" },
   ]);
+  assert.deepEqual(checkpoint.completed, ["npm test"]);
+  assert.deepEqual(checkpoint.blockers, []);
+  assert.equal(checkpoint.currentAction, "npm run typecheck");
+  assert.equal(checkpoint.status, "working");
+});
+
+test("inspection commands and recoverable tool errors stay out of task state", () => {
+  const entries = [
+    user("u1", "Implement parser"),
+    assistantCall("a1", "u1", "c1", "bash", { command: "git status && find test -type f" }),
+    result("t1", "a1", "c1", "bash", "clean"),
+    assistantCall("a2", "t1", "c2", "bash", { command: "rg test test" }),
+    result("t2", "a2", "c2", "bash", "no matches", true),
+    assistantCall("a3", "t2", "c3", "continuity_checkpoint", { extra: true }),
+    result("t3", "a3", "c3", "continuity_checkpoint", "validation failed", true),
+  ];
+  const checkpoint = checkpointFromBranch(entries);
+  assert.deepEqual(checkpoint.checks, []);
+  assert.deepEqual(checkpoint.completed, []);
+  assert.deepEqual(checkpoint.blockers, []);
+  assert.equal(checkpoint.currentAction, undefined);
+  assert.equal(checkpoint.status, "working");
+});
+
+test("persisted inspection noise is pruned while explicit blockers survive later tools", () => {
+  const saved = applyAgentCheckpoint(checkpointFromBranch([user("u1", "Implement parser")]), {
+    status: "blocked",
+    currentAction: "find test -type f",
+    blockers: ["Waiting for API access"],
+    completed: ["Reviewed parser design", "find test -type f"],
+  }, "a1");
+  saved.checks = [{
+    command: "find test -type f",
+    category: "test",
+    status: "passed",
+    sourceEntryIds: ["a1"],
+  }];
+  const entries = [
+    user("u1", "Implement parser"),
+    { type: "custom", id: "s1", parentId: "u1", timestamp: "2026-01-01T00:00:03Z", customType: "pi-config/continuity-checkpoint", data: saved },
+    assistantCall("a2", "s1", "c2", "edit", { path: "src/parser.ts", edits: [] }),
+    result("t2", "a2", "c2", "edit", "updated"),
+  ];
+  const checkpoint = checkpointFromBranch(entries);
+  assert.deepEqual(checkpoint.checks, []);
+  assert.deepEqual(checkpoint.completed, ["Reviewed parser design"]);
+  assert.deepEqual(checkpoint.blockers, ["Waiting for API access"]);
+  assert.equal(checkpoint.currentAction, undefined);
   assert.equal(checkpoint.status, "blocked");
-  assert.equal(continuationAllowed(checkpoint), false);
 });
 
 test("agent checkpoint cannot claim done with pending work or unknown checks", () => {

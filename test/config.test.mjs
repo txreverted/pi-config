@@ -197,14 +197,15 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assertClauses(git, [
       /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
       /staged\/unstaged\/untracked names first/,
-      /Stop on ignored files.*credential\/key\/env\/auth\/settings\/session\/transcript files.*actual secret content/s,
+      /Never include ignored files/,
+      /Stop if candidate work has ignored.*credential\/key\/env\/auth\/settings\/session\/transcript files.*secrets/s,
       /Allow unfamiliar names/,
-      /Smallest coherent PRs, dependency ordered/,
+      /smallest coherent dependency-ordered PRs/i,
       /merge dependencies; refresh\/verify default; branch; commit only its group/,
       /run\/fix required checks.*await\/fix required CI\/reviews.*merge only green/s,
       /Preserve work.*Stop on blocked files.*Never stash\/reset\/discard\/overwrite\/force-push\/bypass/s,
       /hooks\/checks\/CI\/conflicts\/reviews\/protection/,
-      /remove only clean worktrees and merged branches created by this run/,
+      /remove only clean worktrees and merged branches this run created/,
       /Keep default, active, dirty, unmerged, and pre-existing branches\/worktrees/,
       /unsafe switch\/separation\/access\/approval\/cleanup.*Report merges\/cleanup\/blockers/s,
     ]);
@@ -346,6 +347,8 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /automatically checkpoints unfinished work/);
   assert.match(readme, /Pi JSONL remains canonical/);
   assert.match(readme, /`\/continuity` is optional diagnostics and control/);
+  assert.match(readme, /"continuation": \{\n    "afterIdleUnfinished": false,\n    "afterSessionResume": false\n  \}/);
+  assert.match(readme, /keep compaction and length-stop recovery but disable automatic turns after idle work or session resume/i);
   assert.match(readme, /automatically start a provider turn/);
   assert.match(readme, /Without `FIRECRAWL_API_KEY`, they use Firecrawl Keyless/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
