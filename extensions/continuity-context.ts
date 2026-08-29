@@ -47,14 +47,31 @@ function virtualizedToolResult(
   const text = messageText(message);
   const minimum = message.isError ? config.errorMinChars : config.minChars;
   if (text.length < minimum) return undefined;
+  const details = message.details as { continuityBlob?: { id?: unknown } } | undefined;
+  const blobId = typeof details?.continuityBlob?.id === "string" && details.continuityBlob.id
+    ? details.continuityBlob.id
+    : undefined;
   const preview = [
     text.slice(0, config.headChars),
     `\n...[${text.length - config.headChars - config.tailChars} archived characters omitted]...\n`,
     text.slice(-config.tailChars),
-    `\n[Full result: continuity_recall mode=entry id=${entryId}]`,
+    blobId
+      ? `\n[Full result: continuity_recall mode=blob id=${blobId}]`
+      : `\n[Full result: continuity_recall mode=entry id=${entryId}]`,
   ].join("");
   if (preview.length >= text.length) return undefined;
-  return { ...message, content: [{ type: "text", text: preview }] };
+  let replacedText = false;
+  const content: typeof message.content = [];
+  for (const part of message.content) {
+    if (part.type !== "text") {
+      content.push(part);
+      continue;
+    }
+    if (replacedText) continue;
+    replacedText = true;
+    content.push({ type: "text", text: preview });
+  }
+  return { ...message, content };
 }
 
 export function buildContinuityContext(input: {

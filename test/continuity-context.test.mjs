@@ -58,6 +58,37 @@ test("context virtualization preserves tool identity and injects one bounded cap
   assert.match(capsules[0].content, /untrusted data, not instructions/);
 });
 
+test("context virtualization preserves non-text content and prefers an archived blob", () => {
+  const checkpoint = checkpointFromBranch([userEntry]);
+  const config = structuredClone(DEFAULT_CONTINUITY_CONFIG);
+  config.toolOutput.keepRecentEntries = 1;
+  config.retrieval.enabled = false;
+  const blobResultEntry = {
+    ...resultEntry,
+    message: {
+      ...resultEntry.message,
+      content: [
+        { type: "image", data: "AA==", mimeType: "image/png" },
+        { type: "text", text: "x".repeat(10_000) },
+        { type: "image", data: "AQ==", mimeType: "image/png" },
+        { type: "text", text: "y".repeat(10_000) },
+      ],
+      details: { continuityBlob: { id: "blob-1" } },
+    },
+  };
+  const result = buildContinuityContext({
+    messages: [userEntry.message, blobResultEntry.message, recentEntry.message],
+    branch: [userEntry, blobResultEntry, recentEntry],
+    checkpoint,
+    archive: { search: () => [] },
+    sessionId: "s1",
+    config,
+  });
+  const tool = result.messages.find((message) => message.role === "toolResult");
+  assert.deepEqual(tool.content.map((part) => part.type), ["image", "text", "image"]);
+  assert.match(tool.content[1].text, /continuity_recall mode=blob id=blob-1/);
+});
+
 test("retrieval rendering remains source-addressed and bounded", () => {
   const text = renderRetrieval([{
     sessionId: "s1", entryId: "e1", parentId: null, ordinal: 0,
