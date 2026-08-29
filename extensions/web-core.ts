@@ -221,12 +221,16 @@ function safeErrorMessage(value: unknown, apiKey?: string): string {
 }
 
 function apiError(status: number, payload: Record<string, unknown> | undefined, apiKey?: string): Error {
-  if (status === 401) return new Error("Firecrawl authentication failed. Check FIRECRAWL_API_KEY and restart Pi.");
+  if (status === 401) {
+    return new Error(apiKey
+      ? "Firecrawl authentication failed. Check FIRECRAWL_API_KEY and restart Pi."
+      : "Firecrawl Keyless is unavailable for this request. Set FIRECRAWL_API_KEY and restart Pi.");
+  }
   if (status === 402) return new Error("Firecrawl credits are exhausted or billing is not configured.");
   if (status === 403) {
     return new Error(apiKey
       ? "Firecrawl denied this request. Check the API key's endpoint and format restrictions."
-      : "Firecrawl denied keyless access. Set FIRECRAWL_API_KEY and restart Pi.");
+      : "Firecrawl denied keyless access because of an IP or free-tier limit. Set FIRECRAWL_API_KEY and restart Pi.");
   }
   if (status === 429) return new Error("Firecrawl rate or concurrency limit reached. Retry later.");
   const message = safeErrorMessage(payload?.error ?? `HTTP ${status}`, apiKey);

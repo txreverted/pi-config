@@ -151,7 +151,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
       { name: "r-docs", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
-      { name: "r-git", description: "Split dirty work into checked PRs and merge them", argumentHint: undefined },
+      { name: "r-git", description: "Split dirty work into checked PRs, merge, and clean up", argumentHint: undefined },
       { name: "r-impl", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
     ]);
 
@@ -197,13 +197,16 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assertClauses(git, [
       /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
       /staged\/unstaged\/untracked names first/,
-      /Stop on .*credentials\/keys.*auth\/settings.*sessions\/transcripts.*content secrets/s,
+      /Stop on ignored files.*credential\/key\/env\/auth\/settings\/session\/transcript files.*actual secret content/s,
+      /Allow unfamiliar names/,
       /Smallest coherent PRs, dependency ordered/,
       /merge dependencies; refresh\/verify default; branch; commit only its group/,
       /run\/fix required checks.*await\/fix required CI\/reviews.*merge only green/s,
       /Preserve work.*Stop on blocked files.*Never stash\/reset\/discard\/overwrite\/force-push\/bypass/s,
       /hooks\/checks\/CI\/conflicts\/reviews\/protection/,
-      /unsafe switch\/separation\/access\/approval.*Report merges\/blockers/s,
+      /remove only clean worktrees and merged branches created by this run/,
+      /Keep default, active, dirty, unmerged, and pre-existing branches\/worktrees/,
+      /unsafe switch\/separation\/access\/approval\/cleanup.*Report merges\/cleanup\/blockers/s,
     ]);
 
     const promptTokens = {
@@ -211,12 +214,12 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       "r-git": estimateText(git),
       "r-impl": estimateText(implementation),
     };
-    const ceilings = { "r-docs": 340, "r-git": 164, "r-impl": 280 };
+    const ceilings = { "r-docs": 340, "r-git": 220, "r-impl": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
     const total = Object.values(promptTokens).reduce((sum, tokens) => sum + tokens, 0);
-    assert.ok(total <= 775, `prompt estimate ${total} exceeds 775 tokens`);
+    assert.ok(total <= 830, `prompt estimate ${total} exceeds 830 tokens`);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
@@ -344,13 +347,13 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /Pi JSONL remains canonical/);
   assert.match(readme, /`\/continuity` is optional diagnostics and control/);
   assert.match(readme, /automatically start a provider turn/);
-  assert.match(readme, /`FIRECRAWL_API_KEY` from the environment/);
+  assert.match(readme, /Without `FIRECRAWL_API_KEY`, they use Firecrawl Keyless/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
   assert.match(readme, /at most 2,200 tokens/);
   assert.match(readme, /Ponytail controls implementation scope, Unslop removes prose slop,\n  and Caveman limits words in chat, docs, and other non-code output/);
   assert.match(readme, /\]\(extensions\/caveman\.ts\)/);
-  assert.match(readme, /prompt expansions combine to at most 775 tokens/);
+  assert.match(readme, /prompt expansions combine to at most 830 tokens/);
   for (const notice of ["caveman.LICENSE", "ponytail.LICENSE", "unslop.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
   for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
   assert.match(readme, /Local adaptations keep Ponytail at fixed full strength/);
