@@ -58,6 +58,7 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/web.ts",
+  "./extensions/continuity.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
   "./extensions/caveman.ts",
@@ -70,6 +71,12 @@ const packedPaths = [
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/caveman.ts",
+  "extensions/continuity-archive.ts",
+  "extensions/continuity-context.ts",
+  "extensions/continuity-runtime.ts",
+  "extensions/continuity-state.ts",
+  "extensions/continuity-types.ts",
+  "extensions/continuity.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
@@ -97,14 +104,16 @@ test("only documented package resources are enabled", async () => {
   });
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     typebox: "*",
   });
   assert.deepEqual(packageJson.devDependencies, {
-    "@earendil-works/pi-ai": "0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-tui": "0.84.2",
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4",
     "@types/node": "22.20.1",
     typebox: "1.3.14",
     typescript: "5.9.3",
@@ -331,6 +340,10 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
   assert.match(readme, /Firecrawl-backed `web_search`/);
+  assert.match(readme, /automatically checkpoints unfinished work/);
+  assert.match(readme, /Pi JSONL remains canonical/);
+  assert.match(readme, /`\/continuity` is optional diagnostics and control/);
+  assert.match(readme, /automatically start a provider turn/);
   assert.match(readme, /`FIRECRAWL_API_KEY` from the environment/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
