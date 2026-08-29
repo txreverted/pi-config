@@ -35,7 +35,7 @@ function setup() {
 test("ask tool exposes a bounded schema and compact prompt metadata", () => {
   const { tool } = setup();
   assert.equal(tool.executionMode, "sequential");
-  assert.match(tool.description, /Other answers limited to 400 lines or 2,000 UTF-8 bytes/);
+  assert.match(tool.description, /Other answers limited to 1 line or 2,000 UTF-8 bytes/);
   assert.equal(tool.promptGuidelines.length, 2);
   assert.match(tool.promptGuidelines[0], /Inspect available evidence first/);
   assert.match(tool.promptGuidelines[1], /safe reversible default for trivial uncertainty/);
@@ -120,8 +120,7 @@ test("four maximum-size valid custom answers remain visible in runtime output", 
   }));
   const maximumAnswers = questions.map((_question, index) => {
     const marker = `answer-${index + 1}-`;
-    const firstLine = marker + "x".repeat(1_202 - marker.length);
-    return `${firstLine}\n${Array.from({ length: ASK_LIMITS.customAnswerLines - 1 }, () => "x").join("\n")}`;
+    return marker + "x".repeat(ASK_LIMITS.customAnswerBytes - marker.length);
   });
   let answerIndex = 0;
   const result = await tool.execute("call", { questions }, undefined, undefined, {
@@ -139,7 +138,7 @@ test("four maximum-size valid custom answers remain visible in runtime output", 
     assert.match(output, new RegExp(`- Which scope ${index}\\?`));
     assert.match(output, new RegExp(`answer-${index}-`));
     assert.equal(Buffer.byteLength(result.details.answers[index - 1].answer, "utf8"), ASK_LIMITS.customAnswerBytes);
-    assert.equal(result.details.answers[index - 1].answer.split("\n").length, ASK_LIMITS.customAnswerLines);
+    assert.equal(result.details.answers[index - 1].answer.includes("\n"), false);
   }
   assert.doesNotMatch(output, /\[Answer truncated to the ask tool limit:/);
   assert.doesNotMatch(output, /\[Clarification answers truncated/);
@@ -236,7 +235,7 @@ test("native dialog text and custom answers are sanitized", async () => {
 
   assert.equal(shownTitle, "1/1 │ Scope: Choose?");
   assert.equal(shownChoices[0], "□ 1. Small │ Few changes");
-  assert.equal(result.details.answers[0].answer, "custom\nanswer");
+  assert.equal(result.details.answers[0].answer, "custom answer");
   assert.doesNotMatch(result.content[0].text, /[\u001b\u0007\u202e]/);
 });
 
