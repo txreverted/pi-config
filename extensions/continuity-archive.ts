@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { IndexedEntry, RecallHit } from "./continuity-types.ts";
 import { continuityAgentDir, type ContinuityConfig } from "./continuity-types.ts";
@@ -31,6 +31,11 @@ function entryBytes(entry: IndexedEntry): number {
   return Buffer.byteLength(entry.text, "utf8") + Buffer.byteLength(JSON.stringify(entry.filePaths), "utf8");
 }
 
+function isDescendant(root: string, target: string): boolean {
+  const path = relative(root, target);
+  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
 export class ContinuityArchive {
   private database?: DatabaseSync;
   private readonly root: string;
@@ -46,7 +51,14 @@ export class ContinuityArchive {
   private blobPath(path: string): string | undefined {
     const root = resolve(this.blobRoot);
     const target = resolve(path);
-    return target.startsWith(`${root}${sep}`) ? target : undefined;
+    return isDescendant(root, target) ? target : undefined;
+  }
+
+  private async realBlobPath(path: string): Promise<string | undefined> {
+    const target = this.blobPath(path);
+    if (!target) return undefined;
+    const [root, resolvedTarget] = await Promise.all([realpath(this.blobRoot), realpath(target)]);
+    return isDescendant(root, resolvedTarget) ? resolvedTarget : undefined;
   }
 
   private async removeBlobFile(path: string): Promise<void> {
@@ -351,10 +363,8 @@ export class ContinuityArchive {
         sha256: String(row.sha256),
         createdAt: Number(row.created_at),
       };
-      const path = this.blobPath(record.path);
-      if (!path) return undefined;
-      const resolvedPath = await realpath(path);
-      if (!this.blobPath(resolvedPath)) return undefined;
+      const resolvedPath = await this.realBlobPath(record.path);
+      if (!resolvedPath) return undefined;
       return { text: redactContinuityText(await readFile(resolvedPath, "utf8")), record };
     } catch {
       return undefined;

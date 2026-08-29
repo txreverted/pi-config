@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -54,8 +54,12 @@ test("archive indexes idempotently and filters branches before ranking and limit
 
 test("blob spooling redacts before persistence and remains session scoped and size bounded", async () => {
   const root = await mkdtemp(join(tmpdir(), "continuity-blob-"));
+  const storage = join(root, "storage");
+  const alias = join(root, "storage-alias");
+  await mkdir(storage);
+  await symlink(storage, alias, process.platform === "win32" ? "junction" : "dir");
   const source = join(root, "source.log");
-  const archive = new ContinuityArchive(join(root, "state"));
+  const archive = new ContinuityArchive(join(alias, "state"));
   try {
     await writeFile(source, "full compiler output\nsecret=hidden\n", "utf8");
     await archive.open();
