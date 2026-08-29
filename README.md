@@ -23,7 +23,19 @@ npm run check
 
 - [`extensions/ask.ts`](extensions/ask.ts) provides `ask_user_question` in TUI and RPC sessions. It accepts 1-4 questions with 2-4 choices. `Other` answers stop at 2,000 UTF-8 bytes and 400 lines. Its metadata estimate is at most 400 tokens. See the [ask tests](https://github.com/txreverted/pi-config/blob/main/test/ask-extension.test.mjs).
 - [`extensions/web.ts`](extensions/web.ts) provides Firecrawl-backed `web_search` and `web_fetch`. Both attempt Firecrawl Keyless without a key. Search accepts 500 characters, 1-10 results, and 10 domains per filter. Tool output stops at 2,000 lines or 50KB. Firecrawl responses stop at 10MB. See the [web tests](https://github.com/txreverted/pi-config/blob/main/test/web-core.test.mjs).
-- [`extensions/continuity.ts`](extensions/continuity.ts) automatically checkpoints unfinished work, retrieves branch-scoped evidence, preserves referenced full tool output, and guards automatic continuation. Pi JSONL remains canonical. Its redacted search index and output blobs live under `PI_CODING_AGENT_DIR` or `~/.pi/agent/continuity/`. Global config is `continuity.json` in that agent directory. Trusted projects can override it at `.pi/continuity.json`. `/continuity` is optional diagnostics and control. See the [continuity tests](https://github.com/txreverted/pi-config/blob/main/test/continuity-extension.test.mjs).
+- [`extensions/continuity.ts`](extensions/continuity.ts) automatically checkpoints unfinished work, retrieves branch-scoped evidence, preserves referenced full tool output, and guards automatic continuation. Pi JSONL remains canonical. Automatic state records recognized test, build, lint, and type-check commands. Tool errors stay searchable but do not become automatic blockers. Explicit checkpoints can record blockers. The redacted search index and output blobs live under `PI_CODING_AGENT_DIR` or `~/.pi/agent/continuity/`. Global config is `continuity.json` in that agent directory. Trusted projects can override it at `.pi/continuity.json`. `/continuity` is optional diagnostics and control. See the [continuity tests](https://github.com/txreverted/pi-config/blob/main/test/continuity-extension.test.mjs).
+
+To keep compaction and length-stop recovery but disable automatic turns after idle work or session resume, put this override in either continuity config:
+
+```json
+{
+  "continuation": {
+    "afterIdleUnfinished": false,
+    "afterSessionResume": false
+  }
+}
+```
+
 - [`extensions/ui.ts`](extensions/ui.ts) provides a compact live footer and one-row working loader. The footer keeps cumulative usage, context, model, branch, session, and extension status data. See the [UI tests](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
 - [`extensions/ponytail.ts`](extensions/ponytail.ts), [`extensions/unslop.ts`](extensions/unslop.ts), and [`extensions/caveman.ts`](extensions/caveman.ts) append fixed policies on every agent run. Ponytail controls implementation scope, Unslop removes prose slop,
   and Caveman limits words in chat, docs, and other non-code output. Their combined estimate is at most 2,200 tokens. Runtime prose policy: [`policies/UNSLOP.md`](policies/UNSLOP.md). See the [policy tests](https://github.com/txreverted/pi-config/blob/main/test/policies.test.mjs).
