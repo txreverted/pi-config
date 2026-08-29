@@ -67,7 +67,6 @@ const extensions = [
 
 const packedPaths = [
   "README.md",
-  "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/bounded-output.ts",
@@ -94,7 +93,7 @@ test("only documented package resources are enabled", async () => {
     extensions,
     prompts: ["./prompts"],
   });
-  assert.deepEqual(packageJson.files, ["assets", "extensions", "policies", "prompts", "README.md"]);
+  assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
   assert.equal(packageJson.keywords, undefined);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.bundledDependencies, undefined);
@@ -179,8 +178,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assertClauses(implementation, [
       /Scope: entire repository\./,
       /No edits unless asked/,
-      /First explore entire codebase and read all `AGENTS\.md`/,
-      /Before reporting, fully understand its architecture, config, dependencies, tests, and every scoped caller\/input\/state\/output\/failure path/,
+      /Start with `README\.md` as the repository map/,
+      /Read all `AGENTS\.md` files that apply to the scope/,
+      /Trace the scoped implementation through its transitive callers, inputs, state, outputs, failure paths, dependencies, and focused tests/,
       /evidenced requirements, not assumptions/,
       /owner and smallest root fix\/deletion/,
       /main-feature or requirement bugs/,
@@ -191,7 +191,8 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       /Cleanup separate.*No scores or invention/s,
       /With no justified finding, report no change needed/,
     ]);
-    assert.ok(implementation.indexOf("First explore") < implementation.indexOf("Report only:"));
+    assert.doesNotMatch(implementation, /explore entire codebase/);
+    assert.ok(implementation.indexOf("Start with") < implementation.indexOf("Report only:"));
     assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
 
     const git = expandPromptTemplate("/r-git", loaded.prompts);
@@ -343,16 +344,29 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /replacing dirty in-scope docs without confirmation/);
   assert.match(readme, /merges green PRs without confirmation/);
   assert.match(readme, /isolated offline Pi state/);
-  assert.match(readme, /2,000 UTF-8 bytes and 400 lines/);
+  assert.match(readme, /normalized to one line and stop at 2,000 UTF-8 bytes/);
   assert.match(readme, /Firecrawl-backed `web_search`/);
   assert.match(readme, /automatically checkpoints unfinished work/);
   assert.match(readme, /Pi JSONL remains canonical/);
-  assert.match(readme, /`\/continuity` is optional diagnostics and control/);
-  assert.match(readme, /"continuation": \{\n    "afterIdleUnfinished": false,\n    "afterSessionResume": false\n  \}/);
-  assert.match(readme, /keep compaction and length-stop recovery but disable automatic turns after idle work or session resume/i);
-  assert.match(readme, /automatically start a provider turn/);
-  assert.match(readme, /Without `FIRECRAWL_API_KEY`, they use Firecrawl Keyless/);
+  assert.match(readme, /Pi owns \[native compaction\]/);
+  assert.match(readme, /Config is global-only at `continuity\.json`/);
+  assert.match(readme, /retain derived data for 30 days, cap it at 256 MiB, keep full-output blobs off/);
+  assert.match(readme, /"retentionDays": 30/);
+  assert.match(readme, /"maxTotalBytes": 268435456/);
+  assert.match(readme, /"enabled": false/);
+  assert.match(readme, /"afterLengthStop": true/);
+  assert.match(readme, /"afterIdleUnfinished": false/);
+  assert.match(readme, /"afterSessionResume": false/);
+  assert.match(readme, /pause` stops new derived writes, injected context, checkpoints, and automatic turns/);
+  assert.match(readme, /Read-only recall and state remain available\. Resume does not backfill/);
+  assert.match(readme, /purge` asks for confirmation, then deletes all derived continuity data without touching Pi JSONL/);
+  assert.doesNotMatch(readme, /\.pi\/continuity\.json|afterCompaction|"compaction"/);
+  assert.match(readme, /automatically resumes after model length stops/);
+  assert.match(readme, /automatically try experimental, undocumented Firecrawl Keyless/);
+  assert.match(readme, /`developer`, `research`, and `pdf` categories/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
+  assert.match(readme, /adds elapsed time to Pi's native working message/);
+  assert.match(readme, /native footer and working indicator/);
   assert.match(readme, /metadata estimate is at most 400 tokens/);
   assert.match(readme, /at most 2,200 tokens/);
   assert.match(readme, /Ponytail controls implementation scope, Unslop removes prose slop,\n  and Caveman limits words in chat, docs, and other non-code output/);
