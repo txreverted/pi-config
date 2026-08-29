@@ -118,13 +118,6 @@ export class ContinuityRuntime {
     if (type === "error" || this.config.notifications === "all") ctx.ui.notify(message, type);
   }
 
-  private status(ctx: ExtensionContext): void {
-    if (!ctx.hasUI) return;
-    const state = this.paused ? "paused" : this.checkpoint?.status ?? "unknown";
-    const owner = this.ownsCompaction ? "own" : "support";
-    ctx.ui.setStatus("continuity", `continuity:${state}/${owner}`);
-  }
-
   private detectOwner(pi: ExtensionAPI): void {
     const conflictTool = pi.getAllTools().some((tool) => tool.name !== "continuity_checkpoint" && tool.name !== "continuity_recall" && KNOWN_COMPACTION_TOOLS.has(tool.name));
     const conflictCommand = pi.getCommands().some((command) => KNOWN_COMPACTION_COMMANDS.some((name) => command.name.includes(name)));
@@ -168,7 +161,6 @@ export class ContinuityRuntime {
     const branch = ctx.sessionManager.getBranch();
     this.checkpoint = checkpointFromBranch(branch);
     this.persistedRevision = latestPersistedCheckpointRevision(branch);
-    this.status(ctx);
     if (
       this.config.enabled &&
       !this.paused &&
@@ -207,7 +199,6 @@ export class ContinuityRuntime {
     const branch = ctx.sessionManager.getBranch();
     this.checkpoint = checkpointFromBranch(branch);
     this.persistedRevision = latestPersistedCheckpointRevision(branch);
-    this.status(ctx);
   }
 
   async onToolResult(event: {
@@ -246,7 +237,6 @@ export class ContinuityRuntime {
     const current = checkpointFromBranch(branch);
     const sourceId = ctx.sessionManager.getLeafId() ?? `tool-${Date.now()}`;
     this.checkpoint = applyAgentCheckpoint(current, input, sourceId);
-    this.status(ctx);
     return this.checkpoint;
   }
 
@@ -302,7 +292,6 @@ export class ContinuityRuntime {
       : undefined;
     if (checkpointChanged(persisted, checkpoint)) this.persistCheckpoint(pi, checkpoint);
     else this.checkpoint = checkpoint;
-    this.status(ctx);
 
     if (this.postCompaction) {
       const candidate = this.postCompaction;
@@ -431,7 +420,6 @@ export class ContinuityRuntime {
       willRetry: event.willRetry,
     };
     this.indexNow(ctx);
-    this.status(ctx);
   }
 
   compactFailed(errorMessage?: string): void {
@@ -485,13 +473,11 @@ export class ContinuityRuntime {
     if (normalized === "pause") {
       this.paused = true;
       pi.appendEntry(CONTINUITY_TYPES.policy, "paused");
-      this.status(ctx);
       return "Continuity paused.";
     }
     if (normalized === "resume") {
       this.paused = false;
       pi.appendEntry(CONTINUITY_TYPES.policy, "active");
-      this.status(ctx);
       return "Continuity resumed.";
     }
     if (normalized === "state") return renderContinuitySnapshot(checkpointFromBranch(ctx.sessionManager.getBranch()), 8_000);

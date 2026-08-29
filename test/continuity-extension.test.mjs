@@ -131,6 +131,25 @@ function runtimeHarness(initialEntries) {
   return { runtime, pi, ctx, entries, sent, appended };
 }
 
+test("continuity clears old footer status without publishing a replacement", async () => {
+  const harness = runtimeHarness([]);
+  const statuses = [];
+  harness.ctx.hasUI = true;
+  harness.ctx.ui = {
+    setStatus(key, value) { statuses.push({ key, value }); },
+    notify() {},
+  };
+
+  await harness.runtime.start(harness.pi, harness.ctx, "new");
+  harness.runtime.onTurnEnd(harness.ctx);
+  harness.runtime.stop(harness.ctx);
+
+  assert.deepEqual(statuses, [
+    { key: "continuity", value: undefined },
+    { key: "continuity", value: undefined },
+  ]);
+});
+
 test("settled work checkpoints automatically and resumes only once without state change", async () => {
   const harness = runtimeHarness([
     {
