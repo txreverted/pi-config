@@ -8,12 +8,12 @@ export const ASK_LIMITS = {
   description: 240,
   questions: { min: 1, max: 4 },
   options: { min: 2, max: 4 },
-  customAnswerLines: 400,
+  customAnswerLines: 1,
   customAnswerBytes: 2_000,
 } as const;
 
 export const CUSTOM_ANSWER_LIMIT_TEXT =
-  `${ASK_LIMITS.customAnswerLines} lines or ${ASK_LIMITS.customAnswerBytes.toLocaleString("en-US")} UTF-8 bytes`;
+  `${ASK_LIMITS.customAnswerLines} line or ${ASK_LIMITS.customAnswerBytes.toLocaleString("en-US")} UTF-8 bytes`;
 
 export interface AskOption {
   label: string;
@@ -176,17 +176,13 @@ function utf8Prefix(value: string, maximum: number): string {
 
 export function boundCustomAnswer(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const answer = safeDisplayText(value).trim();
+  const answer = safeDisplayLine(value);
   if (!answer) return undefined;
-  const lines = answer.split("\n");
-  if (lines.length <= ASK_LIMITS.customAnswerLines && Buffer.byteLength(answer, "utf8") <= ASK_LIMITS.customAnswerBytes) {
-    return answer;
-  }
+  if (Buffer.byteLength(answer, "utf8") <= ASK_LIMITS.customAnswerBytes) return answer;
 
-  const notice = `\n\n[Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
-  const content = lines.slice(0, ASK_LIMITS.customAnswerLines - 2).join("\n");
+  const notice = ` [Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
   const maximumBytes = ASK_LIMITS.customAnswerBytes - Buffer.byteLength(notice, "utf8");
-  return utf8Prefix(content, maximumBytes).trimEnd() + notice;
+  return utf8Prefix(answer, maximumBytes).trimEnd() + notice;
 }
 
 function indent(value: string): string {

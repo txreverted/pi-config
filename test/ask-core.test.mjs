@@ -86,27 +86,22 @@ test("blank revisions clear a single-choice custom answer", () => {
   assert.equal(state.isAnswered(0), false);
 });
 
-test("custom answers are sanitized and bounded by lines and UTF-8 bytes", () => {
-  assert.equal(boundCustomAnswer(" answer\u001b]52;c;payload\u0007\r\nnext "), "answer\nnext");
+test("custom answers are sanitized and bounded to one line and UTF-8 bytes", () => {
+  assert.equal(ASK_LIMITS.customAnswerLines, 1);
+  assert.equal(boundCustomAnswer(" answer\u001b]52;c;payload\u0007\r\nnext "), "answer next");
   assert.equal(boundCustomAnswer("\u001b]0;gone\u0007"), undefined);
   assert.equal(boundCustomAnswer({ answer: "not a string" }), undefined);
 
   const exactBytes = "x".repeat(ASK_LIMITS.customAnswerBytes);
   const exactUnicodeBytes = "😀".repeat(ASK_LIMITS.customAnswerBytes / 4);
-  const exactLines = Array.from({ length: ASK_LIMITS.customAnswerLines }, () => "x").join("\n");
   assert.equal(boundCustomAnswer(exactBytes), exactBytes);
   assert.equal(boundCustomAnswer(exactUnicodeBytes), exactUnicodeBytes);
-  assert.equal(boundCustomAnswer(exactLines), exactLines);
 
   const notice = `[Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
-  for (const bounded of [
-    boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes)),
-    boundCustomAnswer(Array.from({ length: ASK_LIMITS.customAnswerLines + 1 }, () => "x").join("\n")),
-  ]) {
-    assert.ok(Buffer.byteLength(bounded, "utf8") <= ASK_LIMITS.customAnswerBytes);
-    assert.ok(bounded.split("\n").length <= ASK_LIMITS.customAnswerLines);
-    assert.equal(bounded.endsWith(notice), true);
-  }
+  const bounded = boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes));
+  assert.ok(Buffer.byteLength(bounded, "utf8") <= ASK_LIMITS.customAnswerBytes);
+  assert.equal(bounded.includes("\n"), false);
+  assert.equal(bounded.endsWith(notice), true);
 });
 
 test("answers are formatted clearly with multiline indentation", () => {
