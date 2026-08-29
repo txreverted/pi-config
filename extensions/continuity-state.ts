@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { CONTINUITY_TYPES, type CheckCategory, type ContinuityCheck, type ContinuityCheckpoint, type ContinuityFile, type IndexedEntry, type TaskStatus } from "./continuity-types.ts";
+import { Value } from "typebox/value";
+import { CONTINUITY_TYPES, ContinuityCheckpointSchema, type CheckCategory, type ContinuityCheck, type ContinuityCheckpoint, type ContinuityFile, type IndexedEntry, type TaskStatus } from "./continuity-types.ts";
 
 const PATH_KEYS = new Set(["path", "file", "filePath", "file_path", "target"]);
-const DONE_TEXT = /\b(?:all requested (?:work|changes)|task|implementation|fix|refactor)\b.{0,100}\b(?:complete|completed|done|finished|implemented|fixed)\b/i;
-const OPEN_TEXT = /\b(?:still need|need to|next step|remaining|blocked|waiting|not done|incomplete|failed)\b/i;
 const SECRET_PATTERNS = [
   /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,})\b/g,
   /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+/gi,
@@ -123,11 +122,9 @@ function emptyCheckpoint(goal?: string, sourceId?: string): ContinuityCheckpoint
 }
 
 export function checkpointData(value: unknown): ContinuityCheckpoint | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as Partial<ContinuityCheckpoint>;
-  if (candidate.schema !== 1 || typeof candidate.taskId !== "string" || typeof candidate.revision !== "string") return undefined;
-  if (!candidate.status || !["unknown", "working", "blocked", "waiting", "done"].includes(candidate.status)) return undefined;
-  return candidate as ContinuityCheckpoint;
+  return Value.Check(ContinuityCheckpointSchema, value)
+    ? structuredClone(value as ContinuityCheckpoint)
+    : undefined;
 }
 
 function cloneCheckpoint(value: ContinuityCheckpoint): ContinuityCheckpoint {
@@ -316,13 +313,30 @@ export function latestPersistedCheckpointRevision(entries: readonly SessionEntry
       const checkpoint = checkpointData(entry.data);
       if (checkpoint) return checkpoint.revision;
     }
-    if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "continuity_checkpoint") {
+    if (
+      entry.type === "message" && entry.message.role === "toolResult" &&
+      entry.message.toolName === "continuity_checkpoint" && !entry.message.isError
+    ) {
       const details = entry.message.details as { checkpoint?: unknown } | undefined;
       const checkpoint = checkpointData(details?.checkpoint);
       if (checkpoint) return checkpoint.revision;
     }
   }
   return undefined;
+}
+
+export function hasFreshAgentCheckpoint(entries: readonly SessionEntry[], revision: string): boolean {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry.type !== "message") continue;
+    if (entry.message.role === "user") return false;
+    if (entry.message.role !== "toolResult" || entry.message.toolName !== "continuity_checkpoint") continue;
+    if (entry.message.isError) return false;
+    const details = entry.message.details as { checkpoint?: unknown } | undefined;
+    const checkpoint = checkpointData(details?.checkpoint);
+    return checkpoint?.origin === "agent" && checkpoint.revision === revision;
+  }
+  return false;
 }
 
 export function checkpointFromBranch(entries: readonly SessionEntry[]): ContinuityCheckpoint {
@@ -333,13 +347,15 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
     if (entry.type === "custom" && entry.customType === CONTINUITY_TYPES.checkpoint) {
       checkpoint = checkpointData(entry.data);
     } else if (
-      entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "continuity_checkpoint"
+      entry.type === "message" && entry.message.role === "toolResult" &&
+      entry.message.toolName === "continuity_checkpoint" && !entry.message.isError
     ) {
       const details = entry.message.details as { checkpoint?: unknown } | undefined;
       checkpoint = checkpointData(details?.checkpoint);
     }
     if (checkpoint) {
       checkpoint = cloneCheckpoint(checkpoint);
+      if (checkpoint.status === "done" && checkpoint.origin !== "agent") checkpoint.status = "working";
       start = index + 1;
       break;
     }
@@ -376,12 +392,6 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
 
     if (message.role === "assistant") {
       for (const call of toolCalls(message)) {
-        const action = actionForTool(call.name);
-        if (action) {
-          for (const path of pathValues(call.arguments)) {
-            mergeFile(checkpoint.files, { path: normalizeContinuityText(path, 1_000), action, sourceEntryIds: [entry.id] });
-          }
-        }
         const command = commandFromCall(call);
         if (command && checkCategory(command) !== "other") checkpoint.currentAction = command;
       }
@@ -391,11 +401,6 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
         checkpoint.nextActions = nextActions;
         checkpoint.currentAction = nextActions[0];
         checkpoint.status = "working";
-      }
-      if (text && DONE_TEXT.test(text) && !OPEN_TEXT.test(text) && checkpoint.blockers.length === 0 && checkpoint.checks.every((check) => check.status === "passed")) {
-        checkpoint.status = "done";
-        checkpoint.currentAction = "task complete";
-        checkpoint.nextActions = [];
       }
       checkpoint.sourceEntryIds.push(entry.id);
       continue;
@@ -425,7 +430,8 @@ export function checkpointFromBranch(entries: readonly SessionEntry[]): Continui
       checkpoint.sourceEntryIds.push(entry.id);
     }
   }
-  return finalize(checkpoint ?? emptyCheckpoint(), "automatic");
+  const origin = checkpoint?.status === "done" && checkpoint.origin === "agent" ? "agent" : "automatic";
+  return finalize(checkpoint ?? emptyCheckpoint(), origin);
 }
 
 export function checkpointChanged(previous: ContinuityCheckpoint | undefined, next: ContinuityCheckpoint): boolean {
@@ -452,18 +458,6 @@ export function renderContinuitySnapshot(checkpoint: ContinuityCheckpoint, maxCh
   if (lines.join("\n").length <= maxChars) return lines.join("\n");
   const optional = lines.slice(7).join("\n");
   return normalizeContinuityText(`${required}\n${optional}`, maxChars);
-}
-
-export function renderCompactionSummary(checkpoint: ContinuityCheckpoint, reflection: string | undefined, maxChars: number): string {
-  const snapshot = renderContinuitySnapshot(checkpoint, Math.min(maxChars, 8_000));
-  const details = [
-    checkpoint.constraints.length ? `constraints=${checkpoint.constraints.join("; ")}` : "",
-    checkpoint.completed.length ? `completed=${checkpoint.completed.join("; ")}` : "",
-    checkpoint.preferences.length ? `preferences=${checkpoint.preferences.join("; ")}` : "",
-    checkpoint.environment.length ? `environment=${checkpoint.environment.join("; ")}` : "",
-    reflection ? `reflection=${normalizeContinuityText(reflection, 3_000)}` : "",
-  ].filter(Boolean).join("\n");
-  return normalizeContinuityText(`${snapshot}\n${details}`, maxChars);
 }
 
 export function entryToIndexed(sessionId: string, entry: SessionEntry, ordinal: number): IndexedEntry | undefined {

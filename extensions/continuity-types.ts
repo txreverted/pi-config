@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 export const CONTINUITY_TYPES = {
   checkpoint: "pi-config/continuity-checkpoint",
@@ -49,6 +49,60 @@ export interface ContinuityCheckpoint {
   origin: "automatic" | "agent" | "compaction";
 }
 
+const TaskStatusSchema = Type.Union([
+  Type.Literal("unknown"),
+  Type.Literal("working"),
+  Type.Literal("blocked"),
+  Type.Literal("waiting"),
+  Type.Literal("done"),
+]);
+const CheckCategorySchema = Type.Union([
+  Type.Literal("test"),
+  Type.Literal("build"),
+  Type.Literal("lint"),
+  Type.Literal("typecheck"),
+  Type.Literal("other"),
+]);
+const SourceEntryIdsSchema = Type.Array(Type.String());
+
+export const ContinuityCheckpointSchema = Type.Object({
+  schema: Type.Literal(1),
+  id: Type.String(),
+  taskId: Type.String(),
+  revision: Type.String(),
+  status: TaskStatusSchema,
+  goal: Type.Optional(Type.String()),
+  currentAction: Type.Optional(Type.String()),
+  nextActions: Type.Array(Type.String()),
+  doneWhen: Type.Array(Type.String()),
+  blockers: Type.Array(Type.String()),
+  constraints: Type.Array(Type.String()),
+  decisions: Type.Array(Type.String()),
+  rejectedApproaches: Type.Array(Type.String()),
+  completed: Type.Array(Type.String()),
+  files: Type.Array(Type.Object({
+    path: Type.String(),
+    action: Type.Union([
+      Type.Literal("read"),
+      Type.Literal("created"),
+      Type.Literal("modified"),
+      Type.Literal("deleted"),
+    ]),
+    sourceEntryIds: SourceEntryIdsSchema,
+  }, { additionalProperties: false })),
+  checks: Type.Array(Type.Object({
+    command: Type.String(),
+    category: CheckCategorySchema,
+    status: Type.Union([Type.Literal("unknown"), Type.Literal("passed"), Type.Literal("failed")]),
+    sourceEntryIds: SourceEntryIdsSchema,
+  }, { additionalProperties: false })),
+  preferences: Type.Array(Type.String()),
+  environment: Type.Array(Type.String()),
+  sourceEntryIds: SourceEntryIdsSchema,
+  createdAt: Type.String(),
+  origin: Type.Union([Type.Literal("automatic"), Type.Literal("agent"), Type.Literal("compaction")]),
+}, { additionalProperties: false });
+
 export interface IndexedEntry {
   sessionId: string;
   entryId: string;
@@ -68,15 +122,7 @@ export interface RecallHit extends IndexedEntry {
 
 export interface ContinuityConfig {
   enabled: boolean;
-  compaction: {
-    owner: "auto" | "continuity" | "support";
-    proactive: boolean;
-    ratio: number;
-    minTokens: number;
-    maxTokens: number;
-    reflect: boolean;
-    summaryMaxChars: number;
-  };
+  storage: { retentionDays: number; maxTotalBytes: number };
   retrieval: {
     enabled: boolean;
     maxHits: number;
@@ -96,7 +142,6 @@ export interface ContinuityConfig {
   };
   blobs: { enabled: boolean; maxBytes: number };
   continuation: {
-    afterCompaction: boolean;
     afterLengthStop: boolean;
     afterIdleUnfinished: boolean;
     afterSessionResume: boolean;
@@ -108,15 +153,7 @@ export interface ContinuityConfig {
 
 export const DEFAULT_CONTINUITY_CONFIG: ContinuityConfig = {
   enabled: true,
-  compaction: {
-    owner: "auto",
-    proactive: true,
-    ratio: 0.58,
-    minTokens: 48_000,
-    maxTokens: 180_000,
-    reflect: true,
-    summaryMaxChars: 12_000,
-  },
+  storage: { retentionDays: 30, maxTotalBytes: 256 * 1024 * 1024 },
   retrieval: {
     enabled: true,
     maxHits: 4,
@@ -134,12 +171,11 @@ export const DEFAULT_CONTINUITY_CONFIG: ContinuityConfig = {
     tailChars: 2_400,
     maxPerCall: 32,
   },
-  blobs: { enabled: true, maxBytes: 10 * 1024 * 1024 },
+  blobs: { enabled: false, maxBytes: 10 * 1024 * 1024 },
   continuation: {
-    afterCompaction: true,
     afterLengthStop: true,
-    afterIdleUnfinished: true,
-    afterSessionResume: true,
+    afterIdleUnfinished: false,
+    afterSessionResume: false,
     maxPerUserTurn: 4,
     maxWithoutStateChange: 1,
   },
@@ -168,7 +204,7 @@ function choice<T extends string>(value: unknown, allowed: readonly T[], fallbac
 
 export function parseContinuityConfig(value: unknown, base = DEFAULT_CONTINUITY_CONFIG): ContinuityConfig {
   const root = object(value) ?? {};
-  const compaction = object(root.compaction) ?? {};
+  const storage = object(root.storage) ?? {};
   const retrieval = object(root.retrieval) ?? {};
   const capsule = object(root.capsule) ?? {};
   const toolOutput = object(root.toolOutput) ?? {};
@@ -176,14 +212,14 @@ export function parseContinuityConfig(value: unknown, base = DEFAULT_CONTINUITY_
   const continuation = object(root.continuation) ?? {};
   return {
     enabled: bool(root.enabled, base.enabled),
-    compaction: {
-      owner: choice(compaction.owner, ["auto", "continuity", "support"] as const, base.compaction.owner),
-      proactive: bool(compaction.proactive, base.compaction.proactive),
-      ratio: finite(compaction.ratio, base.compaction.ratio, 0.25, 0.9),
-      minTokens: finite(compaction.minTokens, base.compaction.minTokens, 16_000, 500_000),
-      maxTokens: finite(compaction.maxTokens, base.compaction.maxTokens, 32_000, 1_000_000),
-      reflect: bool(compaction.reflect, base.compaction.reflect),
-      summaryMaxChars: finite(compaction.summaryMaxChars, base.compaction.summaryMaxChars, 2_000, 50_000),
+    storage: {
+      retentionDays: finite(storage.retentionDays, base.storage.retentionDays, 1, 3_650),
+      maxTotalBytes: finite(
+        storage.maxTotalBytes,
+        base.storage.maxTotalBytes,
+        16 * 1024 * 1024,
+        10 * 1024 * 1024 * 1024,
+      ),
     },
     retrieval: {
       enabled: bool(retrieval.enabled, base.retrieval.enabled),
@@ -207,7 +243,6 @@ export function parseContinuityConfig(value: unknown, base = DEFAULT_CONTINUITY_
       maxBytes: finite(blobs.maxBytes, base.blobs.maxBytes, 64 * 1024, 100 * 1024 * 1024),
     },
     continuation: {
-      afterCompaction: bool(continuation.afterCompaction, base.continuation.afterCompaction),
       afterLengthStop: bool(continuation.afterLengthStop, base.continuation.afterLengthStop),
       afterIdleUnfinished: bool(continuation.afterIdleUnfinished, base.continuation.afterIdleUnfinished),
       afterSessionResume: bool(continuation.afterSessionResume, base.continuation.afterSessionResume),
@@ -227,9 +262,6 @@ export function continuityAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }
 
-export function continuityConfigPaths(cwd: string): { global: string; project: string } {
-  return {
-    global: join(continuityAgentDir(), "continuity.json"),
-    project: join(cwd, CONFIG_DIR_NAME, "continuity.json"),
-  };
+export function continuityConfigPath(): string {
+  return join(continuityAgentDir(), "continuity.json");
 }
