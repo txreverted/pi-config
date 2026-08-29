@@ -2,11 +2,11 @@
 description: Audit core behavior and implementation size
 argument-hint: "[scope]"
 ---
-Audit implementation. No edits unless asked.
+No edits unless asked.
 
 Scope: ${ARGUMENTS:-entire repository}.
 
-First explore entire codebase and read all `AGENTS.md`. Before reporting, fully understand its architecture, config, dependencies, tests, and every scoped caller/input/state/output/failure path. Derive evidenced requirements, not assumptions. Find the owner and smallest root fix/deletion.
+Start with `README.md` as the repository map. Read all `AGENTS.md` files that apply to the scope. Trace the scoped implementation through its transitive callers, inputs, state, outputs, failure paths, dependencies, and focused tests. Derive evidenced requirements, not assumptions. Find the owner and smallest root fix/deletion.
 
 Report only:
 
@@ -20,4 +20,4 @@ Exclude theoretical hardening, unmeasured performance, speculative scale/flexibi
 
 Order findings by impact. Each: exact file plus symbol or line; evidence; requirement impact, risk, or maintenance/test gap; smallest deletion/reuse/fix; focused check.
 
-Cleanup separate; only concrete reduction now. No scores or invention. With no justified finding, report no change needed.
+Cleanup separate. No scores or invention. With no justified finding, report no change needed.
