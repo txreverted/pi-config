@@ -30,7 +30,8 @@ test("web extension registers only focused search and fetch tools", () => {
   assert.deepEqual([...tools.keys()], ["web_search", "web_fetch"]);
 
   const search = tools.get("web_search");
-  assert.match(search.description, /Firecrawl Keyless when FIRECRAWL_API_KEY is unset/);
+  assert.match(search.description, /experimental, undocumented Keyless/);
+  assert.match(search.description, /supported Firecrawl v2 usage requires a key/);
   assert.match(search.promptGuidelines.join("\n"), /untrusted data/);
   assert.equal(Value.Check(search.parameters, { query: "current Node release" }), true);
   assert.equal(Value.Check(search.parameters, { query: "test", limit: 11 }), false);
@@ -38,12 +39,13 @@ test("web extension registers only focused search and fetch tools", () => {
   assert.equal(Value.Check(search.parameters, { query: "test", category: "images" }), false);
   assert.equal(Value.Check(search.parameters, { query: "test", extra: true }), false);
   assert.deepEqual(search.parameters.properties.recency.enum, ["hour", "day", "week", "month", "year"]);
-  assert.deepEqual(search.parameters.properties.category.enum, ["github", "research", "pdf", "developer"]);
+  assert.deepEqual(search.parameters.properties.category.enum, ["developer", "research", "pdf"]);
   assert.equal(search.parameters.properties.recency.anyOf, undefined);
 
   const fetch = tools.get("web_fetch");
   assert.match(fetch.description, /2,000 lines or 50KB/);
   assert.match(fetch.promptGuidelines.join("\n"), /selected search results/);
+  assert.match(fetch.promptGuidelines.join("\n"), /private, authenticated, or signed URLs/);
   assert.equal(Value.Check(fetch.parameters, { url: "https://example.com" }), true);
   assert.equal(Value.Check(fetch.parameters, { url: "https://example.com", fresh: true }), true);
   assert.equal(Value.Check(fetch.parameters, { url: "https://example.com", fresh: "yes" }), false);
