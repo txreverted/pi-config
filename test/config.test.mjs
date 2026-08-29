@@ -70,6 +70,7 @@ const packedPaths = [
   "assets/pi-config.png",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
+  "extensions/bounded-output.ts",
   "extensions/caveman.ts",
   "extensions/continuity-archive.ts",
   "extensions/continuity-context.ts",

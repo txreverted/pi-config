@@ -1,21 +1,17 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { BlockList, isIP } from "node:net";
 import { TextDecoder } from "node:util";
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   formatSize,
-  truncateHead,
   type TruncationResult,
-  withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
+import { boundToolOutput } from "./bounded-output.ts";
 import { safeDisplayLine, safeDisplayText } from "./text-safety.ts";
 
 const API_URL = "https://api.firecrawl.dev/v2";
 // ponytail: API responses are capped at 10MB; raise when legitimate pages exceed it.
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
+const MAX_RETRY_DELAY_MS = 30_000;
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const RECENCY = {
   hour: "qdr:h",
@@ -25,6 +21,55 @@ const RECENCY = {
   year: "qdr:y",
 } as const;
 
+const NON_PUBLIC_IPS = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 3],
+] as const) {
+  NON_PUBLIC_IPS.addSubnet(network, prefix, "ipv4");
+  NON_PUBLIC_IPS.addSubnet(`::ffff:${network}`, 96 + prefix, "ipv6");
+}
+for (const [network, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001:2::", 48],
+  ["2001:db8::", 32],
+  ["3fff::", 20],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8],
+] as const) {
+  NON_PUBLIC_IPS.addSubnet(network, prefix, "ipv6");
+}
+
+const NON_PUBLIC_HOST_SUFFIXES = [".example", ".home.arpa", ".internal", ".invalid", ".local", ".localhost", ".test"];
+const PRIVATE_QUERY_KEYS = new Set([
+  "access_token",
+  "api-key",
+  "api_key",
+  "apikey",
+  "auth",
+  "authorization",
+  "credential",
+  "credentials",
+  "jwt",
+  "password",
+  "token",
+]);
+
 export const WEB_LIMITS = {
   queryCharacters: 500,
   results: { default: 5, min: 1, max: 10 },
@@ -33,7 +78,7 @@ export const WEB_LIMITS = {
 } as const;
 
 export const WEB_RECENCIES = Object.keys(RECENCY) as Array<keyof typeof RECENCY>;
-export const WEB_CATEGORIES = ["github", "research", "pdf", "developer"] as const;
+export const WEB_CATEGORIES = ["developer", "research", "pdf"] as const;
 
 export interface WebSearchInput {
   query: string;
@@ -89,12 +134,6 @@ interface RequestOptions {
   timeout: number;
 }
 
-interface BoundedOutput {
-  text: string;
-  truncation?: TruncationResult;
-  fullOutputPath?: string;
-}
-
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -119,6 +158,32 @@ function validHttpUrl(value: string, name: string): string {
   if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
     throw new Error(`${name} must be an absolute HTTP or HTTPS URL without credentials`);
   }
+  return url.href;
+}
+
+function validPublicHttpUrl(value: string, name: string): string {
+  const url = new URL(validHttpUrl(value, name));
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  const addressType = isIP(hostname);
+  const nonPublicAddress = addressType !== 0 && NON_PUBLIC_IPS.check(hostname, addressType === 4 ? "ipv4" : "ipv6");
+  const nonPublicName = addressType === 0 && (
+    !hostname.includes(".") ||
+    hostname === "localhost" ||
+    NON_PUBLIC_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
+  );
+  if (nonPublicAddress || nonPublicName) throw new Error(`${name} must use a public hostname`);
+  if (addressType === 0) url.hostname = hostname;
+
+  const queryKeys = new Set([...url.searchParams.keys()].map((key) => key.toLowerCase()));
+  const has = (...keys: string[]) => keys.every((key) => queryKeys.has(key));
+  const signed = queryKeys.has("x-amz-signature") || queryKeys.has("x-goog-signature") ||
+    (has("sig", "sv") && ["se", "sp", "sr"].some((key) => queryKeys.has(key))) ||
+    (has("signature", "expires") && ["awsaccesskeyid", "googleaccessid", "key-pair-id"].some((key) => queryKeys.has(key))) ||
+    has("signature", "policy", "key-pair-id");
+  if ([...queryKeys].some((key) => PRIVATE_QUERY_KEYS.has(key)) || signed) {
+    throw new Error(`${name} must not contain authentication or signed-access query parameters`);
+  }
+  url.hash = "";
   return url.href;
 }
 
@@ -174,11 +239,11 @@ function retryDelay(response: Response, attempt: number, random: () => number): 
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, MAX_RETRY_DELAY_MS);
     const timestamp = Date.parse(retryAfter);
-    if (Number.isFinite(timestamp)) return Math.max(0, timestamp - Date.now());
+    if (Number.isFinite(timestamp)) return Math.min(Math.max(0, timestamp - Date.now()), MAX_RETRY_DELAY_MS);
   }
-  return Math.min(2 ** attempt, 30) * 1_000 + random() * 1_000;
+  return Math.min(Math.max(0, 2 ** attempt * 1_000 + random() * 1_000), MAX_RETRY_DELAY_MS);
 }
 
 async function readBoundedBody(response: Response): Promise<string> {
@@ -224,32 +289,17 @@ function apiError(status: number, payload: Record<string, unknown> | undefined, 
   if (status === 401) {
     return new Error(apiKey
       ? "Firecrawl authentication failed. Check FIRECRAWL_API_KEY and restart Pi."
-      : "Firecrawl Keyless is unavailable for this request. Set FIRECRAWL_API_KEY and restart Pi.");
+      : "Experimental, undocumented Firecrawl Keyless is unavailable. Supported Firecrawl v2 usage requires FIRECRAWL_API_KEY.");
   }
   if (status === 402) return new Error("Firecrawl credits are exhausted or billing is not configured.");
   if (status === 403) {
     return new Error(apiKey
       ? "Firecrawl denied this request. Check the API key's endpoint and format restrictions."
-      : "Firecrawl denied keyless access because of an IP or free-tier limit. Set FIRECRAWL_API_KEY and restart Pi.");
+      : "Firecrawl denied experimental, undocumented Keyless access. Supported Firecrawl v2 usage requires FIRECRAWL_API_KEY.");
   }
   if (status === 429) return new Error("Firecrawl rate or concurrency limit reached. Retry later.");
   const message = safeErrorMessage(payload?.error ?? `HTTP ${status}`, apiKey);
   return new Error(`Firecrawl request failed (HTTP ${status}): ${message}`);
-}
-
-async function boundToolOutput(output: string, prefix: string): Promise<BoundedOutput> {
-  const initial = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
-  if (!initial.truncated) return { text: output };
-
-  const directory = await mkdtemp(join(tmpdir(), `${prefix}-`));
-  const fullOutputPath = join(directory, "output.md");
-  await withFileMutationQueue(fullOutputPath, () => writeFile(fullOutputPath, output, "utf8"));
-  const notice = `\n\n[Output truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}. Full output saved to: ${fullOutputPath}]`;
-  const bounded = truncateHead(output, {
-    maxBytes: DEFAULT_MAX_BYTES - Buffer.byteLength(notice, "utf8"),
-    maxLines: DEFAULT_MAX_LINES - notice.split("\n").length + 1,
-  });
-  return { text: bounded.content + notice, truncation: initial, fullOutputPath };
 }
 
 export function createFirecrawlClient(options: ClientOptions = {}) {
@@ -331,6 +381,7 @@ export function createFirecrawlClient(options: ClientOptions = {}) {
     const web = Array.isArray(data.web) ? data.web : [];
     const results: SearchResult[] = [];
     for (const value of web) {
+      if (results.length >= limit) break;
       const item = record(value);
       const rawUrl = optionalString(item?.url);
       if (!item || !rawUrl) continue;
@@ -378,7 +429,7 @@ export function createFirecrawlClient(options: ClientOptions = {}) {
   }
 
   async function fetchPage(input: WebFetchInput, signal?: AbortSignal): Promise<{ text: string; details: WebFetchDetails }> {
-    const requestedUrl = validHttpUrl(safeDisplayLine(input.url), "Web page URL");
+    const requestedUrl = validPublicHttpUrl(safeDisplayLine(input.url), "Web page URL");
     const payload = await post("/scrape", {
       url: requestedUrl,
       formats: ["markdown"],
