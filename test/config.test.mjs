@@ -58,7 +58,6 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/web.ts",
-  "./extensions/continuity.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
   "./extensions/caveman.ts",
@@ -71,12 +70,6 @@ const packedPaths = [
   "extensions/ask.ts",
   "extensions/bounded-output.ts",
   "extensions/caveman.ts",
-  "extensions/continuity-archive.ts",
-  "extensions/continuity-context.ts",
-  "extensions/continuity-runtime.ts",
-  "extensions/continuity-state.ts",
-  "extensions/continuity-types.ts",
-  "extensions/continuity.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
@@ -346,22 +339,6 @@ test("CI and the human guide match runtime scope", () => {
   assert.match(readme, /isolated offline Pi state/);
   assert.match(readme, /normalized to one line and stop at 2,000 UTF-8 bytes/);
   assert.match(readme, /Firecrawl-backed `web_search`/);
-  assert.match(readme, /automatically checkpoints unfinished work/);
-  assert.match(readme, /Pi JSONL remains canonical/);
-  assert.match(readme, /Pi owns \[native compaction\]/);
-  assert.match(readme, /Config is global-only at `continuity\.json`/);
-  assert.match(readme, /retain derived data for 30 days, cap it at 256 MiB, keep full-output blobs off/);
-  assert.match(readme, /"retentionDays": 30/);
-  assert.match(readme, /"maxTotalBytes": 268435456/);
-  assert.match(readme, /"enabled": false/);
-  assert.match(readme, /"afterLengthStop": true/);
-  assert.match(readme, /"afterIdleUnfinished": false/);
-  assert.match(readme, /"afterSessionResume": false/);
-  assert.match(readme, /pause` stops new derived writes, injected context, checkpoints, and automatic turns/);
-  assert.match(readme, /Read-only recall and state remain available\. Resume does not backfill/);
-  assert.match(readme, /purge` asks for confirmation, then deletes all derived continuity data without touching Pi JSONL/);
-  assert.doesNotMatch(readme, /\.pi\/continuity\.json|afterCompaction|"compaction"/);
-  assert.match(readme, /automatically resumes after model length stops/);
   assert.match(readme, /automatically try experimental, undocumented Firecrawl Keyless/);
   assert.match(readme, /`developer`, `research`, and `pdf` categories/);
   assert.match(readme, /send queries and URLs to Firecrawl/);
