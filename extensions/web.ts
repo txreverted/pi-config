@@ -22,7 +22,7 @@ export default function webExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "web_search",
     label: "web search",
-    description: `Search the live web through Firecrawl and return query-relevant passages with source URLs. Returns 1-${WEB_LIMITS.results.max} web results. Automatically tries experimental, undocumented Keyless when FIRECRAWL_API_KEY is unset; supported Firecrawl v2 usage requires a key.`,
+    description: `Search the live web through Firecrawl and return query-relevant passages with source URLs. Returns 1-${WEB_LIMITS.results.max} web results. Uses Keyless when FIRECRAWL_API_KEY is absent or blank; a supplied key uses your account.`,
     promptSnippet: "Search the live web through Firecrawl and return cited results",
     promptGuidelines: [
       "Use web_search for current or external facts that repository evidence cannot establish.",
@@ -58,7 +58,7 @@ export default function webExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "web_fetch",
     label: "web fetch",
-    description: "Fetch one public HTTP or HTTPS page through Firecrawl as main-content Markdown. Output is truncated to 2,000 lines or 50KB; complete truncated output is saved to a temporary file. Automatically tries experimental, undocumented Keyless without FIRECRAWL_API_KEY; supported Firecrawl v2 usage requires a key.",
+    description: "Fetch one public HTTP or HTTPS page through Firecrawl as main-content Markdown. Output is truncated to 2,000 lines or 50KB; complete truncated output is saved to a temporary file. Uses Keyless when FIRECRAWL_API_KEY is absent or blank; a supplied key uses your account.",
     promptSnippet: "Fetch a selected web page through Firecrawl as Markdown",
     promptGuidelines: [
       "Use web_fetch on selected search results before relying on details absent from web_search passages.",
