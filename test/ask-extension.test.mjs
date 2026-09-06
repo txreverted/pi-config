@@ -71,6 +71,7 @@ test("TUI single choice pauses for review and returns the selected label", async
 
   assert.equal(calls[0].choices[0], "□ 1. Small │ Smallest useful change");
   assert.equal(calls[1].title, "Review answers");
+  assert.equal(calls[1].choices[0], "Edit 1/1 │ Scope: Small");
   assert.match(result.content[0].text, /Answer: Small/);
   assert.deepEqual(result.details.answers[0].optionIndexes, [1]);
   assert.equal(result.details.cancelled, false);
@@ -92,6 +93,7 @@ test("RPC supports multi-select and an automatic custom answer", async () => {
           return choices.at(-2);
         }
         if (selection === 3) assert.equal(choices.at(-2), "■ Other");
+        if (selection === 4) assert.equal(choices[0], "Edit 1/1 │ Scope: Small, Also mobile");
         return choices.at(-1);
       },
       input: async (_prompt, shownPlaceholder) => {
@@ -173,12 +175,97 @@ test("RPC review can revise an earlier answer", async () => {
           assert.equal(choices[0], "■ 1. Small │ Smallest useful change");
           return choices[1];
         }
+        assert.deepEqual(choices, ["Edit 1/2 │ Scope: Complete", "Edit 2/2 │ Target: Web", "Submit answers"]);
         return choices.at(-1);
       },
     },
   });
   assert.deepEqual(result.details.answers.map(({ answer }) => answer), ["Complete", "Web"]);
 });
+
+for (const mode of ["tui", "rpc"]) {
+  test(`${mode} review keeps duplicate headers distinct and recomputes revised answers`, async () => {
+    const { tool } = setup();
+    const questions = [
+      input().questions[0],
+      { ...input().questions[0], question: "Which additional scope?" },
+    ];
+    let step = 0;
+    const result = await tool.execute("call", { questions }, undefined, undefined, {
+      mode,
+      hasUI: true,
+      ui: {
+        select: async (_title, choices) => {
+          step++;
+          if (step === 1) return choices[0];
+          if (step === 2) return choices[1];
+          if (step === 3) {
+            assert.deepEqual(choices, ["Edit 1/2 │ Scope: Small", "Edit 2/2 │ Scope: Complete", "Submit answers"]);
+            return choices[0];
+          }
+          if (step === 4) return choices[1];
+          assert.deepEqual(choices, ["Edit 1/2 │ Scope: Complete", "Edit 2/2 │ Scope: Complete", "Submit answers"]);
+          return choices.at(-1);
+        },
+      },
+    });
+    assert.equal(step, 5);
+    assert.deepEqual(result.details.answers.map(({ answer }) => answer), ["Complete", "Complete"]);
+  });
+
+  test(`${mode} review sanitizes and bounds Unicode multi-select previews without shortening stored answers`, async () => {
+    const { tool } = setup();
+    const custom = "🦊".repeat(200);
+    let step = 0;
+    const result = await tool.execute("call", input({ multiSelect: true }), undefined, undefined, {
+      mode,
+      hasUI: true,
+      ui: {
+        input: async () => `\u001b[31m${custom}\u001b[0m\u202e`,
+        select: async (_title, choices) => {
+          step++;
+          if (step === 1) return choices[1];
+          if (step === 2) return choices[0];
+          if (step === 3) return choices.at(-2);
+          if (step === 4) return choices.at(-1);
+          const preview = choices[0].slice("Edit 1/1 │ Scope: ".length);
+          const prefix = "Small, Complete, ";
+          assert.equal(preview, prefix + "🦊".repeat(157 - prefix.length) + "...");
+          assert.equal(Array.from(preview).length, 160);
+          assert.doesNotMatch(preview, /[\u001b\u202e]/);
+          return choices.at(-1);
+        },
+      },
+    });
+    assert.equal(step, 5);
+    assert.equal(result.details.answers[0].answer, `Small, Complete, ${custom}`);
+    assert.deepEqual(result.details.answers[0].optionIndexes, [1, 2]);
+    assert.ok(result.content[0].text.includes(custom));
+  });
+
+  test(`${mode} review preserves an exact 160-character preview and discards answers on cancellation`, async () => {
+    const { tool } = setup();
+    const custom = "界".repeat(160);
+    let step = 0;
+    const result = await tool.execute("call", input(), undefined, undefined, {
+      mode,
+      hasUI: true,
+      ui: {
+        input: async () => custom,
+        select: async (_title, choices) => {
+          step++;
+          if (step === 1) return choices.at(-1);
+          assert.equal(choices[0], `Edit 1/1 │ Scope: ${custom}`);
+          return undefined;
+        },
+      },
+    });
+    assert.equal(step, 2);
+    assert.equal(result.details.cancelled, true);
+    assert.deepEqual(result.details.answers, []);
+    assert.ok(!result.content[0].text.includes(custom));
+  });
+}
 
 test("native dialogs clear a blank custom revision and wait for a valid answer", async () => {
   const { tool } = setup();

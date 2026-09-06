@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { safeDisplayLine } from "./text-safety.ts";
 import {
   ASK_LIMITS,
   AskState,
@@ -78,7 +79,11 @@ async function askQuestions(questions: AskQuestion[], signal: AbortSignal | unde
   };
   while (true) {
     if (state.review) {
-      const edits = questions.map((question, index) => `Edit ${index + 1}/${questions.length} │ ${question.header}`);
+      const answers = state.answers();
+      const edits = questions.map((question, index) => {
+        const answer = answers.find((entry) => entry.question === question.question)?.answer ?? "Unanswered";
+        return `Edit ${index + 1}/${questions.length} │ ${question.header}: ${safeDisplayLine(answer, 160)}`;
+      });
       const submit = "Submit answers";
       const selected = await ctx.ui.select("Review answers", [...edits, submit], dialogOptions);
       if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
