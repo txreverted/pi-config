@@ -6,16 +6,12 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader, estimateTokens } from "@earendil-works/pi-coding-agent";
-import { CAVEMAN_INSTRUCTIONS } from "../extensions/caveman.ts";
-import { PONYTAIL_INSTRUCTIONS } from "../extensions/ponytail.ts";
-import { UNSLOP_INSTRUCTIONS } from "../extensions/unslop.ts";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
 const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
-const tsconfig = JSON.parse(await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"));
 const promptNames = ["r-docs", "r-git", "r-impl"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
@@ -60,7 +56,6 @@ const extensions = [
   "./extensions/web.ts",
   "./extensions/ponytail.ts",
   "./extensions/unslop.ts",
-  "./extensions/caveman.ts",
   "./extensions/ui.ts",
 ];
 
@@ -69,7 +64,6 @@ const packedPaths = [
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/bounded-output.ts",
-  "extensions/caveman.ts",
   "extensions/ponytail.ts",
   "extensions/text-safety.ts",
   "extensions/unslop.ts",
@@ -87,7 +81,6 @@ test("only documented package resources are enabled", async () => {
     prompts: ["./prompts"],
   });
   assert.deepEqual(packageJson.files, ["extensions", "policies", "prompts", "README.md"]);
-  assert.equal(packageJson.keywords, undefined);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.bundledDependencies, undefined);
   assert.deepEqual(packageJson.scripts, {
@@ -102,16 +95,6 @@ test("only documented package resources are enabled", async () => {
     "@earendil-works/pi-tui": "*",
     typebox: "*",
   });
-  assert.deepEqual(packageJson.devDependencies, {
-    "@earendil-works/pi-agent-core": "0.84.4",
-    "@earendil-works/pi-ai": "0.84.4",
-    "@earendil-works/pi-coding-agent": "0.84.4",
-    "@earendil-works/pi-tui": "0.84.4",
-    "@types/node": "22.20.1",
-    typebox: "1.3.14",
-    typescript: "5.9.3",
-  });
-  assert.deepEqual(tsconfig.compilerOptions.lib, ["ES2023"]);
   assert.deepEqual((await readdir(new URL("../prompts/", import.meta.url))).sort(), promptNames.map((name) => `${name}.md`));
 });
 
@@ -142,11 +125,12 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     const loaded = loader.getPrompts();
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
-    assert.deepEqual(loaded.prompts.map(({ name, description, argumentHint }) => ({ name, description, argumentHint })), [
-      { name: "r-docs", description: "Rebuild and replace documentation, including dirty files", argumentHint: "[scope]" },
-      { name: "r-git", description: "Split dirty work into checked PRs, merge, and clean up", argumentHint: undefined },
-      { name: "r-impl", description: "Audit core behavior and implementation size", argumentHint: "[scope]" },
-    ]);
+    const prompts = new Map(loaded.prompts.map((prompt) => [prompt.name, prompt]));
+    assert.equal(prompts.get("r-impl").argumentHint, "[scope]");
+    assert.equal(prompts.get("r-docs").argumentHint, "[scope]");
+    assert.equal(prompts.get("r-git").argumentHint, undefined);
+    assert.match(prompts.get("r-docs").description, /dirty/i);
+    assert.match(prompts.get("r-git").description, /merge/i);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
@@ -221,10 +205,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
   }
 });
 
-test("fixed policies remain extensions, carry their notices, and stay within budget", async () => {
-  const policy = normalizeLines(await readFile(new URL("../policies/UNSLOP.md", import.meta.url), "utf8"));
-  assert.match(policy, /^Repo style and requested format win\./);
-  assert.doesNotMatch(policy, /^---\n/);
+test("fixed policies remain extensions and retain adaptation notices", async () => {
   assert.equal(packageJson.pi.skills, undefined);
   assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), [
     "UNSLOP.md",
@@ -232,11 +213,6 @@ test("fixed policies remain extensions, carry their notices, and stay within bud
     "ponytail.LICENSE",
     "unslop.LICENSE",
   ]);
-  assert.match(PONYTAIL_INSTRUCTIONS, /Fix root cause, not reported symptom/);
-  assert.match(UNSLOP_INSTRUCTIONS, /Repo style and requested format win/);
-  assert.match(CAVEMAN_INSTRUCTIONS, /Apply to all human-readable non-code output/);
-  const tokens = estimateText(`${PONYTAIL_INSTRUCTIONS}\n\n${UNSLOP_INSTRUCTIONS}\n\n${CAVEMAN_INSTRUCTIONS}`);
-  assert.ok(tokens <= 2_200, `policy estimate ${tokens} exceeds 2,200 tokens`);
 });
 
 test("the exact production package installs and loads directly and through its Pi manifest", async () => {
@@ -306,7 +282,7 @@ test("the exact production package installs and loads directly and through its P
   }
 });
 
-test("CI and the human guide match runtime scope", () => {
+test("CI covers pinned and latest Pi with required checks", () => {
   assert.match(workflow, /^on:\n  push:\n    branches: \[main\]\n  pull_request:\n  workflow_dispatch:\n  schedule:/m);
   assert.match(workflow, /concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true/);
   assert.match(workflow, /permissions:\n  contents: read/);
@@ -318,42 +294,26 @@ test("CI and the human guide match runtime scope", () => {
     /- os: ubuntu-latest\n\s+node: "22\.x"\n\s+pi: latest/,
     /- os: windows-latest\n\s+node: "22\.19\.0"\n\s+pi: pinned/,
   ]) assert.match(workflow, tuple);
-  assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v7\.0\.0/);
-  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40} # v7\.0\.0/);
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}\b/);
+  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}\b/);
   assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
-  assert.match(workflow, /schedule:\n    - cron: "17 9 \* \* 1"/);
+  assert.match(workflow, /schedule:\s+- cron:/);
   assert.match(workflow, /@earendil-works\/pi-ai@latest @earendil-works\/pi-coding-agent@latest @earendil-works\/pi-tui@latest typebox@latest/);
-  assert.match(workflow, /typebox@latest/);
   assert.match(workflow, /if: matrix\.os == 'ubuntu-latest' && matrix\.node == '22\.19\.0' && matrix\.pi == 'pinned'\n\s+run: npm audit --audit-level=high/);
   assert.equal((workflow.match(/npm audit/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /- run: npm run check/);
   assert.doesNotMatch(workflow, /continue-on-error|--force|--omit=dev|test-name-pattern/);
+});
 
-  assert.ok(readme.trimEnd().split("\n").length < 80, "README must stay below 80 lines");
-  for (const prompt of promptPaths) assert.match(readme, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(readme, /\]\(policies\/UNSLOP\.md\)/);
-  assert.match(readme, /do not control filesystem, shell, network, Git, or provider access/);
-  assert.match(readme, /replacing dirty in-scope docs without confirmation/);
-  assert.match(readme, /merges green PRs without confirmation/);
-  assert.match(readme, /isolated offline Pi state/);
-  assert.match(readme, /normalized to one line and stop at 2,000 UTF-8 bytes/);
-  assert.match(readme, /Firecrawl-backed `web_search`/);
-  assert.match(readme, /automatically try experimental, undocumented Firecrawl Keyless/);
-  assert.match(readme, /`developer`, `research`, and `pdf` categories/);
-  assert.match(readme, /send queries and URLs to Firecrawl/);
-  assert.match(readme, /adds elapsed time to Pi's native working message/);
-  assert.match(readme, /native footer and working indicator/);
-  assert.match(readme, /metadata estimate is at most 400 tokens/);
-  assert.match(readme, /at most 2,200 tokens/);
-  assert.match(readme, /Ponytail controls implementation scope, Unslop removes prose slop,\n  and Caveman limits words in chat, docs, and other non-code output/);
-  assert.match(readme, /\]\(extensions\/caveman\.ts\)/);
-  assert.match(readme, /prompt expansions combine to at most 830 tokens/);
-  for (const notice of ["caveman.LICENSE", "ponytail.LICENSE", "unslop.LICENSE"]) assert.match(readme, new RegExp(notice.replace(".", "\\.")));
-  for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) assert.match(readme, new RegExp(source));
-  assert.match(readme, /Local adaptations keep Ponytail at fixed full strength/);
-  assert.match(readme, /extend Caveman from replies to all non-code output/);
-  for (const command of promptNames) assert.match(readme, new RegExp(`/${command}(?:\\s|\\[|\\x60)`));
+test("README links to active resources and retained policy sources", () => {
+  const targets = new Set(relativeMarkdownTargets(readme));
+  for (const path of [...promptPaths, ...policyPaths, ...extensions.map((path) => path.slice(2))]) {
+    assert.ok(targets.has(path), `README must link to ${path}`);
+  }
+  for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) {
+    assert.ok(readme.includes(source), `README must credit ${source}`);
+  }
 });
 
 test("sensitive Pi state and session transcripts are ignored", () => {

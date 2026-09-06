@@ -23,7 +23,6 @@
       "./extensions/web.ts",
       "./extensions/ponytail.ts",
       "./extensions/unslop.ts",
-      "./extensions/caveman.ts",
       "./extensions/ui.ts"
     ],
     "prompts": [
