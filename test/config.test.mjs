@@ -12,7 +12,7 @@ const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
 const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
-const promptNames = ["r-docs", "r-git", "r-impl"];
+const promptNames = ["r-audit", "r-docs-rebuild", "r-ship"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
   "policies/caveman.LICENSE",
@@ -126,15 +126,18 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.deepEqual(loaded.diagnostics, []);
     assert.deepEqual(loaded.prompts.map(({ name }) => name), promptNames);
     const prompts = new Map(loaded.prompts.map((prompt) => [prompt.name, prompt]));
-    assert.equal(prompts.get("r-impl").argumentHint, "[scope]");
-    assert.equal(prompts.get("r-docs").argumentHint, "[scope]");
-    assert.equal(prompts.get("r-git").argumentHint, undefined);
-    assert.match(prompts.get("r-docs").description, /dirty/i);
-    assert.match(prompts.get("r-git").description, /merge/i);
+    assert.equal(prompts.get("r-audit").argumentHint, "[scope]");
+    assert.equal(prompts.get("r-docs-rebuild").argumentHint, "[scope]");
+    assert.equal(prompts.get("r-ship").argumentHint, undefined);
+    assert.match(prompts.get("r-docs-rebuild").description, /dirty/i);
+    assert.match(prompts.get("r-ship").description, /merge/i);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
     const { expandPromptTemplate } = await import(pathToFileURL(join(piDist, "core", "prompt-templates.js")).href);
-    const docs = expandPromptTemplate("/r-docs", loaded.prompts);
+    for (const removed of ["r-docs", "r-git", "r-impl"]) {
+      assert.equal(expandPromptTemplate(`/${removed}`, loaded.prompts), `/${removed}`);
+    }
+    const docs = expandPromptTemplate("/r-docs-rebuild", loaded.prompts);
     assertClauses(docs, [
       /Scope: entire repository/,
       /Dirty in-scope replacement needs no confirmation/,
@@ -149,9 +152,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       /No paid calls\/deploys\/migrations\/pushes\/publishes\/live operations/,
       /Verify claims\/commands\/paths\/links\/examples/,
     ]);
-    assert.match(expandPromptTemplate('/r-docs "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
+    assert.match(expandPromptTemplate('/r-docs-rebuild "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
 
-    const implementation = expandPromptTemplate("/r-impl", loaded.prompts);
+    const implementation = expandPromptTemplate("/r-audit", loaded.prompts);
     assertClauses(implementation, [
       /Scope: entire repository\./,
       /No edits unless asked/,
@@ -170,9 +173,9 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     ]);
     assert.doesNotMatch(implementation, /explore entire codebase/);
     assert.ok(implementation.indexOf("Start with") < implementation.indexOf("Report only:"));
-    assert.match(expandPromptTemplate("/r-impl extensions tests", loaded.prompts), /Scope: extensions tests\./);
+    assert.match(expandPromptTemplate("/r-audit extensions tests", loaded.prompts), /Scope: extensions tests\./);
 
-    const git = expandPromptTemplate("/r-git", loaded.prompts);
+    const git = expandPromptTemplate("/r-ship", loaded.prompts);
     assertClauses(git, [
       /Branch\/commit\/push\/PR\/merge allowed; do not confirm/,
       /staged\/unstaged\/untracked names first/,
@@ -190,11 +193,11 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     ]);
 
     const promptTokens = {
-      "r-docs": estimateText(docs),
-      "r-git": estimateText(git),
-      "r-impl": estimateText(implementation),
+      "r-docs-rebuild": estimateText(docs),
+      "r-ship": estimateText(git),
+      "r-audit": estimateText(implementation),
     };
-    const ceilings = { "r-docs": 340, "r-git": 220, "r-impl": 280 };
+    const ceilings = { "r-docs-rebuild": 340, "r-ship": 220, "r-audit": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
