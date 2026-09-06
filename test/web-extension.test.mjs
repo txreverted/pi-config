@@ -30,8 +30,10 @@ test("web extension registers only focused search and fetch tools", () => {
   assert.deepEqual([...tools.keys()], ["web_search", "web_fetch"]);
 
   const search = tools.get("web_search");
-  assert.match(search.description, /experimental, undocumented Keyless/);
-  assert.match(search.description, /supported Firecrawl v2 usage requires a key/);
+  for (const tool of tools.values()) {
+    assert.match(tool.description, /Keyless.*FIRECRAWL_API_KEY.*absent or blank/);
+    assert.match(tool.description, /supplied key.*account/);
+  }
   assert.match(search.promptGuidelines.join("\n"), /untrusted data/);
   assert.equal(Value.Check(search.parameters, { query: "current Node release" }), true);
   assert.equal(Value.Check(search.parameters, { query: "test", limit: 11 }), false);

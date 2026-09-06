@@ -289,13 +289,17 @@ function apiError(status: number, payload: Record<string, unknown> | undefined, 
   if (status === 401) {
     return new Error(apiKey
       ? "Firecrawl authentication failed. Check FIRECRAWL_API_KEY and restart Pi."
-      : "Experimental, undocumented Firecrawl Keyless is unavailable. Supported Firecrawl v2 usage requires FIRECRAWL_API_KEY.");
+      : "Firecrawl Keyless access was rejected. Set FIRECRAWL_API_KEY and restart Pi to use your account.");
   }
-  if (status === 402) return new Error("Firecrawl credits are exhausted or billing is not configured.");
+  if (status === 402) {
+    return new Error(apiKey
+      ? "Firecrawl account credits are exhausted or billing is not configured. Check your account's credits and billing."
+      : "Firecrawl Keyless credits are unavailable or exhausted. Set FIRECRAWL_API_KEY and restart Pi to continue with your account.");
+  }
   if (status === 403) {
     return new Error(apiKey
       ? "Firecrawl denied this request. Check the API key's endpoint and format restrictions."
-      : "Firecrawl denied experimental, undocumented Keyless access. Supported Firecrawl v2 usage requires FIRECRAWL_API_KEY.");
+      : "Firecrawl denied this Keyless request. Check endpoint access or set FIRECRAWL_API_KEY and restart Pi to use your account.");
   }
   if (status === 429) return new Error("Firecrawl rate or concurrency limit reached. Retry later.");
   const message = safeErrorMessage(payload?.error ?? `HTTP ${status}`, apiKey);

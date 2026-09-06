@@ -25,6 +25,108 @@ const searchPayload = {
   creditsUsed: 2,
 };
 
+const scrapePayload = { success: true, data: { markdown: "# Public page" } };
+const requests = [
+  ["search", { query: "public docs" }, searchPayload],
+  ["fetchPage", { url: "https://example.com" }, scrapePayload],
+];
+
+test("search and fetch use Keyless for absent or blank keys and prefer supplied keys", async () => {
+  for (const [method, input, payload] of requests) {
+    let configuredKey;
+    const headers = [];
+    const client = createFirecrawlClient({
+      getApiKey: () => configuredKey,
+      fetcher: async (_url, init) => {
+        headers.push(init.headers);
+        return jsonResponse(payload);
+      },
+    });
+    for (const key of [undefined, "", " \t ", "  fc-account-key  "]) {
+      configuredKey = key;
+      const result = await client[method](input);
+      assert.ok(result.text.length > 0);
+    }
+    assert.deepEqual(headers.map((header) => header.authorization), [undefined, undefined, undefined, "Bearer fc-account-key"]);
+    for (const header of headers.slice(0, 3)) assert.equal(Object.hasOwn(header, "authorization"), false);
+  }
+});
+
+test("exhausted Keyless or account credits fail once with distinct remedies", async () => {
+  for (const [method, input] of requests) {
+    for (const key of [undefined, "fc-account-key"]) {
+      let calls = 0;
+      const client = createFirecrawlClient({
+        getApiKey: () => key,
+        sleep: async () => assert.fail("credit exhaustion must not retry"),
+        fetcher: async (_url, init) => {
+          calls++;
+          assert.equal(init.headers.authorization, key ? `Bearer ${key}` : undefined);
+          return jsonResponse({ success: false, error: "Payment Required: Insufficient credits" }, { status: 402 });
+        },
+      });
+      await assert.rejects(() => client[method](input), (error) => {
+        if (key) {
+          assert.match(error.message, /account credits.*billing/i);
+          assert.doesNotMatch(error.message, /Keyless|fc-account-key/);
+        } else {
+          assert.match(error.message, /Keyless credits.*unavailable or exhausted/);
+          assert.match(error.message, /FIRECRAWL_API_KEY.*restart Pi/);
+        }
+        return true;
+      });
+      assert.equal(calls, 1);
+    }
+  }
+});
+
+test("access failures do not imply quota exhaustion or fall back from account to Keyless", async () => {
+  for (const status of [401, 403]) {
+    for (const key of [undefined, "fc-rejected-key"]) {
+      const headers = [];
+      const client = createFirecrawlClient({
+        getApiKey: () => key,
+        sleep: async () => assert.fail("access failures must not retry"),
+        fetcher: async (_url, init) => {
+          headers.push(init.headers.authorization);
+          return jsonResponse({ success: false, error: `Access denied ${key ?? ""}` }, { status });
+        },
+      });
+      await assert.rejects(() => client.search({ query: "public docs" }), (error) => {
+        assert.match(error.message, /Check|Set|set/);
+        assert.doesNotMatch(error.message, /exhaust|quota|fc-rejected-key/);
+        if (key) assert.doesNotMatch(error.message, /Keyless/);
+        else assert.match(error.message, /Keyless.*FIRECRAWL_API_KEY/);
+        return true;
+      });
+      assert.deepEqual(headers, [key ? `Bearer ${key}` : undefined]);
+    }
+  }
+});
+
+test("persistent Keyless rate limits stop after bounded retries without claiming credit exhaustion", async () => {
+  let calls = 0;
+  const delays = [];
+  const client = createFirecrawlClient({
+    getApiKey: () => undefined,
+    sleep: async (delay) => { delays.push(delay); },
+    fetcher: async () => {
+      calls++;
+      return jsonResponse({ success: false, error: "Rate limit exceeded" }, {
+        status: 429,
+        headers: { "retry-after": "1" },
+      });
+    },
+  });
+  await assert.rejects(() => client.search({ query: "public docs" }), (error) => {
+    assert.match(error.message, /rate or concurrency limit/i);
+    assert.doesNotMatch(error.message, /credits|monthly|exhausted/i);
+    return true;
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [1_000, 1_000]);
+});
+
 test("web search sends bounded Firecrawl v2 parameters and formats cited results", async () => {
   let request;
   const client = createFirecrawlClient({
@@ -170,7 +272,7 @@ test("Firecrawl errors are actionable and redact the API key", async () => {
     getApiKey: () => undefined,
     fetcher: async () => jsonResponse({ success: false, error: "suspicious IP" }, { status: 403 }),
   });
-  await assert.rejects(() => denied.search({ query: "test" }), /undocumented.*FIRECRAWL_API_KEY/);
+  await assert.rejects(() => denied.search({ query: "test" }), /Keyless.*FIRECRAWL_API_KEY/);
 
   const failed = createFirecrawlClient({
     getApiKey: () => secret,
