@@ -20,9 +20,7 @@
   "pi": {
     "extensions": [
       "./extensions/ask.ts",
-      "./extensions/web.ts",
-      "./extensions/policies.ts",
-      "./extensions/ui.ts"
+      "./extensions/policies.ts"
     ],
     "prompts": [
       "./prompts"

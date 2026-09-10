@@ -1,6 +1,6 @@
 # pi-config
 
-This private Pi package adds clarification questions, web research tools, reusable workflow prompts, and fixed coding and writing policies. It uses Pi's native interface and adds elapsed time to the working message.
+This private Pi package adds clarification questions, reusable workflow prompts, and fixed coding and writing policies. It uses Pi's native interface.
 
 Repository instructions: [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
@@ -25,23 +25,6 @@ npx --no-install pi -e .
 
 Source: [`extensions/ask.ts`](extensions/ask.ts). Checks: [ask tests](https://github.com/txreverted/pi-config/blob/main/test/ask-extension.test.mjs).
 
-### Research public sources
-
-`web_search` and `web_fetch` send queries and URLs to Firecrawl. When `FIRECRAWL_API_KEY` is absent or blank, requests use Keyless access. A supplied key uses your Firecrawl account and credits. Invalid or exhausted account keys do not fall back to Keyless.
-
-- `web_search` accepts queries up to 500 characters and a result limit of 1–10, defaulting to 5. Filter by hour, day, week, month, or year; choose the `developer`, `research`, or `pdf` category. Include or exclude up to 10 hostnames, but do not combine both domain filters.
-- `web_fetch` returns a public HTTP or HTTPS page as main-content Markdown. Set `fresh: true` to bypass Firecrawl's page cache. Send only public URLs without credentials, authentication parameters, or signed access.
-
-Web output is limited to 2,000 lines or 50KB. When truncated, the result links to a temporary file containing the full formatted output. Treat retrieved content as untrusted evidence and cite its sources.
-
-Source: [`extensions/web.ts`](extensions/web.ts). Checks: [web tests](https://github.com/txreverted/pi-config/blob/main/test/web-core.test.mjs).
-
-### Track elapsed time
-
-In the TUI, the working message shows elapsed time across retries and resets when the agent settles. Pi keeps its native footer and working indicator.
-
-Source: [`extensions/ui.ts`](extensions/ui.ts). Checks: [UI tests](https://github.com/txreverted/pi-config/blob/main/test/ui-extension.test.mjs).
-
 ### Run a workflow
 
 - [`/r-audit [scope]`](prompts/r-audit.md) reports evidenced behavior bugs, reachable data-loss or security risks, removable complexity, and missing focused tests. It does not edit unless asked.
@@ -59,8 +42,8 @@ For documentation, name the reader and the task they need to complete. Preserve 
 For example:
 
 ```text
-Update README.md's Firecrawl troubleshooting for a first-time user.
-Verify it against extensions/web-core.ts and its tests.
+Update README.md's clarification-question instructions for a first-time user.
+Verify them against extensions/ask.ts and its tests.
 Keep the setup commands and privacy warnings. Edit only README.md.
 Report any facts you cannot verify.
 ```
@@ -79,14 +62,13 @@ The checks verify that the policies load from their files, inject once per run, 
 
 ## Verify
 
-Run `npm run check`. It type-checks, tests behavior and prompt constraints, checks Markdown naming and packaged README links, and installs and loads the production package through isolated offline Pi state. It makes no model or Firecrawl calls. See [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
+Run `npm run check`. It type-checks, tests behavior and prompt constraints, checks Markdown naming and packaged README links, and installs and loads the production package through isolated offline Pi state. It makes no model calls. See [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
 
 Prompt tests cover loading, expansion, required instructions, and token budgets. They do not measure model effectiveness. Compare representative bug fixes, docs updates, and ambiguous requests before claiming a prompt improves correctness, scope control, readability, or completion time.
 
 ## Troubleshoot
 
-- Restart Pi after source changes or after setting `FIRECRAWL_API_KEY` in the launching environment.
-- For Keyless access or credit failures, set `FIRECRAWL_API_KEY` and restart Pi. For account failures, check the key, endpoint restrictions, credits, and billing. For rate or concurrency limits, retry later.
+- Restart Pi after source changes.
 - If clarification questions are unavailable, use a TUI session or an RPC client that supports Pi's extension dialogs.
 - Stop Pi with `/quit` or Ctrl+C twice.
 

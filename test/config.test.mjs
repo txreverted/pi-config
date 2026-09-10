@@ -54,21 +54,15 @@ async function markdownFiles(directory) {
 
 const extensions = [
   "./extensions/ask.ts",
-  "./extensions/web.ts",
   "./extensions/policies.ts",
-  "./extensions/ui.ts",
 ];
 
 const packedPaths = [
   "README.md",
   "extensions/ask-core.ts",
   "extensions/ask.ts",
-  "extensions/bounded-output.ts",
   "extensions/policies.ts",
   "extensions/text-safety.ts",
-  "extensions/ui.ts",
-  "extensions/web-core.ts",
-  "extensions/web.ts",
   "package.json",
   ...policyPaths,
   ...promptPaths,
