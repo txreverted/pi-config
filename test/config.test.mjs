@@ -6,12 +6,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DefaultResourceLoader, estimateTokens } from "@earendil-works/pi-coding-agent";
+import { parse as parseYaml } from "yaml";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const normalizeLines = (text) => text.replace(/\r\n?/g, "\n");
 const gitignore = normalizeLines(await readFile(new URL("../.gitignore", import.meta.url), "utf8"));
 const readme = normalizeLines(await readFile(new URL("../README.md", import.meta.url), "utf8"));
-const workflow = normalizeLines(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
+const workflow = parseYaml(await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8"));
 const promptNames = ["r-audit", "r-docs-rebuild", "r-ship"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
@@ -293,27 +294,39 @@ test("the exact production package installs and loads directly and through its P
 });
 
 test("CI covers pinned and latest Pi with required checks", () => {
-  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]\n  pull_request:\n  workflow_dispatch:\n  schedule:/m);
-  assert.match(workflow, /concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true/);
-  assert.match(workflow, /permissions:\n  contents: read/);
-  assert.match(workflow, /timeout-minutes: 10/);
-  assert.match(workflow, /fail-fast: false/);
-  assert.equal((workflow.match(/- os: /g) ?? []).length, 3);
-  for (const tuple of [
-    /- os: ubuntu-latest\n\s+node: "22\.19\.0"\n\s+pi: pinned/,
-    /- os: ubuntu-latest\n\s+node: "22\.x"\n\s+pi: latest/,
-    /- os: windows-latest\n\s+node: "22\.19\.0"\n\s+pi: pinned/,
-  ]) assert.match(workflow, tuple);
-  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}\b/);
-  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}\b/);
-  assert.match(workflow, /node-version: \$\{\{ matrix\.node \}\}/);
-  assert.match(workflow, /schedule:\s+- cron:/);
-  assert.match(workflow, /@earendil-works\/pi-ai@latest @earendil-works\/pi-coding-agent@latest @earendil-works\/pi-tui@latest typebox@latest/);
-  assert.match(workflow, /if: matrix\.os == 'ubuntu-latest' && matrix\.node == '22\.19\.0' && matrix\.pi == 'pinned'\n\s+run: npm audit --audit-level=high/);
-  assert.equal((workflow.match(/npm audit/g) ?? []).length, 1);
-  assert.doesNotMatch(workflow, /npm audit --omit=dev/);
-  assert.match(workflow, /- run: npm run check/);
-  assert.doesNotMatch(workflow, /continue-on-error|--force|--omit=dev|test-name-pattern/);
+  const minimumNode = packageJson.engines.node.replace(/^>=/, "");
+  assert.deepEqual(Object.keys(workflow.on).sort(), ["pull_request", "push", "schedule", "workflow_dispatch"]);
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+
+  const [job, ...otherJobs] = Object.values(workflow.jobs);
+  assert.deepEqual(otherJobs, []);
+  assert.equal(job["timeout-minutes"], 10);
+  assert.equal(job.strategy["fail-fast"], false);
+  assert.deepEqual(job.strategy.matrix.include, [
+    { os: "ubuntu-latest", node: minimumNode, pi: "pinned" },
+    { os: "ubuntu-latest", node: "22.x", pi: "latest" },
+    { os: "windows-latest", node: minimumNode, pi: "pinned" },
+  ]);
+
+  const runs = job.steps.map((step) => step.run ?? "");
+  for (const step of job.steps) {
+    if (step.uses) assert.match(step.uses, /^actions\/(?:checkout|setup-node)@[0-9a-f]{40}$/);
+    assert.doesNotMatch(step.run ?? "", /--force|--omit=dev|test-name-pattern/);
+    assert.equal(step["continue-on-error"], undefined);
+  }
+  assert.equal(job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")).with["node-version"], "${{ matrix.node }}");
+  assert.equal(runs.filter((run) => run.includes("npm audit")).length, 1);
+  assert.equal(
+    job.steps.find((step) => step.run?.includes("npm audit")).if,
+    `matrix.os == 'ubuntu-latest' && matrix.node == '${minimumNode}' && matrix.pi == 'pinned'`,
+  );
+  const latestInstall = job.steps.find((step) => step.run?.includes("@latest"));
+  assert.equal(latestInstall.if, "matrix.pi == 'latest'");
+  for (const name of Object.keys(packageJson.peerDependencies)) {
+    assert.ok(latestInstall.run.includes(`${name}@latest`), name);
+  }
+  assert.equal(runs.at(-1), "npm run check");
 });
 
 test("README links to active resources and retained policy sources", () => {
