@@ -21,8 +21,7 @@
     "extensions": [
       "./extensions/ask.ts",
       "./extensions/web.ts",
-      "./extensions/ponytail.ts",
-      "./extensions/unslop.ts",
+      "./extensions/policies.ts",
       "./extensions/ui.ts"
     ],
     "prompts": [

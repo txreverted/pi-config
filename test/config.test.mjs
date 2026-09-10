@@ -15,7 +15,7 @@ const workflow = normalizeLines(await readFile(new URL("../.github/workflows/che
 const promptNames = ["r-audit", "r-docs-rebuild", "r-ship"];
 const promptPaths = promptNames.map((name) => `prompts/${name}.md`);
 const policyPaths = [
-  "policies/caveman.LICENSE",
+  "policies/PONYTAIL.md",
   "policies/ponytail.LICENSE",
   "policies/unslop.LICENSE",
   "policies/UNSLOP.md",
@@ -54,8 +54,7 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/web.ts",
-  "./extensions/ponytail.ts",
-  "./extensions/unslop.ts",
+  "./extensions/policies.ts",
   "./extensions/ui.ts",
 ];
 
@@ -64,9 +63,8 @@ const packedPaths = [
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/bounded-output.ts",
-  "extensions/ponytail.ts",
+  "extensions/policies.ts",
   "extensions/text-safety.ts",
-  "extensions/unslop.ts",
   "extensions/ui.ts",
   "extensions/web-core.ts",
   "extensions/web.ts",
@@ -220,8 +218,8 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
 test("fixed policies remain extensions and retain adaptation notices", async () => {
   assert.equal(packageJson.pi.skills, undefined);
   assert.deepEqual((await readdir(new URL("../policies/", import.meta.url))).sort(), [
+    "PONYTAIL.md",
     "UNSLOP.md",
-    "caveman.LICENSE",
     "ponytail.LICENSE",
     "unslop.LICENSE",
   ]);
@@ -323,7 +321,7 @@ test("README links to active resources and retained policy sources", () => {
   for (const path of [...promptPaths, ...policyPaths, ...extensions.map((path) => path.slice(2))]) {
     assert.ok(targets.has(path), `README must link to ${path}`);
   }
-  for (const source of ["DietrichGebert/ponytail", "JuliusBrussee/caveman", "cursor/plugins"]) {
+  for (const source of ["DietrichGebert/ponytail", "cursor/plugins"]) {
     assert.ok(readme.includes(source), `README must credit ${source}`);
   }
 });
