@@ -129,7 +129,7 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     assert.equal(prompts.get("r-audit").argumentHint, "[scope]");
     assert.equal(prompts.get("r-docs-rebuild").argumentHint, "[scope]");
     assert.equal(prompts.get("r-ship").argumentHint, undefined);
-    assert.match(prompts.get("r-docs-rebuild").description, /dirty/i);
+    assert.match(prompts.get("r-docs-rebuild").description, /AGENTS\.md.*dirty/i);
     assert.match(prompts.get("r-ship").description, /merge/i);
 
     const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
@@ -139,20 +139,29 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
     }
     const docs = expandPromptTemplate("/r-docs-rebuild", loaded.prompts);
     assertClauses(docs, [
+      /Rebuild human docs and update existing `AGENTS\.md` files/,
       /Scope: entire repository/,
       /Dirty in-scope replacement needs no confirmation/,
       /tracked\/untracked\/dirty Markdown owner\/status/,
-      /Protect .*instructions.*runtime prompts\/policies.*generated\/frozen.*licenses\/notices.*ignored\/vendor.*unrelated changes/s,
-      /Old docs are leads, not evidence/,
+      /Protect other instruction files.*runtime prompts\/policies.*generated\/frozen.*licenses\/notices.*ignored\/vendor.*unrelated changes/s,
+      /Old human docs are leads, not evidence/,
+      /For in-scope `AGENTS\.md`: clarify wording and update evidenced stale facts\/references/,
+      /Preserve rule meaning, safety constraints, filenames, and directory scope/,
+      /Never delete these files or drop rules merely because code disagrees/,
+      /Report unresolved conflicts/,
       /Uppercase Markdown basenames; lowercase `\.md`\. Rename files\/references/,
       /Prepare all replacements before writes\/deletes/,
-      /Keep root `README\.md`; add task docs only if burdened/,
+      /Repository rules override defaults/,
+      /Keep root `README\.md`; add task docs only if permitted and needed/,
+      /Match the reader's technical background/,
+      /Keep prerequisites and necessary detail; no fixed line count/,
       /Write drafts, then delete only obsolete in-scope human docs/,
       /Edit Markdown only/,
       /No paid calls\/deploys\/migrations\/pushes\/publishes\/live operations/,
-      /Verify claims\/commands\/paths\/links\/examples/,
+      /Verify claims\/commands\/paths\/links\/examples; flag unverified facts/,
     ]);
     assert.match(expandPromptTemplate('/r-docs-rebuild "docs and examples"', loaded.prompts), /Scope: docs and examples\./);
+    assert.match(expandPromptTemplate('/r-docs-rebuild src/AGENTS.md', loaded.prompts), /Scope: src\/AGENTS\.md\./);
 
     const implementation = expandPromptTemplate("/r-audit", loaded.prompts);
     assertClauses(implementation, [
@@ -197,12 +206,12 @@ test("workflow prompts load and expand through Pi's built-in templates", async (
       "r-ship": estimateText(git),
       "r-audit": estimateText(implementation),
     };
-    const ceilings = { "r-docs-rebuild": 340, "r-ship": 220, "r-audit": 280 };
+    const ceilings = { "r-docs-rebuild": 420, "r-ship": 220, "r-audit": 280 };
     for (const name of promptNames) {
       assert.ok(promptTokens[name] <= ceilings[name], `${name} estimate ${promptTokens[name]} exceeds ${ceilings[name]}`);
     }
     const total = Object.values(promptTokens).reduce((sum, tokens) => sum + tokens, 0);
-    assert.ok(total <= 830, `prompt estimate ${total} exceeds 830 tokens`);
+    assert.ok(total <= 910, `prompt estimate ${total} exceeds 910 tokens`);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
