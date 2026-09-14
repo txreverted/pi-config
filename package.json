@@ -6,7 +6,6 @@
   "files": [
     "extensions",
     "policies",
-    "prompts",
     "README.md"
   ],
   "scripts": {
@@ -21,9 +20,6 @@
     "extensions": [
       "./extensions/ask.ts",
       "./extensions/policies.ts"
-    ],
-    "prompts": [
-      "./prompts"
     ]
   },
   "peerDependencies": {
