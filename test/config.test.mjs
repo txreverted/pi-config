@@ -43,6 +43,7 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/policies.ts",
+  "./extensions/orbio.ts",
 ];
 
 const packedPaths = [
@@ -50,6 +51,9 @@ const packedPaths = [
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/policies.ts",
+  "extensions/orbio.ts",
+  "extensions/orbio-models.ts",
+  "extensions/openrouter-catalog.ts",
   "extensions/text-safety.ts",
   "package.json",
   ...policyPaths,
@@ -179,6 +183,16 @@ test("the exact production package installs and loads directly and through its P
     directArgs.push("--list-models", "__pi_config_direct_resources__");
     assertLoaded(runPi(directArgs, "direct"));
     assertLoaded(runPi(["-e", packagePath, "--list-models", "__pi_config_package_manifest__"], "manifest"));
+
+    const orbioAgent = join(piState, "orbio", "agent");
+    await mkdir(orbioAgent, { recursive: true });
+    await writeFile(join(orbioAgent, "auth.json"), JSON.stringify({
+      orbio: { type: "api_key", key: "test-only-not-a-real-key" },
+    }));
+    const orbio = runPi(["-e", packagePath, "--list-models", "orbio"], "orbio");
+    assert.equal(orbio.status, 0, orbio.stderr || orbio.stdout);
+    assert.match(orbio.stdout, /orbio\s+stealth\/union-alpha/);
+    assert.doesNotMatch(orbio.stderr, /error|failed|exception/i);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

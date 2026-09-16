@@ -1,6 +1,6 @@
 # pi-config
 
-This private Pi package adds clarification questions and fixed coding and writing policies. It uses Pi's native interface.
+This private Pi package adds the Orbio provider, clarification questions, and fixed coding and writing policies. It uses Pi's native interface.
 
 Repository instructions: [`AGENTS.md`](https://github.com/txreverted/pi-config/blob/main/AGENTS.md).
 
@@ -13,9 +13,27 @@ npm ci --ignore-scripts
 npx --no-install pi -e .
 ```
 
-`npm ci` replaces `node_modules/` and may contact the npm registry. Pi extensions run with your permissions. The policies guide model behavior; they do not restrict filesystem, shell, network, Git, or provider access. This package does not select a model or configure its API transport.
+`npm ci` replaces `node_modules/` and may contact the npm registry. Pi extensions run with your permissions. The policies guide model behavior; they do not restrict filesystem, shell, network, Git, or provider access. This package registers Orbio's API transport but does not select a default model or change other providers.
 
 ## Use
+
+### Use Orbio
+
+Orbio is registered whenever this package loads. Each user needs their own Orbio API key. Start Pi with this package, run `/login orbio`, and enter the key in Pi's login prompt. Then run `/model` and search for `orbio`.
+
+For non-interactive use, set `ORBIO_API_KEY` in the environment before starting Pi. With a key configured, list models without making a model call:
+
+```sh
+npx --no-install pi -e . --list-models orbio
+```
+
+Pi stores login credentials in the user's private `~/.pi/agent/auth.json`, not this package. Existing credentials under `orbio` continue to work. Do not put API keys in this repository or paste them into chat. Model calls send conversation content to Orbio and may incur provider charges.
+
+Each time Pi starts, the package fetches OpenRouter's public model catalog and registers Orbio with the current models. Pi routes every request to Orbio; the catalog only describes the models. OpenRouter may list models that Orbio does not serve. Startup waits up to a few seconds for this request. If the request fails, the bundled catalog is used and a warning appears once. Setting `PI_OFFLINE` skips the request. `pi update --models` refreshes the catalog through Pi's own model-refresh path.
+
+Local `models.json` overrides still apply, and the extension does not modify local Pi state.
+
+Source: [`extensions/orbio.ts`](extensions/orbio.ts), [catalog refresh](extensions/openrouter-catalog.ts), and [bundled fallback](extensions/orbio-models.ts). Checks: [Orbio tests](https://github.com/txreverted/pi-config/blob/main/test/orbio.test.mjs).
 
 ### Answer clarification questions
 
