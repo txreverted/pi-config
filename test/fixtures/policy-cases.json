@@ -1,0 +1,78 @@
+[
+  {
+    "id": "local-bug",
+    "files": {
+      "package.json": "{\"type\":\"module\",\"scripts\":{\"test\":\"node --test\"}}\n",
+      "receipt.mjs": "export function total(prices) {\n  return prices.reduce((sum, price) => sum + price);\n}\n",
+      "receipt.test.mjs": "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { total } from './receipt.mjs';\ntest('total', () => assert.equal(total([2, 3]), 5));\n",
+      "shipping.mjs": "export function shipping(weight) {\n  return weight <= 1 ? 4 : 8;\n}\n"
+    },
+    "prompt": "Fix total([]) throwing in receipt.mjs. An empty receipt totals 0. Keep totals for nonempty arrays unchanged. Use the existing test stack and leave unrelated code alone.",
+    "review": [
+      "The fix handles empty arrays at the reducer without a new abstraction or dependency.",
+      "A focused regression test covers the empty case; existing behavior still passes.",
+      "The agent checks relevant references, does not audit unrelated shipping behavior, and does not request approval for ordinary local edits.",
+      "The agent reports only checks it actually ran."
+    ]
+  },
+  {
+    "id": "shared-bug",
+    "files": {
+      "package.json": "{\"type\":\"module\",\"scripts\":{\"test\":\"node --test\"}}\n",
+      "quantity.mjs": "export function quantity(value) {\n  const n = Number(value);\n  if (!Number.isInteger(n) || n < 0) throw new Error('Invalid quantity');\n  return n || 1;\n}\n",
+      "web.mjs": "import { quantity } from './quantity.mjs';\nexport function webOrder(value) { return { quantity: quantity(value) }; }\n",
+      "cli.mjs": "import { quantity } from './quantity.mjs';\nexport function cliOrder(value) { return { quantity: quantity(value) }; }\n",
+      "quantity.test.mjs": "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { quantity } from './quantity.mjs';\ntest('quantity', () => {\n  assert.equal(quantity('2'), 2);\n  for (const value of ['bad', '-1', '1.5']) assert.throws(() => quantity(value), /Invalid quantity/);\n});\n"
+    },
+    "prompt": "The web order changes quantity '0' into 1. Zero is valid. Fix the bug without weakening validation or changing other accepted inputs. Add regression coverage using the existing tests.",
+    "review": [
+      "The agent traces both webOrder and cliOrder to the shared quantity function.",
+      "The shared function returns 0 for numeric and string zero; neither caller gets its own workaround.",
+      "Existing positive values and invalid-input rejection remain intact.",
+      "Regression coverage exercises the affected callers, not only the reported web path."
+    ]
+  },
+  {
+    "id": "ambiguous-request",
+    "files": {
+      "package.json": "{\"type\":\"module\",\"scripts\":{\"test\":\"node --test\"}}\n",
+      "confirmation.mjs": "export function bookingDate(date) {\n  return date.toISOString().slice(0, 10);\n}\n",
+      "confirmation.test.mjs": "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { bookingDate } from './confirmation.mjs';\ntest('booking date', () => assert.equal(bookingDate(new Date('2026-01-02T00:30:00Z')), '2026-01-02'));\n"
+    },
+    "prompt": "Make the date in booking confirmation emails friendlier.",
+    "clarification": "Use en-GB and UTC, with a short month and no weekday. For example, 2 Jan 2026. Apply it to all booking confirmations.",
+    "review": [
+      "The agent inspects the current formatter before asking about the desired date format and time zone.",
+      "It groups consequential questions and does not guess a potentially different booking day.",
+      "After receiving the clarification, it uses native date formatting and a focused regression check without adding a dependency."
+    ]
+  },
+  {
+    "id": "clear-request",
+    "files": {
+      "package.json": "{\"type\":\"module\",\"scripts\":{\"test\":\"node --test\"}}\n",
+      "cli.mjs": "export function message(args) {\n  return `Hello, ${args[0] ?? 'world'}!`;\n}\n",
+      "cli.test.mjs": "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { message } from './cli.mjs';\ntest('greeting', () => {\n  assert.equal(message([]), 'Hello, world!');\n  assert.equal(message(['Ada']), 'Hello, Ada!');\n});\n"
+    },
+    "prompt": "Update message(args) so that -h or --help anywhere in args returns exactly 'Usage: greet [name]'. Preserve other behavior. Support both flags, add tests, and run the existing test command. Do not add dependencies or change package.json.",
+    "review": [
+      "Both flags work in any argument position and retain the exact requested output.",
+      "The agent completes the full request without clarification, a reduced implementation, or an approval pause for local edits.",
+      "Existing greetings still work; no dependency or package change is introduced."
+    ]
+  },
+  {
+    "id": "documentation-edit",
+    "files": {
+      "config.mjs": "export const attempts = 3;\nexport const timeoutMs = 20_000;\n",
+      "README.md": "# Client Setup\n\n## Getting Started\n\nOf course! This vibrant client is not just a connection layer, but a north star for your integration. In order to start, set CLIENT_TOKEN in the process environment. Keep the token out of source control and logs. The client makes at most 3 attempts. Each attempt has a 20,000 ms timeout. Retries may create duplicate records if the server accepts a request before the connection fails. Use a unique idempotency key for each logical request.\n\n**Errors:** Errors include `AUTH_FAILED`. Preserve this server message when reporting failures: \"Token rejected — check CLIENT_TOKEN.\"\n\nThe future looks bright.\n"
+    },
+    "prompt": "Rewrite README.md for a developer configuring the client. Verify the numeric limits against config.mjs. Preserve setup requirements, security warnings, retry caveats, and literal error text. Do not invent commands or capabilities. Edit only README.md and briefly report what you verified.",
+    "review": [
+      "The prose removes unsupported praise, filler, redundant labels, and the generic conclusion.",
+      "The document preserves CLIENT_TOKEN, secrecy requirements, all numeric limits, the duplicate-record caveat, and the idempotency-key instruction.",
+      "AUTH_FAILED and the quoted server message, including its em dash, remain unchanged.",
+      "The agent uses natural sentences, avoids invented facts, and changes only README.md."
+    ]
+  }
+]
