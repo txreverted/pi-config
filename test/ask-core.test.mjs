@@ -4,7 +4,6 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-
 import {
   ASK_LIMITS,
   AskState,
-  CUSTOM_ANSWER_LIMIT_TEXT,
   boundCustomAnswer,
   formatAnswers,
   normalizeQuestions,
@@ -97,11 +96,8 @@ test("custom answers are sanitized and bounded to one line and UTF-8 bytes", () 
   assert.equal(boundCustomAnswer(exactBytes), exactBytes);
   assert.equal(boundCustomAnswer(exactUnicodeBytes), exactUnicodeBytes);
 
-  const notice = `[Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
-  const bounded = boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes));
-  assert.ok(Buffer.byteLength(bounded, "utf8") <= ASK_LIMITS.customAnswerBytes);
-  assert.equal(bounded.includes("\n"), false);
-  assert.equal(bounded.endsWith(notice), true);
+  assert.throws(() => boundCustomAnswer("x".repeat(ASK_LIMITS.customAnswerBytes + 1)), /2,000 UTF-8 bytes/);
+  assert.throws(() => boundCustomAnswer("😀".repeat(ASK_LIMITS.customAnswerBytes)), /2,000 UTF-8 bytes/);
 });
 
 test("answers are formatted clearly with multiline indentation", () => {

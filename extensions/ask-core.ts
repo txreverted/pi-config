@@ -13,7 +13,7 @@ export const ASK_LIMITS = {
 } as const;
 
 export const CUSTOM_ANSWER_LIMIT_TEXT =
-  `${ASK_LIMITS.customAnswerLines} line or ${ASK_LIMITS.customAnswerBytes.toLocaleString("en-US")} UTF-8 bytes`;
+  `${ASK_LIMITS.customAnswerLines} line, up to ${ASK_LIMITS.customAnswerBytes.toLocaleString("en-US")} UTF-8 bytes`;
 
 export interface AskOption {
   label: string;
@@ -162,27 +162,14 @@ export function normalizeQuestions(value: unknown): AskQuestion[] {
   });
 }
 
-function utf8Prefix(value: string, maximum: number): string {
-  let bytes = 0;
-  let result = "";
-  for (const character of value) {
-    const size = Buffer.byteLength(character, "utf8");
-    if (bytes + size > maximum) break;
-    bytes += size;
-    result += character;
-  }
-  return result;
-}
-
 export function boundCustomAnswer(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const answer = safeDisplayLine(value);
   if (!answer) return undefined;
-  if (Buffer.byteLength(answer, "utf8") <= ASK_LIMITS.customAnswerBytes) return answer;
-
-  const notice = ` [Answer truncated to the ask tool limit: ${CUSTOM_ANSWER_LIMIT_TEXT}.]`;
-  const maximumBytes = ASK_LIMITS.customAnswerBytes - Buffer.byteLength(notice, "utf8");
-  return utf8Prefix(answer, maximumBytes).trimEnd() + notice;
+  if (Buffer.byteLength(answer, "utf8") > ASK_LIMITS.customAnswerBytes) {
+    throw new Error(`Custom answers must fit ${CUSTOM_ANSWER_LIMIT_TEXT}`);
+  }
+  return answer;
 }
 
 function indent(value: string): string {

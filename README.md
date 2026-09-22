@@ -33,7 +33,9 @@ Pi manages provider catalogs and authentication. Login credentials are stored in
 
 `ask_user_question` works in TUI and RPC sessions. It presents 1–4 questions with 2–4 choices each, supports single or multiple selections, and adds an `Other` answer. Review and revise answers before submitting. Cancelling discards partial answers.
 
-`Other` answers are normalized to one line and limited to 2,000 UTF-8 bytes. Review previews stop at 160 characters; submitted answers retain the full text within the input limit. The tool is disabled in print and JSON sessions.
+`Other` opens an editor with the question and a visible 2,000-byte limit. Revising an answer preserves its existing text. Answers are normalized to one line; oversized drafts stay available for correction and are never silently shortened. Review previews stop at 160 characters; reopen an answer to inspect and edit its full text. The tool is disabled in print and JSON sessions.
+
+RPC clients need Pi's `select` and `editor` dialogs. If a request is aborted, the tool discards its answers; the RPC client may need to dismiss its editor because Pi's protocol has no editor-dismissal message.
 
 Source: [`extensions/ask.ts`](extensions/ask.ts). Checks: [ask tests](https://github.com/txreverted/pi-config/blob/main/test/ask-extension.test.mjs).
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ExtensionEditorComponent, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { safeDisplayLine } from "./text-safety.ts";
 import {
@@ -58,11 +58,53 @@ function cancelledResult(questions: AskQuestion[]) {
   };
 }
 
-async function customAnswer(ctx: ExtensionContext, prompt: string, signal: AbortSignal | undefined): Promise<string | undefined | null> {
-  const written = await ctx.ui.input(prompt, `Up to ${CUSTOM_ANSWER_LIMIT_TEXT}`, signal ? { signal } : undefined);
-  if (written === undefined || signal?.aborted) return null;
-  if (typeof written !== "string") throw new Error("Ask UI returned an invalid custom answer");
-  return boundCustomAnswer(written);
+async function editAnswer(ctx: ExtensionContext, prompt: string, prefill: string, signal: AbortSignal | undefined): Promise<string | undefined> {
+  if (signal?.aborted) return undefined;
+  if (ctx.mode === "tui") {
+    let onAbort: (() => void) | undefined;
+    try {
+      return await ctx.ui.custom<string | undefined>((tui, _theme, keybindings, done) => {
+        onAbort = () => done(undefined);
+        const editor = new ExtensionEditorComponent(tui, keybindings, prompt, prefill, done, onAbort);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+        return editor;
+      });
+    } finally {
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  // Pi's RPC editor has no signal option or client-dialog dismissal message.
+  // Settle the tool on abort and consume either outcome of the late response.
+  return await new Promise<string | undefined>((resolve, reject) => {
+    const onAbort = () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) return onAbort();
+    ctx.ui.editor(prompt, prefill).then(
+      (value) => { signal?.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal?.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
+async function customAnswer(ctx: ExtensionContext, prompt: string, current: string | undefined, signal: AbortSignal | undefined): Promise<string | undefined | null> {
+  let draft = current ?? "";
+  let warning = "";
+  while (true) {
+    const written = await editAnswer(ctx,
+      `${prompt}\nOther answer: ${CUSTOM_ANSWER_LIMIT_TEXT}. Newlines become spaces.${warning}`,
+      draft, signal);
+    if (written === undefined || signal?.aborted) return null;
+    if (typeof written !== "string") throw new Error("Ask UI returned an invalid custom answer");
+    draft = safeDisplayLine(written);
+    const bytes = Buffer.byteLength(draft, "utf8");
+    if (bytes <= ASK_LIMITS.customAnswerBytes) return boundCustomAnswer(draft);
+    warning = `\nAnswer is ${bytes.toLocaleString("en-US")} UTF-8 bytes. Shorten the preserved draft to continue; nothing has been submitted.`;
+  }
 }
 
 async function askQuestions(questions: AskQuestion[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AskDialogResult> {
@@ -85,7 +127,7 @@ async function askQuestions(questions: AskQuestion[], signal: AbortSignal | unde
         return `Edit ${index + 1}/${questions.length} │ ${question.header}: ${safeDisplayLine(answer, 160)}`;
       });
       const submit = "Submit answers";
-      const selected = await ctx.ui.select("Review answers", [...edits, submit], dialogOptions);
+      const selected = await ctx.ui.select("Review answers", [submit, ...edits], dialogOptions);
       if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
       if (selected === submit) {
         if (state.allAnswered) return { answers: state.answers(), cancelled: false };
@@ -109,7 +151,7 @@ async function askQuestions(questions: AskQuestion[], signal: AbortSignal | unde
       const selected = await ctx.ui.select(prompt, [...choices, other], dialogOptions);
       if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
       if (selected === other) {
-        const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
+        const answer = await customAnswer(ctx, prompt, state.customAnswer, signal);
         if (answer === null) return { answers: [], cancelled: true };
         state.write(answer);
         if (!answer) continue;
@@ -123,7 +165,8 @@ async function askQuestions(questions: AskQuestion[], signal: AbortSignal | unde
     }
 
     const done = `Done (${state.selectedIndexes.length + (state.customAnswer ? 1 : 0)} selected)`;
-    const selected = await ctx.ui.select(prompt, [...choices, other, done], dialogOptions);
+    const items = [...choices, other];
+    const selected = await ctx.ui.select(prompt, state.isAnswered(questionIndex) ? [done, ...items] : [...items, done], dialogOptions);
     if (selected === undefined || signal?.aborted) return { answers: [], cancelled: true };
     if (selected === done) {
       if (!state.isAnswered(questionIndex)) continue;
@@ -131,7 +174,7 @@ async function askQuestions(questions: AskQuestion[], signal: AbortSignal | unde
       continue;
     }
     if (selected === other) {
-      const answer = await customAnswer(ctx, `${questionIndex + 1}/${questions.length} │ ${CUSTOM_CHOICE}`, signal);
+      const answer = await customAnswer(ctx, prompt, state.customAnswer, signal);
       if (answer === null) return { answers: [], cancelled: true };
       state.write(answer);
       continue;
