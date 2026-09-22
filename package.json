@@ -11,7 +11,8 @@
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "eval:prepare": "node scripts/materialize-policy-case.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

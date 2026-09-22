@@ -66,6 +66,7 @@ test("only documented package resources are enabled", async () => {
     test: "node --test \"test/*.test.mjs\"",
     typecheck: "tsc --noEmit",
     check: "npm run typecheck && npm test",
+    "eval:prepare": "node scripts/materialize-policy-case.mjs",
   });
   assert.deepEqual(packageJson.peerDependencies, {
     "@earendil-works/pi-ai": "*",

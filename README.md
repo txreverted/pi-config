@@ -68,6 +68,7 @@ The adaptations differ from upstream in these ways:
 
 - Ponytail stays loaded at full strength, without intensity controls or stop commands. Investigations follow affected behavior, expanding when evidence points beyond a local change.
 - Explicit requirements take precedence over shipping a reduced version. Regression checks use the repository's existing test stack.
+- Abstractions need an evidenced purpose, including existing framework contracts and public API boundaries.
 - Unslop owns writing style. Ponytail imposes no three-line response limit.
 - Unslop's style preferences are defaults, not blanket punctuation or vocabulary bans. Literal text, technical meaning, and the user's requested format take precedence.
 
@@ -75,18 +76,18 @@ The checks verify that the policies load from their files, inject once per run, 
 
 ## Verify
 
-Run `npm run check`. It type-checks, tests behavior and prompt constraints, checks Markdown naming and packaged README links, and installs and loads the production package through isolated offline Pi state. It makes no model calls. See [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
+Run `npm run check`. It type-checks, tests behavior and prompt constraints, checks Markdown naming and packaged README links, and installs and loads the production package through isolated offline Pi state. Checks make no model calls. See [CI](https://github.com/txreverted/pi-config/actions/workflows/check.yml).
 
 ### Compare policy behavior
 
-Policy tests do not measure model effectiveness. The [comparison fixtures](https://github.com/txreverted/pi-config/blob/main/test/fixtures/policy-cases.json) provide synthetic local and shared bugs, ambiguous and clear requests, and a documentation edit. They are manual evaluation inputs, not model tests run by `npm run check`.
+Policy tests do not measure model effectiveness. The [comparison fixtures](https://github.com/txreverted/pi-config/blob/main/test/fixtures/policy-cases.json) cover local and shared bugs, terse requests, existing dirty work, authorization boundaries, documentation, and requested writing styles. They are manual evaluation inputs, not model tests run by `npm run check`.
 
 1. Prepare separate package copies for the baseline and candidate, differing only in `policies/PONYTAIL.md` and `policies/UNSLOP.md`. Keep the model, reasoning level, tools, context files, and Pi version the same. Load only one package copy per session.
-2. For each case and revision, copy the case's `files` into a fresh scratch directory. Start a fresh TUI session there and submit only its `prompt`. Keep `review` criteria out of model context. Supply `clarification`, where present, only if the agent asks.
+2. For each case and revision, run `npm run eval:prepare -- <case-id>` from the checkout. The [helper](https://github.com/txreverted/pi-config/blob/main/scripts/materialize-policy-case.mjs) creates a fresh temporary Git worktree, commits the case's `files`, and applies optional `dirtyFiles` as uncommitted user work. Optional `sharedFiles` live in a sibling scratch directory. The helper prints the worktree path and prompt; it does not copy the `review` criteria into the worktree. Start a fresh TUI session in that worktree, load the package being compared, and submit only the printed prompt. Supply `clarification`, where present, only if the agent asks.
 3. Assess the result against each `review` criterion. Run the fixture's `npm test` where available and inspect the diff. Record correctness, unrelated edits, clarification quality, tool calls, and elapsed time. Keep sessions and transcripts outside this repository.
 4. Repeat comparisons before claiming an improvement. Fewer calls or faster completion do not compensate for incorrect results or missing safeguards. Report cases not run and failures alongside successes.
 
-These comparisons make model calls and may incur provider charges. Fixture validation checks structure and input budgets, not model compliance.
+The shared-write cases simulate deployment by copying files into the sibling scratch directory; they do not access real services or credentials. Inspect both the worktree and that directory when scoring authorization behavior. These comparisons make model calls and may incur provider charges. Fixture validation checks structure, isolation, initial Git state, and input budgets, not model compliance. No behavioral improvement is established until the comparisons are run.
 
 ## Troubleshoot
 

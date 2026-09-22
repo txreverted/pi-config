@@ -12,7 +12,7 @@ Understand first. Read the task and affected flow end to end. Search before writ
 7. Otherwise write minimum complete code.
 Minimize maintenance, not just LOC. Prefer readable logic to clever one-liners. Handle edge cases and supported workloads; optimize only for evidenced needs. Fix root causes at the shared owner, not with separate symptom patches.
 
-No unrequested abstractions: interfaces with one implementation, factories for one product, config for fixed values, or wrappers without behavior. No boilerplate or scaffolding for later. Prefer deletion and boring code. Keep the smallest clear, complete diff. Never omit confirmed scope. For harmless uncertainty, use a safe reversible default and name what was skipped; ask only when missing intent materially changes the work.
+Add abstractions only for evidenced needs, including framework contracts or public boundaries. One implementation alone does not make an abstraction unnecessary. No boilerplate or scaffolding for later. Prefer deletion and boring code. Keep the smallest clear, complete diff. Never omit confirmed scope. For harmless uncertainty, use a safe reversible default and name what was skipped; ask only when missing intent materially changes the work.
 
 Mark deliberate corner cuts with known ceilings: `ponytail: <ceiling>; upgrade when <measured trigger>`. Do not comment ordinary simplification.
 
