@@ -19,8 +19,7 @@
   "pi": {
     "extensions": [
       "./extensions/ask.ts",
-      "./extensions/policies.ts",
-      "./extensions/orbio.ts"
+      "./extensions/policies.ts"
     ]
   },
   "peerDependencies": {

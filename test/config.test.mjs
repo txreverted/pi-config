@@ -43,7 +43,6 @@ async function markdownFiles(directory) {
 const extensions = [
   "./extensions/ask.ts",
   "./extensions/policies.ts",
-  "./extensions/orbio.ts",
 ];
 
 const packedPaths = [
@@ -51,9 +50,6 @@ const packedPaths = [
   "extensions/ask-core.ts",
   "extensions/ask.ts",
   "extensions/policies.ts",
-  "extensions/orbio.ts",
-  "extensions/orbio-models.ts",
-  "extensions/openrouter-catalog.ts",
   "extensions/text-safety.ts",
   "package.json",
   ...policyPaths,
@@ -184,15 +180,19 @@ test("the exact production package installs and loads directly and through its P
     assertLoaded(runPi(directArgs, "direct"));
     assertLoaded(runPi(["-e", packagePath, "--list-models", "__pi_config_package_manifest__"], "manifest"));
 
-    const orbioAgent = join(piState, "orbio", "agent");
-    await mkdir(orbioAgent, { recursive: true });
-    await writeFile(join(orbioAgent, "auth.json"), JSON.stringify({
-      orbio: { type: "api_key", key: "test-only-not-a-real-key" },
+    const providerAgent = join(piState, "providers", "agent");
+    await mkdir(providerAgent, { recursive: true });
+    await writeFile(join(providerAgent, "auth.json"), JSON.stringify({
+      openai: { type: "api_key", key: "test-only-not-a-real-key" },
     }));
-    const orbio = runPi(["-e", packagePath, "--list-models", "orbio"], "orbio");
-    assert.equal(orbio.status, 0, orbio.stderr || orbio.stdout);
-    assert.match(orbio.stdout, /orbio\s+stealth\/union-alpha/);
-    assert.doesNotMatch(orbio.stderr, /error|failed|exception/i);
+    const native = runPi(["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--list-models"], "providers");
+    const configured = runPi(["-e", packagePath, "--list-models"], "providers");
+    for (const result of [native, configured]) {
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /^openai\s+/m);
+      assert.doesNotMatch(result.stderr, /error|failed|exception/i);
+    }
+    assert.equal(configured.stdout, native.stdout, "Loading this package must preserve Pi's built-in model catalog");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -246,7 +246,7 @@ test("README links to active resources and retained policy sources", () => {
 
 test("sensitive Pi state and session transcripts are ignored", () => {
   const patterns = new Set(gitignore.split("\n"));
-  for (const pattern of [".pi/", "sessions/", "*.jsonl", "settings.json", "models.json", "trust.json"]) {
+  for (const pattern of [".pi/", "sessions/", "*.jsonl", "settings.json", "models.json", "models-store.json", "trust.json"]) {
     assert.ok(patterns.has(pattern), pattern);
   }
 });
